@@ -40,7 +40,7 @@ def test_classify() -> None:
     for name, want in cases.items():
         got = e.classify_map(name)
         assert got == want, f"classify {name!r}: want {want}, got {got}"
-    print(f"PASS: classify_map — {len(cases)} names → roles (incl. variants + qualifier tags).")
+    print(f"PASS: classify_map — {len(cases)} names to roles (incl. variants + qualifier tags).")
 
 
 def test_detect_sets() -> None:
@@ -91,7 +91,7 @@ def test_channel_algebra() -> None:
     # invert_channel: 0 -> 255
     inv = e.invert_channel(Image.new("L", (4, 4), 0))
     assert np.asarray(inv).mean() == 255, "invert_channel(0) != 255"
-    print("PASS: channel algebra — pack/unpack round-trip, flip involution, invert 0→255.")
+    print("PASS: channel algebra — pack/unpack round-trip, flip involution, invert 0->255.")
 
 
 def test_full_pipeline() -> None:
@@ -119,6 +119,7 @@ def test_full_pipeline() -> None:
                                  target_engine="unity", dry_run=False)
         res = e.process_set(sets[0], opts)
         assert res.action == "converted", f"expected converted, got {res.action}: {res.reason}"
+        assert e.validate_result(res, opts), "fresh material set did not pass artifact validation"
 
         # ORM written with correct packed channels (R=AO=40, G=Rough=130, B=Metal=220)
         orm_path = out / "rock_ORM.png"
@@ -144,6 +145,23 @@ def test_full_pipeline() -> None:
         data = json.loads(man.read_text(encoding="utf-8"))
         assert data["schema"] == "ks_material_converter.v1" and data["base"].lower() == "rock", \
             f"bad manifest: {data}"
+
+        original_manifest_writer = e._write_set_manifest
+
+        def fail_manifest(*args, **kwargs):
+            raise OSError("simulated read-only manifest destination")
+
+        e._write_set_manifest = fail_manifest
+        try:
+            manifest_failure = e.process_set(sets[0], opts)
+        finally:
+            e._write_set_manifest = original_manifest_writer
+        assert manifest_failure.action == "failed", "manifest failure must fail the set visibly"
+        assert manifest_failure.outputs, "already committed outputs must remain in failure provenance"
+        assert "already committed" in manifest_failure.reason, manifest_failure.reason
+
+        orm_path.write_bytes(b"not a png")
+        assert not e.validate_result(res, opts), "corrupt set member must invalidate stored result"
     print("PASS: full pipeline — set detected, ORM packed, normal flipped, Unity-renamed, manifest written.")
 
 

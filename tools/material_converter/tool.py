@@ -19,4 +19,4 @@ class MaterialConverterTool:
         # Lazy import: the panel/engine pull numpy + Pillow. Keeping them out of
         # module import means discovery/the sidebar work before those are installed.
         from .panel import MaterialConverterPanel
-        return MaterialConverterPanel(parent)
+        return MaterialConverterPanel(parent, services.queue)

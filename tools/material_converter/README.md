@@ -59,6 +59,11 @@ Each set writes its renamed maps, any packed/unpacked maps, and a
 an explicit output folder also appends a top-level `material_manifest.csv`.
 **Preview only** lists the planned files without writing anything.
 
+The shared durable queue treats each detected texture set as one work item while
+every member map participates in its checkpoint identity. Changing any channel
+invalidates the set. Stored results are reused only after every output image and
+the versioned per-set provenance manifest pass deterministic validation.
+
 ## Dependencies
 
 - **numpy** and **Pillow** (`pip install numpy pillow`).

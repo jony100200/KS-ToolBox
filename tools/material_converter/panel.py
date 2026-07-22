@@ -1,10 +1,8 @@
-"""Material Converter — the tool's UI. Thin over engine.py: collect maps +
-operation options, run on a worker thread, stream results back via after().
-No image math here — detection, packing, flipping all live in the engine.
-"""
+"""Material Converter UI; texture sets run through the shell-owned queue."""
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict
 from pathlib import Path
 
 import customtkinter as ctk
@@ -13,6 +11,9 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.batch_reporting import completion_report_path, prepare_batch_completion
+from toolbox.job_queue import QueueCompletion, QueueFinalization, QueueSubmission
 from . import engine as e
 
 
@@ -21,6 +22,9 @@ class MaterialConverterPanel(BaseBatchPanel):
     FILE_LABEL = "map"
     RESULTS_ICON = Icons.LAYERS
     RUN_LABEL = "Preview & Convert"
+
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
 
     # -- options (tool-specific) ----------------------------------------------
     def _build_options_card(self):
@@ -97,27 +101,85 @@ class MaterialConverterPanel(BaseBatchPanel):
             resize_to=max(0, resize_to), dry_run=bool(self._dry.get()),
         )
 
-    # -- batch loop (tool-specific) --------------------------------------------
-    def _work(self, files: list[Path], opts: e.MaterialOptions):
+    # -- queue submission (one coherent texture set per durable item) ----------
+    def _build_submission(self, files: list[Path], opts: e.MaterialOptions) -> QueueSubmission:
         sets = e.detect_sets(files)
-        self.after(0, self._logline, f"detected {len(sets)} texture set(s)", t.TEXT_MUTED)
-        converted = skipped = failed = 0
-        results = []
-        total = len(sets)
-        for i, tset in enumerate(sets, 1):
-            if self._stop.is_set():
-                self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
-            self.after(0, self._logline, f"[{i}/{total}] {tset.base} ({','.join(tset.roles)}) …", t.TEXT_MUTED)
-            res = e.process_set(tset, opts); results.append(res)
+        self._logline(f"detected {len(sets)} texture set(s)", t.TEXT_MUTED)
+        anchors: list[Path] = []
+        sets_by_anchor: dict[str, e.TextureSet] = {}
+        for texture_set in sets:
+            anchor = next(iter(texture_set.maps.values())).expanduser().resolve(strict=False)
+            anchors.append(anchor)
+            sets_by_anchor[str(anchor)] = texture_set
+
+        definition = JobDefinition.create(
+            tool_id="material_converter",
+            tool_version="1",
+            workflow_version="material-set.v1",
+            inputs=anchors,
+            identity_dependencies=files,
+            settings=asdict(opts),
+        )
+
+        def execute(anchor: Path, token) -> e.Result:
+            return e.process_set(sets_by_anchor[str(anchor.resolve(strict=False))], opts)
+
+        def classify(res: e.Result) -> ItemOutcome:
+            data = res.to_dict()
             if res.action == "converted":
-                converted += 1
-            elif res.action in ("skipped", "dry-run"):
-                skipped += 1
-            else:
-                failed += 1
-            self.after(0, self._show, res, i, total)
-        manifest = self._write_manifest(opts, results)
-        self.after(0, self._done, converted, skipped, failed, manifest)
+                return ItemOutcome.completed(data, res.reason)
+            if res.action in {"skipped", "dry-run"}:
+                return ItemOutcome.skipped(data, res.reason)
+            return ItemOutcome.failed(res.reason, data=data)
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Material Converter · {len(sets)} set(s)",
+            execute=execute,
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_completion(report, opts),
+        )
+
+    def _prepare_completion(self, report, opts: e.MaterialOptions) -> QueueFinalization:
+        return prepare_batch_completion(
+            report,
+            result_from_record=self._result_from_record,
+            write_manifest=lambda results: self._write_manifest(opts, results),
+            report_path=completion_report_path(
+                "material_converter", report.job_id,
+                out_root=opts.out_root, dry_run=opts.dry_run,
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        converted = sum(result.action == "converted" for result in results)
+        skipped = sum(result.action in {"skipped", "dry-run"} for result in results)
+        failed = len(results) - converted - skipped
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            converted, skipped, failed, remaining, payload.manifest,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"base", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            Path(item.input_path).stem,
+            "failed",
+            item.details or "texture set quarantined",
+            detail="batch.quarantined",
+        )
 
     def _write_manifest(self, opts: e.MaterialOptions, results: list) -> str | None:
         """Aggregate CSV across all sets (the per-set JSON manifests are written
@@ -125,19 +187,16 @@ class MaterialConverterPanel(BaseBatchPanel):
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            path = root / "material_manifest.csv"
-            new = not path.exists()
-            with open(path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["base", "action", "roles", "outputs", "manifest", "reason"])
-                for r in results:
-                    w.writerow([r.base, r.action, r.roles, len(r.outputs), r.manifest, r.reason])
-            return str(path)
-        except OSError:
-            return None
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "material_manifest.csv"
+        new = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["base", "action", "roles", "outputs", "manifest", "reason"])
+            for r in results:
+                w.writerow([r.base, r.action, r.roles, len(r.outputs), r.manifest, r.reason])
+        return str(path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
@@ -149,10 +208,12 @@ class MaterialConverterPanel(BaseBatchPanel):
             extra = f"  — {res.reason}"
         self._logline(f"  {icon} {res.base}{extra}", color)
 
-    def _done(self, converted, skipped, failed, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"converted {converted} · skipped {skipped} · failed {failed}")
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+    def _done(self, converted, skipped, failed, remaining=0, manifest=None,
+              report_path=None, job_state=JobState.COMPLETED, recovered=False, reused=False):
+        summary = f"converted {converted} · skipped {skipped} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

@@ -56,6 +56,10 @@ def main() -> int:
         first, second = root / "first.png", root / "second.png"
         Image.new("RGB", (64, 32), (20, 40, 60)).save(first)
         Image.new("RGB", (32, 64), (60, 40, 20)).save(second)
+        material_base = root / "stone_BaseColor.png"
+        material_rough = root / "stone_Roughness.png"
+        Image.new("RGB", (32, 32), (100, 80, 60)).save(material_base)
+        Image.new("L", (32, 32), 128).save(material_rough)
 
         app = ToolBoxShell(discover())
         app.withdraw()
@@ -74,6 +78,11 @@ def main() -> int:
             pixel_panel = app._panels["pixel_art"]
             pixel_panel._add([first, second])
             pixel_job_id = _run_and_wait(app, pixel_panel, "Pixel Art Converter", 2)
+
+            app._select("material_converter")
+            material_panel = app._panels["material_converter"]
+            material_panel._add([material_base, material_rough])
+            material_job_id = _run_and_wait(app, material_panel, "Material Converter", 1)
 
             video_job_id = None
             ffmpeg = resolve_tool("ffmpeg")
@@ -97,13 +106,14 @@ def main() -> int:
             assert any(item.job_id == job_id for item in app._services.queue.history())
             assert any(item.job_id == icon_job_id for item in app._services.queue.history())
             assert any(item.job_id == pixel_job_id for item in app._services.queue.history())
+            assert any(item.job_id == material_job_id for item in app._services.queue.history())
             if video_job_id:
                 assert any(item.job_id == video_job_id for item in app._services.queue.history())
         finally:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "and Video Compressor through shell queue; history UI rendered.")
+          "Material Converter, and Video Compressor through shell queue; history UI rendered.")
     return 0
 
 

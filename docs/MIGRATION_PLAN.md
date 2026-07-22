@@ -61,6 +61,29 @@ dimensions, palette limit, and binary alpha before trusting the artifact.
 | Reliability/security | Failures isolate per item; manifests no longer fail silently; corrupt or policy-mismatched artifacts are rejected |
 | Tests/benchmarks | Tool smoke, 17 unit tests, 17-panel construction, four-tool queue flow, full 17-tool smoke, compile and startup gates pass |
 | Risk/rollback | Validator adds reopen cost only during reuse; revert panel/tool adapter and `validate_result` to restore the compatibility worker |
+
+### Slice 3e — implemented grouped Material Converter
+
+Material Converter demonstrates grouped durable work. One detected PBR texture
+set is one executable item and failure boundary; all member maps are explicit
+identity dependencies. Changing roughness, metallic, AO, normal, or another
+member invalidates the checkpoint even when the representative anchor is
+unchanged. Reuse validation opens every emitted image and verifies the versioned
+per-set manifest, its operations, source paths, and output names. A manifest
+write failure now fails visibly and records any already committed outputs.
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-local set loop → one durable queue item per detected texture set |
+| Architecture/language | Existing Python/NumPy/Pillow algorithms retained; grouped identity added to the shared batch contract |
+| Functionality and quality | Detection, packing, normal flip, inversion, resizing, and engine naming unchanged; existing channel-algebra/full-pipeline smoke remains green |
+| Code/dependencies | Material production source 578 → 667 lines (+89 for grouped adapter, validation, and visible partial-output provenance); zero dependencies added |
+| Package/startup/runtime | No package component added; ready-to-mainloop 120 → 137 ms within the measured range; set-processing throughput is not claimed changed |
+| RAM/VRAM/CPU/disk/GPU | Existing image buffers unchanged; no GPU/model; SQLite stores one record per set plus report metadata |
+| Batch/cache/AI | Any member-map change invalidates the set; valid complete sets are reusable; no AI calls |
+| Reliability/security | Per-set retry boundary prevents partial channel packing; atomic images remain; manifest failure no longer disappears |
+| Tests/benchmarks | 18 unit tests, material smoke including corrupt-output and manifest-failure cases, real two-map/one-set queue flow, 17/17 panels and smokes; durable core 9,876 items/s |
+| Risk/rollback | Validation reopens all set outputs during reuse; revert the panel adapter/validator while retaining the backward-compatible dependency field |
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

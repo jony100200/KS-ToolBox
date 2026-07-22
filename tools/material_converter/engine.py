@@ -416,9 +416,9 @@ def process_set(tset: TextureSet, opts: MaterialOptions) -> Result:
                       roles=roles_str, outputs=planned, detail="dry-run")
 
     # ---- execute -------------------------------------------------------------
+    outputs: list[Path] = []
     try:
         loaded = {r: _open_detached(p) for r, p in tset.maps.items() if r != UNKNOWN}
-        outputs: list[Path] = []
 
         # per-map transforms + engine rename (every recognized map is emitted)
         for role, img in loaded.items():
@@ -478,15 +478,22 @@ def process_set(tset: TextureSet, opts: MaterialOptions) -> Result:
 
         manifest_path = _write_set_manifest(tset, opts, out_dir, outputs)
     except Exception as ex:               # PIL/numpy raise many types on bad data / writes
-        return Result(tset.base, "failed", f"convert failed for '{tset.base}': {ex}",
-                      roles=roles_str, detail="process.failed")
+        partial = f"; {len(outputs)} output(s) already committed" if outputs else ""
+        return Result(
+            tset.base,
+            "failed",
+            f"convert failed for '{tset.base}': {ex}{partial}",
+            roles=roles_str,
+            outputs=[str(path) for path in outputs],
+            detail="process.failed",
+        )
 
     return Result(tset.base, "converted", f"wrote {len(outputs)} file(s)", roles=roles_str,
                   outputs=[str(p) for p in outputs], manifest=manifest_path, detail="ok")
 
 
 def _write_set_manifest(tset: TextureSet, opts: MaterialOptions, out_dir: Path,
-                        outputs: list[Path]) -> str | None:
+                        outputs: list[Path]) -> str:
     """Per-set `<base>_Material.json` — records source maps, operations, outputs."""
     payload = {
         "schema": "ks_material_converter.v1",
@@ -496,11 +503,44 @@ def _write_set_manifest(tset: TextureSet, opts: MaterialOptions, out_dir: Path,
         "outputs": [p.name for p in outputs],
     }
     dst = out_dir / f"{tset.base}_Material.json"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_name(f"{dst.stem}.part.json")
+    tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(dst)
+    return str(dst)
+
+
+def validate_result(result: Result, opts: MaterialOptions) -> bool:
+    """Verify every set output and its provenance manifest before reuse."""
+    if result.action in {"skipped", "dry-run"}:
+        return True
+    if result.action != "converted" or not result.outputs or not result.manifest:
+        return False
     try:
-        out_dir.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_name(f"{dst.stem}.part.json")
-        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(dst)
-        return str(dst)
-    except OSError:
-        return None
+        from PIL import Image
+
+        output_paths = [Path(value) for value in result.outputs]
+        for output in output_paths:
+            if not output.is_file() or output.stat().st_size <= 0:
+                return False
+            with Image.open(output) as image:
+                image.load()
+                if image.width <= 0 or image.height <= 0:
+                    return False
+                if opts.resize_to and max(image.size) != opts.resize_to:
+                    return False
+
+        manifest_path = Path(result.manifest)
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        source_maps = payload.get("source_maps")
+        return (
+            payload.get("schema") == "ks_material_converter.v1"
+            and str(payload.get("base", "")).lower() == result.base.lower()
+            and payload.get("operations") == opts.op_summary()
+            and payload.get("outputs") == [path.name for path in output_paths]
+            and isinstance(source_maps, dict)
+            and bool(source_maps)
+            and all(Path(path).is_file() for path in source_maps.values())
+        )
+    except (ImportError, OSError, TypeError, ValueError):
+        return False
