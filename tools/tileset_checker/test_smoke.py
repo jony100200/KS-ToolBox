@@ -71,18 +71,53 @@ def test_full_pipeline() -> None:
         src = tmp / "flat.png"
         Image.new("RGB", (64, 64), (80, 120, 160)).save(src)
         out = tmp / "out"
-        res = e.process(src, e.TileOptions(out_root=out, dry_run=False))
+        opts = e.TileOptions(out_root=out, dry_run=False)
+        res = e.process(src, opts)
         assert res.action == "checked", f"expected checked, got {res.action}: {res.reason}"
         assert res.overall > 0.99, f"flat image should score seamless: {res.overall}"
+        assert e.validate_result(res, opts), "recorded preview artifacts should validate"
+        recorded_overall = res.overall
+        res.overall = 0.5
+        assert not e.validate_result(res, opts), "inconsistent stored score must be rejected"
+        res.overall = recorded_overall
+        recorded_hashes = res.output_sha256
+        res.output_sha256 = []
+        assert not e.validate_result(res, opts), "malformed stored hash metadata must be rejected"
+        res.output_sha256 = recorded_hashes
         names = [Path(p).name for p in res.outputs]
         assert any("_offset" in n for n in names), f"no offset preview written: {names}"
         assert any("_tile" in n for n in names), f"no tile preview written: {names}"
+        assert len(res.output_sha256) == len(res.outputs) == 3
         for p in res.outputs:
             assert Path(p).is_file(), f"preview missing on disk: {p}"
             with Image.open(p) as g:      # close the handle so tempdir cleanup works on Windows
                 g.load()
+
+        Path(res.outputs[0]).write_bytes(b"not the recorded preview")
+        assert not e.validate_result(res, opts), "corrupt preview hash must be rejected"
+
+        score_only_opts = e.TileOptions(
+            out_root=out, make_offset=False, make_tile=False, make_heatmap=False,
+            dry_run=False,
+        )
+        score_only = e.process(src, score_only_opts)
+        assert score_only.action == "checked" and not score_only.outputs
+        assert e.validate_result(score_only, score_only_opts), "score-only result should validate"
+
+        other_dir = tmp / "other"
+        other_dir.mkdir()
+        same_name = other_dir / src.name
+        Image.new("RGB", (32, 32), (10, 20, 30)).save(same_name)
+        collisions = e.find_output_collisions([src, same_name], opts)
+        assert len(collisions) == 3, f"flat output collisions not detected: {collisions}"
+
+        input_target = tmp / "flat_offset.png"
+        Image.new("RGB", (16, 16), (1, 2, 3)).save(input_target)
+        clobber_opts = e.TileOptions(out_root=tmp, dry_run=False)
+        clobbers = e.find_output_collisions([src, input_target], clobber_opts)
+        assert str(input_target.resolve()) in clobbers, "selected-input overwrite not detected"
     print(f"PASS: tileset_checker full pipeline — wrote {len(res.outputs)} previews, "
-          f"overall={res.overall:.3f}.")
+          f"validated hashes/collisions, overall={res.overall:.3f}.")
 
 
 def main() -> int:

@@ -22,9 +22,9 @@ Tool registry + lazy single-lane BatchRunner
 ```
 
 The first durable vertical slices are `image_rescale`, `video_compressor`,
-`icon_normalizer`, `pixel_art`, `material_converter`, and `showcase`. Other tools
-still use the existing `BaseBatchPanel` loop until migrated and verified
-individually.
+`icon_normalizer`, `pixel_art`, `material_converter`, `showcase`, and
+`tileset_checker`. Other tools still use the existing `BaseBatchPanel` loop
+until migrated and verified individually.
 
 ## Allowed dependency directions
 
@@ -55,11 +55,12 @@ tool engine ──► toolbox.engine_common
 | `QueueSubmission` | `toolbox/job_queue.py` | Tool execution, classification, validation, and finalization contract |
 | `BatchCompletionArtifacts` | `toolbox/batch_reporting.py` | Shared typed results, manifest, and atomic morning-report finalization |
 | `JobDefinition` | `toolbox/batch_core.py` | Stable executable-item anchors plus complete file-dependency identity |
-| `ItemOutcome` | `toolbox/batch_core.py` | Typed completed, skipped, failed, or quarantined result |
+| `ItemOutcome` | `toolbox/batch_core.py` | Typed completed, warning, skipped, failed, or quarantined result |
 | `CancellationToken` | `toolbox/batch_core.py` | Cooperative pause/cancel at safe item boundaries |
 | `JobStore` | `toolbox/batch_core.py` | Small persistence boundary used by the runner |
 | `SQLiteJobStore` | `toolbox/sqlite_job_store.py` | Transactional jobs and per-item checkpoints |
 | error envelope | `toolbox/engine_common.py` | Headless engine error-as-value convention |
+| file integrity/collision helpers | `toolbox/engine_common.py` | Shared streaming hashes and normalized output-path safety checks |
 
 ## Deliberately not implemented yet
 

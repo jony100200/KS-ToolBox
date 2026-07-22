@@ -7,15 +7,15 @@ They are evidence for this revision, not universal hardware guarantees.
 
 | Metric | Measured | Command |
 |---|---:|---|
-| Ready-to-mainloop, measured range; latest 124 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
+| Ready-to-mainloop, measured range; latest 128 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
 | Discovery + shell import; latest 30 ms | 21–31 ms | same |
 | Optional AI/numeric modules at startup | none | same |
-| Python source after this slice | 112 files / 12,807 lines | bounded repository scan |
+| Python source after this slice | 112 files / 13,045 lines | bounded repository scan |
 | Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s | `measure_batch_core.py` |
-| Job identity, 1,000 path/stat inputs | 96.04–122.26 ms | same |
+| Job identity, 1,000 path/stat inputs | 95.43–122.26 ms | same |
 | Completed-job reuse, 1,000 items | 5.40–6.22 ms / zero executor calls | same |
 | SQLite checkpoint, 1,000 items | 270,336 bytes | same |
-| Shell queue integration | PASS for six image/material/video workflows and history UI | `python benchmarks/check_queue_flow.py` |
+| Shell queue integration | PASS for seven image/material/video workflows and history UI | `python benchmarks/check_queue_flow.py` |
 | Runtime dependency added by batch core | 0 | SQLite is Python standard library |
 | Runtime dependency added by job queue | 0 | threading/heapq are Python standard library |
 

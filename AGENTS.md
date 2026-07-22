@@ -37,7 +37,7 @@ tools/<name>/
   README.md      what it does, deps, options
 ```
 Add a tool = drop the folder; **no edits** to `toolbox/` or `main.py`.
-- Engine files import shared helpers from `toolbox.engine_common` (`ok`/`err` envelope, binary resolution and subprocess runners, streaming `sha256_file`, `VIDEO_EXTS`/`IMAGE_EXTS` constants) — never duplicate these.
+- Engine files import shared helpers from `toolbox.engine_common` (`ok`/`err` envelope, binary resolution and subprocess runners, streaming `sha256_file`, output-collision detection, `VIDEO_EXTS`/`IMAGE_EXTS` constants) — never duplicate these.
 - Batch-tool panels extend `toolbox.batch_panel.BaseBatchPanel` (shared files card, run/stop/pause row, output-folder picker, results log, queue polling, terminal-item display, and terminal status/report UI). New durable tools receive `services.queue`, implement `_build_submission`, use `toolbox.batch_reporting.prepare_batch_completion` for manifest/report finalization, and never start their own worker thread. The old `_work` hook remains only as a compatibility path while existing tools migrate individually. Use `self._build_output_row(b, hint)` + `self._build_run_row(b)` at the end of the options card; use `self._resolve_input_root()` for mirror mode.
 
 Extracting from RupayanFlow/ChobiEngine: keep the engine logic, drop the `runtime.py` job wrapper, write a thin panel, and **fix anti-patterns on the way in** (this session's verification found: VideoRescaler's bytes/str ffmpeg-detect bug, `eval()` on ffprobe output, `random` instead of `secrets` for passwords).

@@ -19,4 +19,4 @@ class TilesetCheckerTool:
         # Lazy import: the panel/engine pull numpy + Pillow. Keeping them out of
         # module import means discovery/the sidebar work before they're installed.
         from .panel import TilesetCheckerPanel
-        return TilesetCheckerPanel(parent)
+        return TilesetCheckerPanel(parent, services.queue)

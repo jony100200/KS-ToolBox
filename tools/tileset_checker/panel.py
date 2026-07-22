@@ -1,11 +1,9 @@
-"""Tileset Checker — the tool's UI. Thin over engine.py via BaseBatchPanel:
-collect textures + options, run on a worker thread, stream seam scores back via
-after(). No seam math here.
-"""
+"""Tileset Checker UI; seam analysis executes through the shell-owned queue."""
 from __future__ import annotations
 
 import csv
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import customtkinter as ctk
@@ -14,6 +12,9 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.batch_reporting import completion_report_path, prepare_batch_completion
+from toolbox.job_queue import QueueCompletion, QueueFinalization, QueueSubmission
 from . import engine as e
 
 
@@ -22,6 +23,9 @@ class TilesetCheckerPanel(BaseBatchPanel):
     FILE_LABEL = "texture"
     RESULTS_ICON = Icons.GRID
     RUN_LABEL = "Preview & Check"
+
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
 
     # -- options (tool-specific) -----------------------------------------------
 
@@ -67,24 +71,90 @@ class TilesetCheckerPanel(BaseBatchPanel):
                              make_heatmap=bool(self._heatmap.get()),
                              dry_run=bool(self._dry.get()))
 
-    # -- batch loop (tool-specific) --------------------------------------------
+    # -- queue submission (tool-specific) --------------------------------------
 
-    def _work(self, files: list[Path], opts: e.TileOptions):
-        checked = previewed = failed = 0; results = []
-        for i, f in enumerate(files, 1):
-            if self._stop.is_set():
-                self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
-            self.after(0, self._logline, f"[{i}/{len(files)}] {f.name} …", t.TEXT_MUTED)
-            res = e.process(f, opts); results.append(res)
+    def _pre_run_check(self, opts: e.TileOptions) -> bool:
+        if opts.dry_run:
+            return True
+        collisions = e.find_output_collisions(self._files, opts)
+        if not collisions:
+            return True
+        self._logline(
+            f"Cannot start: {len(collisions)} output path collision(s). "
+            "Choose mirror mode, a different output folder, or rename the inputs.",
+            t.STATE["error"][1],
+        )
+        for output, owners in list(collisions.items())[:5]:
+            self._logline(f"  {output}", t.STATE["error"][1])
+            for owner in owners:
+                self._logline(f"    ← {owner}", t.TEXT_MUTED)
+        return False
+
+    def _build_submission(self, files: list[Path], opts: e.TileOptions) -> QueueSubmission:
+        definition = JobDefinition.create(
+            tool_id="tileset_checker",
+            tool_version="1",
+            workflow_version="seam-check.v2",
+            inputs=files,
+            settings=asdict(opts),
+        )
+
+        def classify(res: e.Result) -> ItemOutcome:
+            data = res.to_dict()
             if res.action == "checked":
-                checked += 1
-            elif res.action == "dry-run":
-                previewed += 1
-            else:
-                failed += 1
-            self.after(0, self._show, res, i, len(files))
-        manifest = self._write_manifest(opts, results)
-        self.after(0, self._done, checked, previewed, failed, manifest)
+                return ItemOutcome.completed(data, res.reason)
+            if res.action == "dry-run":
+                return ItemOutcome.skipped(data, res.reason)
+            return ItemOutcome.failed(res.reason, data=data)
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Tileset Checker · {len(files)} texture(s)",
+            execute=lambda path, token: e.process(path, opts),
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_completion(report, opts),
+        )
+
+    def _prepare_completion(self, report, opts: e.TileOptions) -> QueueFinalization:
+        return prepare_batch_completion(
+            report,
+            result_from_record=self._result_from_record,
+            write_manifest=lambda results: self._write_manifest(opts, results),
+            report_path=completion_report_path(
+                "tileset_checker", report.job_id,
+                out_root=opts.out_root, dry_run=opts.dry_run,
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        checked = sum(result.action == "checked" for result in results)
+        previewed = sum(result.action == "dry-run" for result in results)
+        failed = len(results) - checked - previewed
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            checked, previewed, failed, remaining, payload.manifest,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"src", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path,
+            "failed",
+            item.details or "tileset item quarantined",
+            detail="batch.quarantined",
+        )
 
     def _write_manifest(self, opts: e.TileOptions, results: list) -> str | None:
         """Aggregate seam scores — CSV row per texture + a JSON sibling. Only
@@ -92,25 +162,22 @@ class TilesetCheckerPanel(BaseBatchPanel):
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            csv_path = root / "seam_scores.csv"
-            new = not csv_path.exists()
-            with open(csv_path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["src", "action", "x", "y", "overall", "outputs", "reason"])
-                for r in results:
-                    w.writerow([r.src, r.action, f"{r.x:.6f}", f"{r.y:.6f}",
-                                f"{r.overall:.6f}", "|".join(r.outputs), r.reason])
-            json_path = root / "seam_scores.json"
-            tmp = json_path.with_name("seam_scores.part.json")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump([r.to_dict() for r in results], f, indent=2)
-            tmp.replace(json_path)
-            return str(csv_path)
-        except OSError:
-            return None
+        root.mkdir(parents=True, exist_ok=True)
+        csv_path = root / "seam_scores.csv"
+        new = not csv_path.exists()
+        with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["src", "action", "x", "y", "overall", "outputs", "reason"])
+            for r in results:
+                w.writerow([r.src, r.action, f"{r.x:.6f}", f"{r.y:.6f}",
+                            f"{r.overall:.6f}", "|".join(r.outputs), r.reason])
+        json_path = root / "seam_scores.json"
+        tmp = json_path.with_name("seam_scores.part.json")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump([r.to_dict() for r in results], f, indent=2)
+        tmp.replace(json_path)
+        return str(csv_path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
@@ -126,10 +193,12 @@ class TilesetCheckerPanel(BaseBatchPanel):
             extra = f"  — {res.reason}"
         self._logline(f"  {icon} {name}{extra}", color)
 
-    def _done(self, checked, previewed, failed, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"checked {checked} · previewed {previewed} · failed {failed}")
-        if manifest:
-            self._logline(f"  scores: {manifest}", t.TEXT_MUTED)
+    def _done(self, checked, previewed, failed, remaining=0, manifest=None,
+              report_path=None, job_state=JobState.COMPLETED, recovered=False, reused=False):
+        summary = f"checked {checked} · previewed {previewed} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

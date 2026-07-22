@@ -29,10 +29,15 @@ Public interface:
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from toolbox.engine_common import IMAGE_EXTS
+from toolbox.engine_common import (
+    IMAGE_EXTS,
+    find_output_collisions as _find_collisions,
+    sha256_file,
+)
 
 # 8-bit range — inputs are loaded and converted to RGB uint8 before scoring, so
 # edge differences live in 0..255 and normalize cleanly against this.
@@ -168,6 +173,7 @@ class Result:
     y: float = 0.0
     overall: float = 0.0
     outputs: list[str] = field(default_factory=list)   # written (or would-write) PNGs
+    output_sha256: dict[str, str] = field(default_factory=dict)
     detail: str = ""
 
     def to_dict(self) -> dict:
@@ -206,6 +212,16 @@ def _planned(base: Path, opts: TileOptions) -> list[str]:
     return out
 
 
+def planned_outputs(path: str | Path, opts: TileOptions) -> list[str]:
+    """Public, side-effect-free output plan used by preview and collision checks."""
+    return _planned(_out_base(Path(path), opts), opts)
+
+
+def find_output_collisions(paths, opts: TileOptions) -> dict[str, tuple[str, ...]]:
+    """Return outputs shared by inputs or targeting an input file."""
+    return _find_collisions(paths, lambda source: planned_outputs(source, opts))
+
+
 def _atomic_save(img, dst: Path) -> str:
     """Write via a `.part` temp then os-replace into place (never a half file)."""
     dst = Path(dst)
@@ -230,6 +246,8 @@ def process(path: str | Path, opts: TileOptions) -> Result:
 
     # A `with` block releases the source handle on every path (matters for
     # large batches on Windows, where a held handle blocks the file).
+    written: list[str] = []
+    output_sha256: dict[str, str] = {}
     try:
         with Image.open(src) as im:
             rgb = im.convert("RGB")                  # deterministic 8-bit RGB for scoring
@@ -241,23 +259,92 @@ def process(path: str | Path, opts: TileOptions) -> Result:
 
             if opts.dry_run:
                 return Result(str(src), "dry-run", summary, x=score["x"], y=score["y"],
-                              overall=score["overall"], outputs=_planned(base, opts),
+                              overall=score["overall"], outputs=planned_outputs(src, opts),
                               detail="preview")
 
             base.parent.mkdir(parents=True, exist_ok=True)
-            written: list[str] = []
             if opts.make_offset:
-                written.append(_atomic_save(Image.fromarray(offset_wrap(arr)),
-                                            base.parent / f"{base.name}_offset.png"))
+                output = _atomic_save(Image.fromarray(offset_wrap(arr)),
+                                      base.parent / f"{base.name}_offset.png")
+                written.append(output)
+                output_sha256[output] = sha256_file(output)
             if opts.make_tile:
-                written.append(_atomic_save(tile_preview(rgb, opts.tile_n),
-                                            base.parent / f"{base.name}_tile.png"))
+                output = _atomic_save(tile_preview(rgb, opts.tile_n),
+                                      base.parent / f"{base.name}_tile.png")
+                written.append(output)
+                output_sha256[output] = sha256_file(output)
             if opts.make_heatmap:
-                written.append(_atomic_save(edge_diff_strip(arr),
-                                            base.parent / f"{base.name}_heatmap.png"))
+                output = _atomic_save(edge_diff_strip(arr),
+                                      base.parent / f"{base.name}_heatmap.png")
+                written.append(output)
+                output_sha256[output] = sha256_file(output)
     except Exception as ex:                          # PIL/numpy raise many types on bad images
+        partial = f"; {len(written)} output(s) committed before failure" if written else ""
         return Result(str(src), "failed",
-                      f"tileset check failed on {src.name}: {ex}", detail="check.failed")
+                      f"tileset check failed on {src.name}: {ex}{partial}",
+                      outputs=written, output_sha256=output_sha256,
+                      detail="check.failed")
 
     return Result(str(src), "checked", summary, x=score["x"], y=score["y"],
-                  overall=score["overall"], outputs=written, detail="checked")
+                  overall=score["overall"], outputs=written,
+                  output_sha256=output_sha256, detail="checked")
+
+
+def validate_result(result: Result, opts: TileOptions) -> bool:
+    """Validate scores, the exact artifact set, hashes, formats, and geometry."""
+    if (
+        not isinstance(result.src, str)
+        or not isinstance(result.outputs, list)
+        or not isinstance(result.output_sha256, dict)
+    ):
+        return False
+    scores = (result.x, result.y, result.overall)
+    try:
+        valid_scores = all(
+            math.isfinite(value) and 0.0 <= value <= 1.0 for value in scores
+        )
+    except (TypeError, ValueError):
+        return False
+    if not valid_scores:
+        return False
+    if not math.isclose(
+        result.overall, min(result.x, result.y), rel_tol=0.0, abs_tol=1e-12
+    ):
+        return False
+    expected = planned_outputs(result.src, opts)
+    if result.outputs != expected:
+        return False
+    if result.action == "dry-run":
+        return not result.output_sha256
+    if result.action != "checked":
+        return False
+    if not expected:
+        return not result.output_sha256
+    if set(result.output_sha256) != set(expected):
+        return False
+    try:
+        from PIL import Image
+
+        with Image.open(result.src) as source:
+            width, height = source.size
+        expected_sizes: list[tuple[int, int]] = []
+        if opts.make_offset:
+            expected_sizes.append((width, height))
+        if opts.make_tile:
+            n = max(1, int(opts.tile_n))
+            expected_sizes.append((width * n, height * n))
+        if opts.make_heatmap:
+            expected_sizes.append((_STRIP_LEN, _STRIP_BAND * 2 + 3))
+        for output, expected_size in zip(expected, expected_sizes):
+            if sha256_file(output) != result.output_sha256[output]:
+                return False
+            with Image.open(output) as artifact:
+                if (
+                    artifact.format != "PNG"
+                    or artifact.mode != "RGB"
+                    or artifact.size != expected_size
+                ):
+                    return False
+        return True
+    except (ImportError, OSError, TypeError, ValueError):
+        return False

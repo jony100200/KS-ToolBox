@@ -8,10 +8,43 @@ import time
 import unittest
 from pathlib import Path
 
-from toolbox.engine_common import CommandCancelled, run_cancellable_cmd, sha256_file
+from toolbox.engine_common import (
+    CommandCancelled,
+    find_output_collisions,
+    run_cancellable_cmd,
+    sha256_file,
+)
 
 
 class CancellableCommandTests(unittest.TestCase):
+    def test_output_collisions_cover_shared_targets_and_selected_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            first = root / "a" / "same.png"
+            second = root / "b" / "same.png"
+            protected = root / "out" / "protected.png"
+            for source in (first, second, protected):
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_bytes(b"source")
+
+            def plan(source: Path):
+                if source == first:
+                    return [root / "out" / "shared.png", protected,
+                            root / "out" / "duplicate.png", root / "out" / "duplicate.png"]
+                if source == protected:
+                    return [root / "out" / "other.png"]
+                return [root / "out" / "shared.png", protected]
+
+            collisions = find_output_collisions([first, second, protected], plan)
+            self.assertEqual(len(collisions), 3)
+            self.assertEqual(len(collisions[str((root / "out" / "shared.png").resolve())]), 2)
+            self.assertEqual(
+                collisions[str((root / "out" / "duplicate.png").resolve())],
+                (str(first.resolve()),),
+            )
+            protected_owners = collisions[str(protected.resolve())]
+            self.assertTrue(any(owner.startswith("selected input:") for owner in protected_owners))
+
     def test_streaming_sha256_matches_known_digest(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / "sample.bin"

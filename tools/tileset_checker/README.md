@@ -19,6 +19,14 @@ Previews are written next to an aggregate `seam_scores.csv` + `seam_scores.json`
 Everything is deterministic (same input → same score and pixels) and
 non-destructive: it reads your sources and only writes previews + the report.
 
+Runs use the shared durable queue with per-texture checkpoints, pause/resume,
+cancellation at item boundaries, failure quarantine, and completion reports.
+Stored previews are reused only when their exact SHA-256, PNG format, RGB mode,
+expected dimensions, selected artifact set, and score invariants still match.
+Flat output-name collisions—including an output that would overwrite a selected
+input—are blocked before a real run; enable mirroring, choose another output
+folder, or rename the conflicting sources.
+
 ## Options
 
 | Option | Meaning | Default |

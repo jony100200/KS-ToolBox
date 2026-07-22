@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +33,43 @@ def sha256_file(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def find_output_collisions(
+    sources: Iterable[str | Path],
+    plan_outputs: Callable[[Path], Iterable[str | Path]],
+) -> dict[str, tuple[str, ...]]:
+    """Find output paths shared by sources or targeting a selected input.
+
+    The planner remains tool-specific; normalization and collision semantics are
+    shared. Host filesystem case rules are respected through ``normcase``.
+    """
+    resolved_sources = [Path(path).expanduser().resolve(strict=False) for path in sources]
+
+    def resolved(path: str | Path) -> Path:
+        return Path(path).expanduser().resolve(strict=False)
+
+    def key(path: str | Path) -> str:
+        return os.path.normcase(str(resolved(path)))
+
+    source_by_key = {key(source): str(source) for source in resolved_sources}
+    owners: dict[str, list[str]] = {}
+    display: dict[str, str] = {}
+    for source in resolved_sources:
+        for output in plan_outputs(source):
+            output_key = key(output)
+            display.setdefault(output_key, str(resolved(output)))
+            owners.setdefault(output_key, []).append(str(source))
+
+    collisions: dict[str, tuple[str, ...]] = {}
+    for output_key, output_owners in owners.items():
+        participants = list(dict.fromkeys(output_owners))
+        multiple_writes = len(output_owners) > 1
+        if output_key in source_by_key:
+            participants.append(f"selected input: {source_by_key[output_key]}")
+        if multiple_writes or output_key in source_by_key:
+            collisions[display[output_key]] = tuple(participants)
+    return collisions
 
 
 # --- error envelope -----------------------------------------------------------

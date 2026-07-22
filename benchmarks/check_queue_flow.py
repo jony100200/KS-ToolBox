@@ -89,6 +89,11 @@ def main() -> int:
             showcase_panel._add([first, second])
             showcase_job_id = _run_and_wait(app, showcase_panel, "Showcase Contact Sheet", 1)
 
+            app._select("tileset_checker")
+            tileset_panel = app._panels["tileset_checker"]
+            tileset_panel._add([first, second])
+            tileset_job_id = _run_and_wait(app, tileset_panel, "Tileset Checker", 2)
+
             video_job_id = None
             ffmpeg = resolve_tool("ffmpeg")
             if ffmpeg:
@@ -113,13 +118,14 @@ def main() -> int:
             assert any(item.job_id == pixel_job_id for item in app._services.queue.history())
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
+            assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
             if video_job_id:
                 assert any(item.job_id == video_job_id for item in app._services.queue.history())
         finally:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "Material Converter, Showcase, and Video Compressor through shell queue; "
+          "Material Converter, Showcase, Tileset Checker, and Video Compressor through shell queue; "
           "history UI rendered.")
     return 0
 

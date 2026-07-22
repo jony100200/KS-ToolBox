@@ -111,6 +111,34 @@ accepted as an earlier result.
 | Reliability/security | Degraded sheets are warning-bearing; overwritten/corrupt PNGs fail validation; manifest errors remain visible |
 | Tests/benchmarks | 20 unit tests; 17/17 panels and smokes; full contact/hero/before-after, degraded/corrupt overwrite, and real grouped queue checks; durable core 10,725 items/s |
 | Risk/rollback | Extra output read costs disk bandwidth; revert panel/validator/result metadata while retaining compatible core contracts |
+
+### Slice 3g — implemented analytical Tileset Checker
+
+Tileset Checker now submits one durable item per texture while preserving the
+existing NumPy seam metric and Pillow previews. Results record the exact selected
+artifact set and a streamed SHA-256 for each PNG. Reuse validates score
+invariants, hashes, formats, modes, and mode-derived geometry without decoding
+the large preview pixels again.
+
+The slice also proved a universal output-safety primitive. A tool supplies its
+side-effect-free output plan; `engine_common.find_output_collisions` normalizes
+paths using host filesystem rules and detects cross-source writes, duplicate
+writes within one plan, and outputs that target selected inputs. Tileset Checker
+blocks a real run with visible remediation instead of silently overwriting data.
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-local loop with silent manifest/collision failures → shell queue, visible finalization errors, and pre-run collision rejection |
+| Architecture/language | Existing Python/NumPy/Pillow analysis retained; generic path safety lives in `engine_common`, queue/report mechanics stay shared |
+| Functionality and quality | X/Y/overall score, offset, montage, heatmap, dry run, mirroring, and reports are unchanged for non-conflicting inputs |
+| Code/dependencies | Tool production source 340 → 482 nonblank lines; shared `engine_common` 161 → 191 (+172 combined); zero dependencies added |
+| Package/startup/runtime | No package component/model added; ready-to-mainloop 124 → 128 ms; a 12.8 MB three-preview sample measured 401.2 ms processing and 9.9 ms for the added hash pass |
+| RAM/VRAM/CPU/disk/GPU | Hashing uses the shared 1 MiB streaming buffer; validation reads bytes plus image headers without pixel decompression; no GPU/VRAM/AI |
+| Batch/cache/AI | Per-texture checkpoint/retry/quarantine and exact artifact reuse added; unchanged analytical method; zero AI calls |
+| Reliability/security | Source/output collisions are blocked; corrupt, missing, wrong-sized, wrong-mode, or inconsistent stored results rerun; partial outputs are reported |
+| Tests/benchmarks | 21 unit tests; focused math/preview/hash/collision smoke; seven-tool real queue flow; 17/17 panels and smokes; durable core 10,611 items/s |
+| Risk/rollback | Hashing adds bounded output I/O and strict collision checks reject formerly destructive cases; revert the panel/tool adapter and result validator while retaining the generic helper |
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.
