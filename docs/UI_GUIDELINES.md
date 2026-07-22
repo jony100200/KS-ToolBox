@@ -33,6 +33,8 @@ schedule immutable results with `after()`, but never mutate widgets directly.
 - Make preview/dry-run the safe default where output can be destructive or large.
 - Keep basic settings visible and group specialist controls separately.
 - Show input count, output location, current state, progress, and per-item result.
+- Reuse `BaseBatchPanel` terminal status/report handling; a tool supplies only
+  its domain-specific summary text.
 - Expose Stop for long work. Pause appears only when the executor genuinely
   supports safe cooperative pause.
 - Explain failures with file, stage, reason, retry status, and next action.

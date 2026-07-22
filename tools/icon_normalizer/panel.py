@@ -164,35 +164,12 @@ class IconNormalizerPanel(BaseBatchPanel):
             extra = f"  — {res.reason}"
         self._logline(f"  {icon} {name}{extra}", color)
 
-    def _batch_failed(self, details: str):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._pause_btn.configure(state="disabled", text="Pause")
-        self._active_job_id = None
-        self._status.set_state("FAILED", "error")
-        self._logline(f"batch core failed: {details}", t.STATE["error"][1])
-
     def _done(self, converted, skipped, failed, remaining=0, manifest=None,
               report_path=None, job_state=JobState.COMPLETED, recovered=False, reused=False):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._pause_btn.configure(state="disabled", text="Pause")
-        self._active_job_id = None
-        if job_state is JobState.CANCELLED:
-            self._status.set_state("CANCELLED", "waiting")
-        elif job_state is JobState.COMPLETED_WITH_WARNINGS:
-            self._status.set_state("WARNINGS", "waiting"); self._progress.set(1)
-        elif job_state is JobState.FAILED:
-            self._status.set_state("FAILED", "error"); self._progress.set(1)
-        else:
-            self._status.set_state("DONE", "done"); self._progress.set(1)
         summary = f"normalized {converted} · skipped {skipped} · failed {failed}"
         if remaining:
             summary += f" · remaining {remaining}"
-        self._summary.configure(text=summary)
-        if recovered:
-            self._logline("  recovered unfinished work from the previous run", t.TEXT_MUTED)
-        if reused:
-            self._logline("  reused valid outputs and prior item decisions", t.TEXT_MUTED)
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
-        if report_path:
-            self._logline(f"  completion report: {report_path}", t.TEXT_MUTED)
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

@@ -71,6 +71,12 @@ extraction (−21 lines). Two focused unit tests were added. Ready-to-mainloop w
 121 ms before and 127 ms after, within the existing 99–197 ms measured range;
 no dependency, process, model, RAM/VRAM, or output-algorithm change was added.
 
+After the fourth migration proved identical terminal control/status/report UI,
+that behavior moved into `BaseBatchPanel._finish_queue_ui`. Measured production
+source across the base and four durable panels fell from 1,078 to 1,027 lines
+(−51). Ready-to-mainloop remained 120 ms, and the real four-tool queue flow plus
+all 17 unit tests remained green.
+
 ### Slice 4 — next: resource profiles and dependencies
 
 Priorities already order waiting jobs. Add dependency edges and resource

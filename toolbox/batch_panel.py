@@ -277,6 +277,51 @@ class BaseBatchPanel(ctk.CTkFrame):
             return JobState.COMPLETED_WITH_WARNINGS
         return state
 
+    def _finish_queue_ui(
+        self,
+        summary: str,
+        *,
+        job_state,
+        recovered: bool = False,
+        reused: bool = False,
+        manifest: str | None = None,
+        report_path: str | None = None,
+    ) -> None:
+        from toolbox.batch_core import JobState
+
+        self._run_btn.configure(state="normal")
+        self._stop_btn.configure(state="disabled")
+        self._pause_btn.configure(state="disabled", text="Pause")
+        self._active_job_id = None
+        if job_state is JobState.CANCELLED:
+            self._status.set_state("CANCELLED", "waiting")
+        elif job_state is JobState.COMPLETED_WITH_WARNINGS:
+            self._status.set_state("WARNINGS", "waiting")
+            self._progress.set(1)
+        elif job_state is JobState.FAILED:
+            self._status.set_state("FAILED", "error")
+            self._progress.set(1)
+        else:
+            self._status.set_state("DONE", "done")
+            self._progress.set(1)
+        self._summary.configure(text=summary)
+        if recovered:
+            self._logline("  recovered unfinished work from the previous run", t.TEXT_MUTED)
+        if reused:
+            self._logline("  reused valid outputs and prior item decisions", t.TEXT_MUTED)
+        if manifest:
+            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+        if report_path:
+            self._logline(f"  completion report: {report_path}", t.TEXT_MUTED)
+
+    def _batch_failed(self, details: str) -> None:
+        self._run_btn.configure(state="normal")
+        self._stop_btn.configure(state="disabled")
+        self._pause_btn.configure(state="disabled", text="Pause")
+        self._active_job_id = None
+        self._status.set_state("FAILED", "error")
+        self._logline(f"batch core failed: {details}", t.STATE["error"][1])
+
     def _queue_complete(self, completion) -> None:
         raise NotImplementedError
 
@@ -317,7 +362,4 @@ class BaseBatchPanel(ctk.CTkFrame):
         raise NotImplementedError
 
     def _show(self, result, position: int, total: int):
-        raise NotImplementedError
-
-    def _batch_failed(self, details: str):
         raise NotImplementedError
