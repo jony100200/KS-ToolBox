@@ -12,6 +12,10 @@ venv/
 build/
 dist/
 
+# Generated smoke-test / run outputs (regenerable — never track)
+_test_out/
+scratch_out/
+
 # Bundled external binaries — HUGE (ffmpeg/ffprobe ~460 MB) and separately
 # licensed. Never commit; ship them with the release build, not the repo.
 bin/
