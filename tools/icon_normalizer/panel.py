@@ -17,11 +17,7 @@ from toolbox.batch_core import (
     JobDefinition,
     JobState,
 )
-from toolbox.batch_reporting import (
-    completion_report_path,
-    prepare_batch_completion,
-)
-from toolbox.job_queue import QueueCompletion, QueueFinalization, QueueSubmission
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 
@@ -98,17 +94,8 @@ class IconNormalizerPanel(BaseBatchPanel):
             execute=lambda path, token: e.process(path, opts),
             classify=classify,
             validate_stored=lambda item: e.validate_result(self._result_from_record(item)),
-            finalize=lambda report: self._prepare_completion(report, opts),
-        )
-
-    def _prepare_completion(self, report, opts: e.NormalizeOptions) -> QueueFinalization:
-        return prepare_batch_completion(
-            report,
-            result_from_record=self._result_from_record,
-            write_manifest=lambda results: self._write_manifest(opts, results),
-            report_path=completion_report_path(
-                "icon_normalizer", report.job_id,
-                out_root=opts.out_root, dry_run=opts.dry_run,
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="icon_normalizer"
             ),
         )
 

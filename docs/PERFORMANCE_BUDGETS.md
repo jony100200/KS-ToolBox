@@ -7,10 +7,10 @@ They are evidence for this revision, not universal hardware guarantees.
 
 | Metric | Measured | Command |
 |---|---:|---|
-| Ready-to-mainloop, measured range; latest 128 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
+| Ready-to-mainloop, measured range; latest 126 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
 | Discovery + shell import; latest 30 ms | 21–31 ms | same |
 | Optional AI/numeric modules at startup | none | same |
-| Python source after this slice | 112 files / 13,045 lines | bounded repository scan |
+| Python source after this slice | 112 files / 12,987 lines | bounded repository scan |
 | Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s | `measure_batch_core.py` |
 | Job identity, 1,000 path/stat inputs | 95.43–122.26 ms | same |
 | Completed-job reuse, 1,000 items | 5.40–6.22 ms / zero executor calls | same |

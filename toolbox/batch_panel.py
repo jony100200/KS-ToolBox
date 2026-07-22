@@ -268,6 +268,22 @@ class BaseBatchPanel(ctk.CTkFrame):
             self._logline(warning, t.STATE["error"][1])
         return payload
 
+    def _prepare_queue_completion(self, report, opts, *, tool_id: str):
+        """Finalize a durable tool with its manifest and atomic morning report."""
+        from toolbox.batch_reporting import completion_report_path, prepare_batch_completion
+
+        return prepare_batch_completion(
+            report,
+            result_from_record=self._result_from_record,
+            write_manifest=lambda results: self._write_manifest(opts, results),
+            report_path=completion_report_path(
+                tool_id,
+                report.job_id,
+                out_root=getattr(opts, "out_root", None),
+                dry_run=bool(getattr(opts, "dry_run", False)),
+            ),
+        )
+
     @staticmethod
     def _queue_completion_state(completion):
         from toolbox.batch_core import JobState

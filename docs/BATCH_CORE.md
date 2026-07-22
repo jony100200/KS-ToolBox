@@ -104,6 +104,9 @@ tool-owned manifest plus the atomic JSON report, and returns typed
 `BatchCompletionArtifacts`. Non-fatal I/O problems become `QueueFinalization`
 warnings. The queue then records `CompletedWithWarnings`, exposes the warning
 text in history, and keeps successful item results available to the panel.
+Durable `BaseBatchPanel` tools call `_prepare_queue_completion()` so tool ID,
+output-root/dry-run routing, result decoding, manifest writing, and report
+creation cannot drift across panels.
 
 ## Scope still required
 

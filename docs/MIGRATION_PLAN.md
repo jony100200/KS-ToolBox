@@ -155,6 +155,15 @@ source across the base and four durable panels fell from 1,078 to 1,027 lines
 (−51). Ready-to-mainloop remained 120 ms, and the real four-tool queue flow plus
 all 17 unit tests remained green.
 
+After seven migrations, completion preparation was the remaining exact clone:
+seven 10-line methods differed only by tool ID. It now lives in
+`BaseBatchPanel._prepare_queue_completion`; tool-specific job definitions,
+classification, metrics, manifests, and result reconstruction remain local.
+Across `BaseBatchPanel` and the seven panels, measured nonblank production source
+fell from 1,608 to 1,550 lines (−58). Ready-to-mainloop measured 128 → 126 ms
+within normal variance; 21 unit tests and the seven-tool real queue flow pass.
+No dependency, process, algorithm, output, or persistence schema changed.
+
 ### Slice 4 — next: resource profiles and dependencies
 
 Priorities already order waiting jobs. Add dependency edges and resource
