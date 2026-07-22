@@ -16,14 +16,16 @@ This audit implemented the first shared execution slice: a headless `BatchRunner
 transactional `SQLiteJobStore`, typed lifecycle, per-item retry/quarantine,
 cancellation/resume, validated previous-result reuse, and atomic JSON completion
 reports. Image Rescale and Video Compressor now prove deterministic-library and
-external-process paths. The global queue, resource scheduler, and
+external-process paths through one lazy shell-owned priority queue. The queue
+includes pause/resume/cancel controls, persisted history, and a CustomTkinter
+Queue/History view. Resource-aware scheduling, dependency graphs, and a
 content-addressed artifact cache are still missing and must not be claimed.
 
 The best next move is therefore:
 
-1. make the default installation and smoke suite reliable;
-2. measure representative workloads;
-3. migrate a contrasting external-process tool through the shared batch contract;
+1. migrate additional deterministic tools through the proven queue contract;
+2. measure representative CPU, disk, and external-process workloads;
+3. add resource profiles and dependency edges only where those measurements require them;
 4. improve exact algorithms and mature native backends;
 5. add optional specialist models only behind validation-driven escalation.
 
@@ -58,12 +60,12 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | One tool per auto-discovered folder | 17 independent plugins expose `TOOL` | Good |
 | Engine/UI split | Engines are headless; panels own CustomTkinter | Good |
 | Lazy optional dependencies | Tool metadata avoids optional engine imports | Good |
-| Worker-thread UI | Batch panels do work off the Tk loop | Good |
+| Worker-thread UI | Migrated panels use the shell queue; compatibility panels stay off Tk | Good; continue migration |
 | Preview, confirm, logging | Batch tools use preview/manifests; destructive compressor confirms | Good, verify per new feature |
 | Atomic output | Common pattern is temporary output then replace | Good, standardize and test crash recovery |
 | Error envelope | Shared `ok`/`err` helpers exist | Good, add conformance tests |
-| Durable batch execution | Shared runner/store implemented for Image Rescale and Video Compressor | Partial; global queue UI is next |
-| Failure isolation/recovery | Per-item quarantine, retry, cancellation/resume in first slice | Good contract; UI/global queue still missing |
+| Durable batch execution | Runner/store plus shell queue implemented for Image Rescale and Video Compressor | Good first vertical slice; migrate remaining tools |
+| Failure isolation/recovery | Per-item quarantine/retry, pause/resume/cancel, history, and finalization warnings | Good contract; manual item retry remains |
 | Content identity/cache | No shared persistent content-addressed cache | Missing |
 | Incremental recomputation | Mostly output-exists checks | Partial and settings-blind |
 | Resource scheduling | Serial batch loops; external tools manage themselves | Safe but unmeasured |
@@ -77,7 +79,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Video Compressor | cancellable ffprobe/x265/NVENC/HandBrake, staged candidate, VMAF rejection gate | Deterministic | per-title encode search, AV1 option, sampled/full VMAF policy, probe/VMAF cache |
 | Video Chopper | ffmpeg `blackdetect`, stream copy or H.264 cuts | Deterministic | adaptive/content cuts and fades before optional neural shot detection |
 | Audio Tool | ffmpeg convert, trim, fade, normalize | Deterministic | two-pass loudness measurement, silence/chapters, optional stem separation |
-| Image Rescale | Pillow resampling and fit modes; durable validated batch checkpoint | Deterministic | shared queue UI, content hashes, streaming/native backend benchmark, optional restoration upscale |
+| Image Rescale | Pillow resampling and fit modes; durable validated shell-queue execution | Deterministic | content hashes, streaming/native backend benchmark, optional restoration upscale |
 | Format Converter | Pillow/ffmpeg/document adapters | Deterministic | capability matrix, metadata/color handling, modern formats, backend provenance |
 | Pixel Art | nearest-neighbor pixelization, median-cut palette, optional dithering | Deterministic | perceptual palette benchmark, palette locking, alpha-aware quantization |
 | To SVG | VTracer | Deterministic | expose presets/path controls, score path complexity and reconstruction error |
@@ -184,9 +186,10 @@ Every implementation slice in the roadmap must record:
 ## Audit conclusion
 
 The architecture is being evolved, not rewritten. The first durable batch slice
-is implemented and verified without changing CustomTkinter or image algorithms.
-Image Rescale and Video Compressor now prove the contrasting contracts. Next,
-introduce a shell-owned queue without creating a second scheduler.
+and shell-owned queue are implemented and verified without changing
+CustomTkinter or image algorithms. Image Rescale and Video Compressor prove the
+contrasting contracts. Next, migrate additional deterministic tools and measure
+resource profiles before adding scheduling lanes or dependency graphs.
 Content-addressed caching remains later work. Improve deterministic
 paths with mature native algorithms and add specialist AI only as optional,
 lazy, confidence-triggered cartridges with exact validation around outputs.

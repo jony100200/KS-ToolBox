@@ -33,17 +33,21 @@ a candidate; VMAF runs before atomic final commit. Delete confirmation and the
 quality gate remain intact, and an unproven VMAF result never authorizes original
 deletion.
 
-### Slice 3 — next: shared queue application service
+### Slice 3 — implemented shared queue application service
 
-After two contrasting tools pass, move worker ownership from individual panels
-to one shell-owned queue service. Add queue history and pause/resume/cancel UI.
-Do not create a second scheduler beside `BaseBatchPanel`; migrate adapters one
-tool at a time.
+Worker ownership for Image Rescale and Video Compressor now lives in one lazy,
+shell-owned `JobQueue`. `AppServices` injects it into panels, and the
+CustomTkinter Queue/History view exposes priority-ordered submissions,
+pause/resume/cancel, progress, finalization warnings, and persisted history.
+Tk widgets poll immutable snapshots on the main thread; queue workers never
+touch Tk. `BaseBatchPanel` retains its old worker only as a migration adapter.
 
-### Slice 4 — priorities, dependencies, and resources
+### Slice 4 — next: resource profiles and dependencies
 
-Add only for demonstrated workflows. Start with bounded CPU/disk/external-process
-slots. GPU/model residency belongs later, when an integrated model tool needs it.
+Priorities already order waiting jobs. Add dependency edges and resource
+profiles only for demonstrated workflows. Start with measured CPU, disk, and
+external-process limits. GPU/model residency belongs later, when an integrated
+model tool needs it.
 
 ### Slice 5 — content-addressed cache
 

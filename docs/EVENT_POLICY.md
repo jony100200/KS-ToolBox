@@ -1,8 +1,10 @@
 # Event Policy
 
 KS ToolBox does not currently need a general event bus. Direct calls remain the
-default within a tool pipeline; typed progress callbacks cross the current
-runner/presentation boundary. This keeps execution traceable.
+default within a tool pipeline. `JobQueue` stores immutable snapshots and offers
+isolated subscribers for headless consumers; CustomTkinter reads snapshots by
+main-thread polling. This keeps execution traceable and prevents worker-to-Tk
+calls.
 
 ## Commands and facts
 
@@ -12,9 +14,9 @@ runner/presentation boundary. This keeps execution traceable.
   `JobPaused`, `JobCompleted`, `JobFailed`, `ItemQuarantined`, `CacheHit`,
   `ResourcePressureDetected`.
 
-This catalogue reserves names; it does not claim those events are implemented.
-Events should be introduced only when a real second subscriber or cross-system
-lifecycle boundary exists.
+The command methods and queue lifecycle states are implemented; named event
+objects are not. Events should be introduced only when a real second subscriber
+or cross-system lifecycle boundary exists.
 
 ## Rules for an implemented event
 
@@ -32,9 +34,9 @@ lifecycle boundary exists.
 
 | Publisher | Signal | Subscriber | Delivery |
 |---|---|---|---|
-| `BatchRunner` | `BatchProgress` | migrated panel | direct typed callback |
-| panel worker | UI update | CustomTkinter loop | `after(0, ...)` |
+| `BatchRunner` | `BatchProgress` | `JobQueue` | direct typed callback on queue worker |
+| `JobQueue` | `QueueSnapshot` | optional headless subscriber | synchronous, exception-isolated |
+| `JobQueue` | stored snapshot/completion | migrated panel and Queue/History view | read-only polling on Tk main thread |
 
-No invisible multi-hop event chains exist. A future queue controller may publish
-job lifecycle events to the queue view and structured logger after its contract
-is proven by two tools.
+No invisible multi-hop event chains exist. A future structured logger may
+subscribe after its audit and retention requirements are defined.

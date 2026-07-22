@@ -39,7 +39,7 @@ missing or invalid artifact is reset and only that item is recomputed.
 | cancellation | job becomes Cancelled; pending items remain resumable |
 | external process cancellation | owned process tree stops; candidate is removed; item returns to Pending |
 | process/power loss | prior Running item resets to Pending on next prepare |
-| report write failure | panel reports the write error; database state remains |
+| report/manifest write failure | queue and panel show CompletedWithWarnings; database state and outputs remain |
 | SQLite open/write failure | panel reports batch-core failure; tool output is not assumed complete |
 
 Tool engines remain responsible for temporary output cleanup and atomic
@@ -47,6 +47,11 @@ replacement. Existing `.part` sweeping remains scoped to declared output roots.
 Video Compressor writes a `.verify` candidate, runs VMAF against it, and exposes
 the final destination only after acceptance. A crash cannot make an unverified
 candidate look like a completed output.
+
+The Queue/History view loads the most recent SQLite reports only when opened.
+Terminal records retain their stored state. A nonterminal record from a prior
+process is displayed as `Recovered` with an explicit instruction to resubmit it
+from the owning tool; submission then reuses valid item checkpoints.
 
 ## Trust and privacy
 

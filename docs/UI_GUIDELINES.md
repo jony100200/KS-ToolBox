@@ -11,9 +11,9 @@ Tool Browser → Inputs → Preset/Settings → Preview → Output
              → Run/Add to Queue → Progress → Results/Report
 ```
 
-The current shell and panels implement the first, input, settings, processing,
-and results portions. A global queue view is planned only after the queue service
-is proven by contrasting tools.
+The shell implements the full route for Image Rescale and Video Compressor,
+including a Queue/History view. Other panels keep their verified UI and migrate
+to the shared queue one at a time.
 
 ## Separation
 
@@ -22,8 +22,10 @@ is proven by contrasting tools.
 - Application/core: job lifecycle, retry, persistence, recovery, and reports.
 - Engine: processing algorithms and output validation.
 
-Widgets must not call FFmpeg, models, or native engines directly. Worker results
-must return to Tk through `after(0, ...)`; never update widgets from a worker.
+Widgets must not call FFmpeg, models, or native engines directly. Queue workers
+never call Tk, including `after()`. Migrated panels and the queue view poll
+immutable snapshots from Tk's main-thread timer. Compatibility workers may
+schedule immutable results with `after()`, but never mutate widgets directly.
 
 ## Shared interaction rules
 

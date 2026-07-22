@@ -1,9 +1,11 @@
 # Batch Core
 
-`toolbox.batch_core` is a headless durable item executor. It removes recovery,
-retry, and failure-isolation policy from migrated panels without changing tool
-algorithms. `image_rescale` and `video_compressor` are the first production
-integrations.
+`toolbox.batch_core` is a headless durable item executor. `toolbox.job_queue`
+owns shell-wide submission, priority ordering, pause/resume/cancel controls,
+immutable progress snapshots, and history. Together they remove recovery,
+retry, failure-isolation, and worker ownership from migrated panels without
+changing tool algorithms. `image_rescale` and `video_compressor` are the first
+production integrations.
 
 ## Job lifecycle
 
@@ -83,21 +85,26 @@ a malformed-file quarantine.
 - tool result data;
 - subscriber diagnostics.
 
+Finalizers may return `QueueFinalization` with non-fatal warnings. The queue
+then records `CompletedWithWarnings`, exposes the warning text in history, and
+keeps the successful item report and output payload available to the panel.
+
 ## Scope still required
 
-The current slice does not yet provide queue priorities, dependencies, scheduled
-start, shutdown-on-finish, resource reservations, global history UI, physical
-quarantine, or manual reset/retry controls. Those remain migration work, not
-claimed capabilities.
+The current slice does not yet provide job dependencies, scheduled start,
+shutdown-on-finish, resource reservations, physical quarantine, or manual
+item reset/retry controls. Those remain migration work, not claimed
+capabilities. Priority affects waiting jobs; the intentionally single execution
+lane avoids unmeasured CPU, disk, and codec oversubscription.
 
 ## Cartridge-grade score for this slice
 
 | Category | Score | Evidence or reason |
 |---|---:|---|
-| Functional completeness | 4 | Scoped durable item runner is complete; global queue is a later feature |
+| Functional completeness | 4 | Durable runner, priority queue, controls, and history work; dependencies and scheduling remain |
 | Output quality | 5 | Image algorithm unchanged; video candidate commits only after VMAF policy |
 | Runtime performance | 4 | 8,651–10,508 durable no-op item transitions/s |
-| Startup efficiency | 5 | Store opens only on submission; no optional-heavy startup import |
+| Startup efficiency | 5 | Queue worker and store remain absent until submission; no optional-heavy startup import |
 | Memory efficiency | 4 | Item metadata is linear and small for the supported batch scale |
 | Storage efficiency | 4 | About 270 KB for 1,000 checkpointed items; no new package |
 | Batch efficiency | 4 | Per-item retry and completed/valid artifact reuse |

@@ -7,13 +7,13 @@ the allowed direction of incremental migration; it is not a rewrite brief.
 ## System shape
 
 ```text
-CustomTkinter shell and tool panels
-        │ requests / progress callbacks
+CustomTkinter shell, tool panels, and Queue/History view
+        │ requests / immutable snapshot polling
         ▼
-Application coordination
-        │ JobDefinition + CancellationToken
+AppServices + shell-owned JobQueue
+        │ QueueSubmission + JobDefinition + CancellationToken
         ▼
-Tool registry + BatchRunner
+Tool registry + lazy single-lane BatchRunner
         │ direct per-item execution
         ├──────────────► headless tools/<name>/engine.py
         │
@@ -35,7 +35,8 @@ infrastructure adapter ──► batch contracts
 tool engine ──► toolbox.engine_common
 ```
 
-- `toolbox/shell.py` depends only on the tool registry and shared UI elements.
+- `toolbox/shell.py` owns `AppServices`, the queue view, the tool registry, and
+  shared UI elements; it does not implement tool processing.
 - A tool may import public names from `toolbox`; it must not import another tool.
 - Engine modules are headless and must not import CustomTkinter.
 - `batch_core.py` has no UI, database, codec, model, or tool dependency.
@@ -48,6 +49,9 @@ tool engine ──► toolbox.engine_common
 | Contract | Owner | Purpose |
 |---|---|---|
 | `Tool` / `ToolMeta` | `toolbox/tool.py` | Lazy first-party tool registration and UI construction |
+| `AppServices` | `toolbox/application.py` | Explicit shell-owned service context passed to panels |
+| `JobQueue` | `toolbox/job_queue.py` | Lazy priority queue, pause/resume/cancel, snapshots, and history |
+| `QueueSubmission` | `toolbox/job_queue.py` | Tool execution, classification, validation, and finalization contract |
 | `JobDefinition` | `toolbox/batch_core.py` | Stable tool, workflow, inputs, settings, and retry identity |
 | `ItemOutcome` | `toolbox/batch_core.py` | Typed completed, skipped, failed, or quarantined result |
 | `CancellationToken` | `toolbox/batch_core.py` | Cooperative pause/cancel at safe item boundaries |
@@ -57,9 +61,9 @@ tool engine ──► toolbox.engine_common
 
 ## Deliberately not implemented yet
 
-- A global queue controller or queue screen; two contrasting tools now prove
-  the executor boundary needed to build it.
-- Priorities and dependency graphs.
+- Job dependency graphs, scheduled start, and shutdown-on-finish.
+- Resource reservations and hardware-aware multi-lane scheduling. The current
+  single execution lane is deliberately bounded and predictable.
 - A general event bus.
 - Public/untrusted plugins.
 - A workflow VM or JSON programming language.

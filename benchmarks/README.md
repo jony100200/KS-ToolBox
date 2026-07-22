@@ -13,6 +13,9 @@ touches the app venv).
 | `measure_repo.ps1` | file count, LOC, source/asset/bin sizes | pure filesystem |
 | `measure_startup.py` | import + discovery time, models-at-startup | headless (no window) |
 | `measure_batch_core.py` | durable item transitions, checkpoint size, completed-job reuse | 1,000 no-op local items |
+| `check_queue_flow.py` | real CustomTkinter submission, Image/Video completion, and history rendering | uses temporary state and a generated video |
+| `check_ui.py` | construction of every discovered tool panel | no processing |
+| `run_all_smoke.py` | every tool's real standalone smoke contract | optional dependencies skip cleanly |
 | `measure_deps.ps1` | installed footprint of base vs Clean Cutout stacks | uv `--target` into temp, then du |
 | `measure_ai_calls.ps1` | every AI / network call site in the source | static sweep |
 | `measure_package.ps1` | built PyInstaller dist size + file count | run after a build |

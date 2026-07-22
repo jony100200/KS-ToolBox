@@ -15,7 +15,7 @@ toolbox/           the framework — shell, discovery, theme, shared widgets & h
   engine_common.py   error-envelope, binary resolution, subprocess runner, extension sets
 tools/<name>/      one tool, end to end
   engine.py          PURE logic — headless, no customtkinter, returns the error envelope
-  panel.py           thin CustomTkinter UI — work on a worker thread, never blocks the loop
+  panel.py           thin CustomTkinter UI — work never blocks or mutates the Tk loop
   tool.py            TOOL metadata + build_panel (LAZILY imports the panel)
   __init__.py        TOOL = <Name>Tool()
   test_smoke.py      boots + produces valid output on a real sample
@@ -27,7 +27,8 @@ tools/<name>/      one tool, end to end
 1. **Engine ≠ UI.** All logic lives in `engine.py`, pure and headless — no
    CustomTkinter import, no global state. It returns the standard envelope
    `{error, error_type, retryable, degraded, details, data}`. The panel only
-   renders and calls the engine on a worker thread.
+   renders and submits durable work to the shell queue. Existing unmigrated
+   tools temporarily use the shared panel's compatibility worker.
 2. **Errors are values.** No `eval()`, no `except: pass`, no silent fallback. A
    fallback must announce itself (a status, a flag, a `degraded` envelope).
 3. **Batch/destructive = Preview + Confirm + Logging.** Every batch tool defaults
@@ -50,10 +51,10 @@ tools/<name>/      one tool, end to end
 ## Writing a file-batch tool the easy way
 
 Extend `toolbox.batch_panel.BaseBatchPanel` — it gives you the files card, the
-run/stop row, the output-folder picker, the results log, worker-thread lifecycle,
-and the stale-`.part` sweep for free. You implement only:
-`_build_options_card`, `_collect_options`, `_work`, `_write_manifest`, `_show`,
-`_done` (plus `_pre_run_check` for a confirm dialog). Use `self._build_output_row`
+run/pause/stop row, the output-folder picker, queue polling, the results log,
+and the stale-`.part` sweep for free. New tools implement `_build_submission`
+plus their tool-specific result formatting. The `_work` hook remains only for
+incremental migration of existing verified tools. Use `self._build_output_row`
 and `self._build_run_row` at the end of your options card, and
 `self._resolve_input_root()` for mirror mode. See `tools/image_rescale/` as the
 canonical example.

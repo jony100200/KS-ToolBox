@@ -17,6 +17,12 @@ tools/<name>/
 optional module is reported to stderr and skipped; it cannot prevent startup.
 Heavy dependencies must be imported inside panel construction or execution.
 
+The shell calls `build_panel(parent, services)`. `services` is an explicit
+`AppServices` instance containing the shared queue. A durable batch panel accepts
+`services.queue`; tools must not locate services through globals or widget-tree
+inspection. Unmigrated tools may ignore the argument while retaining their
+verified compatibility worker.
+
 ## Current metadata schema
 
 `ToolMeta` is the typed, code-native manifest:

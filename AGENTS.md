@@ -11,13 +11,13 @@ Cross-platform (Windows/Linux/macOS) CustomTkinter desktop app — **one UI shel
 ## Ownership
 
 - **This doc** owns: the plugin architecture, the tool template, the release/verification bar, and the app-local env decision.
-- **`toolbox/`** owns the shared framework — `tool.py` (contract), `theme.py`, `components.py`, `icons.py`, `shell.py`, `discovery.py`, `engine_common.py` (shared envelope helpers, binary resolution, subprocess runner), `batch_panel.py` (`BaseBatchPanel` — shared file picker, run/stop orchestration, results log for batch tools). Tools depend only on its public names.
+- **`toolbox/`** owns the shared framework — `tool.py` (contract), `application.py`/`job_queue.py` (shell-owned services and queue), `batch_core.py`/`sqlite_job_store.py` (durable execution and recovery), `queue_panel.py`, `theme.py`, `components.py`, `icons.py`, `shell.py`, `discovery.py`, `engine_common.py`, and `batch_panel.py`. Tools depend only on its public names.
 - **`tools/<name>/`** owns one tool end-to-end.
 
 ## Local Contracts
 
-- **One tool = one folder** under `tools/`, exposing a module-level `TOOL` (`ToolMeta` + `build_panel`). Discovery finds it; the shell never changes. (LEGO principle.)
-- **Engine ≠ UI** (three-layer Domain/Presentation, per the Unity rules' spirit): pure logic in `engine.py` — headless, no CustomTkinter import, no global state, returns the error-envelope `{error, error_type, retryable, degraded, details, data}`. Thin `panel.py` — CustomTkinter only, work runs on a worker thread, never blocks the UI loop.
+- **One tool = one folder** under `tools/`, exposing a module-level `TOOL` (`ToolMeta` + `build_panel(parent, services)`). Discovery finds it; the shell never changes. The explicit service context contains the shell-owned queue; do not replace it with a singleton or widget-tree lookup. (LEGO principle.)
+- **Engine ≠ UI** (three-layer Domain/Presentation, per the Unity rules' spirit): pure logic in `engine.py` — headless, no CustomTkinter import, no global state, returns the error-envelope `{error, error_type, retryable, degraded, details, data}`. Thin `panel.py` — CustomTkinter only; work never runs on the UI thread. Durable tools submit to the shell queue, while unmigrated panels temporarily use the compatibility worker.
 - Tools import **`toolbox`** (theme/components/contract) only — never another tool, never framework internals.
 - **Batch / destructive actions MUST have Preview + Confirm + Logging** (Unity rules §9): a dry-run preview, an explicit confirm before deleting originals, and a per-run log/manifest.
 - **No** `eval()`, **no** swallowed exceptions (`except: pass`), **no** silent fallback — a fallback must announce itself (status/flag). (CodingPrinciples #3, #12.)
@@ -38,7 +38,7 @@ tools/<name>/
 ```
 Add a tool = drop the folder; **no edits** to `toolbox/` or `main.py`.
 - Engine files import shared helpers from `toolbox.engine_common` (`ok`/`err` envelope, `resolve_tool`/`bundled_bin_dir`/`run_cmd` for subprocess tools, `VIDEO_EXTS`/`IMAGE_EXTS` constants) — never duplicate these.
-- Batch-tool panels extend `toolbox.batch_panel.BaseBatchPanel` (shared files card, run/stop row, output-folder picker, results log, worker-thread lifecycle) instead of duplicating that code. Subclasses set `FILE_EXTS`/`FILE_LABEL`/`FILES_ICON`/`RESULTS_ICON`/`RUN_LABEL` and keep only `_build_options_card`, `_collect_options`, `_work`, `_write_manifest`, `_show`, `_done` (plus `_pre_run_check` for a confirm dialog). Use `self._build_output_row(b, hint)` + `self._build_run_row(b)` at the end of the options card; use `self._resolve_input_root()` for mirror mode.
+- Batch-tool panels extend `toolbox.batch_panel.BaseBatchPanel` (shared files card, run/stop/pause row, output-folder picker, results log, and queue polling). New durable tools receive `services.queue`, implement `_build_submission`, and never start their own worker thread. The old `_work` hook remains only as a compatibility path while existing tools migrate individually. Use `self._build_output_row(b, hint)` + `self._build_run_row(b)` at the end of the options card; use `self._resolve_input_root()` for mirror mode.
 
 Extracting from RupayanFlow/ChobiEngine: keep the engine logic, drop the `runtime.py` job wrapper, write a thin panel, and **fix anti-patterns on the way in** (this session's verification found: VideoRescaler's bytes/str ffmpeg-detect bug, `eval()` on ffprobe output, `random` instead of `secrets` for passwords).
 

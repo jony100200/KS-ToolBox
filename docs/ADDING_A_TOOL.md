@@ -38,15 +38,19 @@ class ExampleTool:
         subtitle="One precise job",
     )
 
-    def build_panel(self, parent):
+    def build_panel(self, parent, services):
         from .panel import ExamplePanel
-        return ExamplePanel(parent)
+        return ExamplePanel(parent, queue_service=services.queue)
 
 TOOL = ExampleTool()
 ```
 
 The panel import remains inside `build_panel`; discovery must not import heavy
 or optional dependencies.
+
+New batch tools should implement `_build_submission()` and return a
+`QueueSubmission`; the shared panel submits it to `services.queue`. Keep the
+legacy `_work` loop only when migrating an already verified tool incrementally.
 
 ## Preset example
 
