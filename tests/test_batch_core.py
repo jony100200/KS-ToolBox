@@ -207,6 +207,33 @@ class BatchCoreTests(unittest.TestCase):
         changed = definition([metallic, roughness])
         self.assertNotEqual(first.job_id, changed.job_id)
 
+    def test_completed_warning_is_visible_and_revalidated_before_reuse(self) -> None:
+        job = self._job()
+        with SQLiteJobStore(self.db_path) as store:
+            first = BatchRunner(store).run(
+                job,
+                lambda path: path,
+                lambda path: (
+                    ItemOutcome.warning({"name": path.name}, "degraded output")
+                    if path.name == "one.dat"
+                    else ItemOutcome.completed({"name": path.name})
+                ),
+            )
+        self.assertEqual(first.state, JobState.COMPLETED_WITH_WARNINGS)
+        self.assertEqual(first.counts[ItemState.COMPLETED_WITH_WARNINGS.value], 1)
+
+        calls: list[str] = []
+        with SQLiteJobStore(self.db_path) as store:
+            rerun = BatchRunner(store).run(
+                job,
+                lambda path: calls.append(path.name) or path,
+                lambda path: ItemOutcome.completed({"name": path.name}),
+                validate_stored=lambda item: item.state is not ItemState.COMPLETED_WITH_WARNINGS,
+            )
+        self.assertEqual(calls, ["one.dat"])
+        self.assertTrue(rerun.recovered)
+        self.assertEqual(rerun.state, JobState.COMPLETED)
+
 
 if __name__ == "__main__":
     unittest.main()

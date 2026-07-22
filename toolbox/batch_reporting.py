@@ -49,7 +49,12 @@ def prepare_batch_completion(
     """Decode terminal items and write auditable outputs without hiding I/O failures."""
     finished_items = tuple(
         item for item in report.items
-        if item.state in {ItemState.COMPLETED, ItemState.SKIPPED, ItemState.QUARANTINED}
+        if item.state in {
+            ItemState.COMPLETED,
+            ItemState.COMPLETED_WITH_WARNINGS,
+            ItemState.SKIPPED,
+            ItemState.QUARANTINED,
+        }
     )
     results = tuple(result_from_record(item) for item in finished_items)
     warnings: list[str] = []

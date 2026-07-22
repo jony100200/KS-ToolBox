@@ -19,6 +19,11 @@ validated JobDefinition
 Tool engines remain responsible for safe output planning, temporary files,
 atomic commit, and format validation.
 
+Classification distinguishes clean completion, usable completion with warnings,
+skip, and failure. A warning preserves the degraded artifact, makes the job
+state visibly warning-bearing, and requires the same stored validation as a
+clean completion before future reuse. Retry exhaustion remains quarantine.
+
 ## Typed multi-step contract gate
 
 A reusable `WorkflowStep` contract will be added when a migrated tool needs

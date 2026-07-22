@@ -24,15 +24,17 @@ open matching job
 → execute pending items only
 ```
 
-A completed matching job revalidates stored completed artifacts. When every
-artifact remains valid, it returns `reused=true` with zero executor calls. A
-missing or invalid artifact is reset and only that item is recomputed.
+A completed matching job revalidates stored completed and completed-with-warning
+artifacts. When every artifact remains valid, it returns `reused=true` with zero
+executor calls. A missing or invalid artifact is reset and only that item is
+recomputed.
 
 ## Failure boundaries
 
 | Failure | Current behavior |
 |---|---|
 | malformed input | item becomes logical quarantine; later items continue |
+| degraded but useful output | item and job complete with visible warnings; artifact remains validated/reusable |
 | retryable item result | only that item retries, up to declared maximum |
 | unexpected item exception | visible non-retryable quarantine record |
 | progress subscriber exception | work continues; report diagnostic records it |

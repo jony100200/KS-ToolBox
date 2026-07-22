@@ -34,6 +34,7 @@ class ItemState(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
+    COMPLETED_WITH_WARNINGS = "completed_with_warnings"
     SKIPPED = "skipped"
     FAILED = "failed"
     QUARANTINED = "quarantined"
@@ -136,7 +137,13 @@ class ItemOutcome:
     def __post_init__(self) -> None:
         # QUARANTINED is produced by the runner after a failure exhausts its
         # retry policy; accepting it here keeps the persisted outcome typed.
-        allowed = {ItemState.COMPLETED, ItemState.SKIPPED, ItemState.FAILED, ItemState.QUARANTINED}
+        allowed = {
+            ItemState.COMPLETED,
+            ItemState.COMPLETED_WITH_WARNINGS,
+            ItemState.SKIPPED,
+            ItemState.FAILED,
+            ItemState.QUARANTINED,
+        }
         if self.state not in allowed:
             raise ValueError(f"executor outcome cannot be {self.state.value}")
         if self.data is not None:
@@ -145,6 +152,10 @@ class ItemOutcome:
     @classmethod
     def completed(cls, data: Mapping[str, Any] | None = None, details: str = "") -> "ItemOutcome":
         return cls(ItemState.COMPLETED, details=details, data=data)
+
+    @classmethod
+    def warning(cls, data: Mapping[str, Any] | None = None, details: str = "") -> "ItemOutcome":
+        return cls(ItemState.COMPLETED_WITH_WARNINGS, details=details, data=data)
 
     @classmethod
     def skipped(cls, data: Mapping[str, Any] | None = None, details: str = "") -> "ItemOutcome":
@@ -319,7 +330,7 @@ class BatchRunner:
             stored = self._store.build_report(definition.job_id)
             invalid: list[int] = []
             for item in stored.items:
-                if item.state is not ItemState.COMPLETED:
+                if item.state not in {ItemState.COMPLETED, ItemState.COMPLETED_WITH_WARNINGS}:
                     continue
                 if validate_stored is None:
                     invalid.append(item.position)
@@ -412,9 +423,10 @@ class BatchRunner:
 
         report = self._store.build_report(definition.job_id)
         quarantined = report.counts[ItemState.QUARANTINED.value]
+        warned = report.counts[ItemState.COMPLETED_WITH_WARNINGS.value]
         if report.items and quarantined == len(report.items):
             final_state = JobState.FAILED
-        elif quarantined:
+        elif quarantined or warned:
             final_state = JobState.COMPLETED_WITH_WARNINGS
         else:
             final_state = JobState.COMPLETED

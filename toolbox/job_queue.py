@@ -202,7 +202,9 @@ class JobQueue:
                         JobState.FAILED, JobState.CANCELLED,
                     } else JobState.RECOVERED),
                     completed_items=sum(
-                        item.state.value in {"completed", "skipped", "quarantined"}
+                        item.state.value in {
+                            "completed", "completed_with_warnings", "skipped", "quarantined"
+                        }
                         for item in report.items
                     ),
                     total_items=len(report.items),
@@ -323,7 +325,9 @@ class JobQueue:
                 job_id,
                 state=final_state,
                 completed_items=sum(
-                    item.state.value in {"completed", "skipped", "quarantined"}
+                    item.state.value in {
+                        "completed", "completed_with_warnings", "skipped", "quarantined"
+                    }
                     for item in report.items
                 ),
                 total_items=len(report.items),

@@ -29,6 +29,7 @@ owned-process adapter and can stop FFmpeg, ffprobe, VMAF, or HandBrake mid-item.
 
 ```text
 Pending → Running → Completed
+                  → CompletedWithWarnings
                   → Skipped
                   → retry same item only
                   → Quarantined after retry exhaustion
@@ -37,6 +38,11 @@ Pending → Running → Completed
 Quarantine is currently logical: the source is not moved or deleted. The report
 and database identify the unresolved item. Physical quarantine requires an
 explicit, user-approved file policy and is not implied by the runner.
+
+`CompletedWithWarnings` preserves a useful degraded artifact while making its
+uncertainty visible at both item and job level. It is distinct from quarantine:
+the output may be used, but it is revalidated before reuse like a clean
+completion.
 
 ## SQLite schema
 
