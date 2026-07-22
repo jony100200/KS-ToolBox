@@ -20,6 +20,7 @@ from toolbox.icons import Icons
 from toolbox.engine_common import sweep_part_files
 
 if TYPE_CHECKING:
+    from toolbox.batch_reporting import BatchCompletionArtifacts
     from toolbox.job_queue import JobQueue, QueueSubmission
 
 
@@ -40,6 +41,7 @@ class BaseBatchPanel(ctk.CTkFrame):
         super().__init__(parent, fg_color=t.BG_COLOR)
         self._queue_service = queue_service
         self._active_job_id: str | None = None
+        self._queue_shown: set[int] = set()
         self._files: list[Path] = []
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
@@ -160,6 +162,7 @@ class BaseBatchPanel(ctk.CTkFrame):
         files = list(self._files)
         if self._queue_service is not None:
             try:
+                self._queue_shown.clear()
                 submission = self._build_submission(files, opts)
                 self._active_job_id = self._queue_service.submit(submission)
             except Exception as ex:  # noqa: BLE001 - visible queue submission failure
@@ -246,6 +249,33 @@ class BaseBatchPanel(ctk.CTkFrame):
             self._status.set_state("QUEUED", "waiting")
         elif snapshot.state.value == "cancelling":
             self._status.set_state("STOPPING", "waiting")
+        item = snapshot.last_item
+        if item is not None and item.position not in self._queue_shown:
+            self._queue_shown.add(item.position)
+            self._show(self._result_from_record(item), snapshot.completed_items, snapshot.total_items)
+
+    def _consume_queue_completion(self, completion) -> "BatchCompletionArtifacts | None":
+        from toolbox.batch_reporting import BatchCompletionArtifacts
+
+        payload = completion.value
+        if not isinstance(payload, BatchCompletionArtifacts):
+            self._batch_failed(completion.error or "completion payload missing")
+            return None
+        for item, result in zip(payload.finished_items, payload.results):
+            if item.position not in self._queue_shown:
+                self._show(result, item.position + 1, len(completion.report.items))
+        for warning in completion.warnings:
+            self._logline(warning, t.STATE["error"][1])
+        return payload
+
+    @staticmethod
+    def _queue_completion_state(completion):
+        from toolbox.batch_core import JobState
+
+        state = completion.report.state
+        if completion.warnings and state is JobState.COMPLETED:
+            return JobState.COMPLETED_WITH_WARNINGS
+        return state
 
     def _queue_complete(self, completion) -> None:
         raise NotImplementedError
@@ -281,4 +311,13 @@ class BaseBatchPanel(ctk.CTkFrame):
         raise NotImplementedError
 
     def _write_manifest(self, opts, results: list) -> str | None:
+        raise NotImplementedError
+
+    def _result_from_record(self, item):
+        raise NotImplementedError
+
+    def _show(self, result, position: int, total: int):
+        raise NotImplementedError
+
+    def _batch_failed(self, details: str):
         raise NotImplementedError

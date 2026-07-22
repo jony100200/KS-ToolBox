@@ -53,7 +53,8 @@ tools/<name>/      one tool, end to end
 Extend `toolbox.batch_panel.BaseBatchPanel` — it gives you the files card, the
 run/pause/stop row, the output-folder picker, queue polling, the results log,
 and the stale-`.part` sweep for free. New tools implement `_build_submission`
-plus their tool-specific result formatting. The `_work` hook remains only for
+plus their tool-specific result formatting, and reuse
+`batch_reporting.prepare_batch_completion` for reports. The `_work` hook remains only for
 incremental migration of existing verified tools. Use `self._build_output_row`
 and `self._build_run_row` at the end of your options card, and
 `self._resolve_input_root()` for mirror mode. See `tools/image_rescale/` as the

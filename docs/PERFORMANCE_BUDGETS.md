@@ -7,7 +7,7 @@ They are evidence for this revision, not universal hardware guarantees.
 
 | Metric | Measured | Command |
 |---|---:|---|
-| Ready-to-mainloop, measured range; latest 122 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
+| Ready-to-mainloop, measured range; latest 127 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
 | Discovery + shell import; latest 29 ms | 21–31 ms | same |
 | Optional AI/numeric modules at startup | none | same |
 | Python source after this slice | 104 files / 13,054 lines | bounded repository scan |

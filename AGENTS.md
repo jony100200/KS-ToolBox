@@ -11,7 +11,7 @@ Cross-platform (Windows/Linux/macOS) CustomTkinter desktop app — **one UI shel
 ## Ownership
 
 - **This doc** owns: the plugin architecture, the tool template, the release/verification bar, and the app-local env decision.
-- **`toolbox/`** owns the shared framework — `tool.py` (contract), `application.py`/`job_queue.py` (shell-owned services and queue), `batch_core.py`/`sqlite_job_store.py` (durable execution and recovery), `queue_panel.py`, `theme.py`, `components.py`, `icons.py`, `shell.py`, `discovery.py`, `engine_common.py`, and `batch_panel.py`. Tools depend only on its public names.
+- **`toolbox/`** owns the shared framework — `tool.py` (contract), `application.py`/`job_queue.py` (shell-owned services and queue), `batch_core.py`/`sqlite_job_store.py` (durable execution and recovery), `batch_reporting.py` (typed completion/report finalization), `queue_panel.py`, `theme.py`, `components.py`, `icons.py`, `shell.py`, `discovery.py`, `engine_common.py`, and `batch_panel.py`. Tools depend only on its public names.
 - **`tools/<name>/`** owns one tool end-to-end.
 
 ## Local Contracts
@@ -38,7 +38,7 @@ tools/<name>/
 ```
 Add a tool = drop the folder; **no edits** to `toolbox/` or `main.py`.
 - Engine files import shared helpers from `toolbox.engine_common` (`ok`/`err` envelope, `resolve_tool`/`bundled_bin_dir`/`run_cmd` for subprocess tools, `VIDEO_EXTS`/`IMAGE_EXTS` constants) — never duplicate these.
-- Batch-tool panels extend `toolbox.batch_panel.BaseBatchPanel` (shared files card, run/stop/pause row, output-folder picker, results log, and queue polling). New durable tools receive `services.queue`, implement `_build_submission`, and never start their own worker thread. The old `_work` hook remains only as a compatibility path while existing tools migrate individually. Use `self._build_output_row(b, hint)` + `self._build_run_row(b)` at the end of the options card; use `self._resolve_input_root()` for mirror mode.
+- Batch-tool panels extend `toolbox.batch_panel.BaseBatchPanel` (shared files card, run/stop/pause row, output-folder picker, results log, queue polling, and terminal-item display). New durable tools receive `services.queue`, implement `_build_submission`, use `toolbox.batch_reporting.prepare_batch_completion` for manifest/report finalization, and never start their own worker thread. The old `_work` hook remains only as a compatibility path while existing tools migrate individually. Use `self._build_output_row(b, hint)` + `self._build_run_row(b)` at the end of the options card; use `self._resolve_input_root()` for mirror mode.
 
 Extracting from RupayanFlow/ChobiEngine: keep the engine logic, drop the `runtime.py` job wrapper, write a thin panel, and **fix anti-patterns on the way in** (this session's verification found: VideoRescaler's bytes/str ffmpeg-detect bug, `eval()` on ffprobe output, `random` instead of `secrets` for passwords).
 

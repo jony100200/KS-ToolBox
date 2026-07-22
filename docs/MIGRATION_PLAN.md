@@ -43,6 +43,15 @@ Tk widgets poll immutable snapshots on the main thread; queue workers never
 touch Tk. `BaseBatchPanel` retains its old worker only as a migration adapter.
 Icon Normalizer is the third migrated slice and adds deterministic square-RGBA
 artifact validation before a stored output is reused.
+The third slice also justified one shared `batch_reporting` primitive: all three
+panels now reuse typed completion artifacts and BaseBatchPanel's item-display
+flow rather than maintaining duplicate finalization loops.
+
+Measured production source for the three panels plus `BaseBatchPanel` was 995
+lines before extraction and is 974 lines including the new shared module after
+extraction (−21 lines). Two focused unit tests were added. Ready-to-mainloop was
+121 ms before and 127 ms after, within the existing 99–197 ms measured range;
+no dependency, process, model, RAM/VRAM, or output-algorithm change was added.
 
 ### Slice 4 — next: resource profiles and dependencies
 

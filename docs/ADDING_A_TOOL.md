@@ -51,6 +51,8 @@ or optional dependencies.
 New batch tools should implement `_build_submission()` and return a
 `QueueSubmission`; the shared panel submits it to `services.queue`. Keep the
 legacy `_work` loop only when migrating an already verified tool incrementally.
+Use `prepare_batch_completion()` for terminal-record decoding, manifest errors,
+and the atomic JSON report instead of copying finalization code into the panel.
 
 ## Preset example
 

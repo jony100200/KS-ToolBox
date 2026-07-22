@@ -15,18 +15,14 @@ from toolbox.batch_panel import BaseBatchPanel
 from toolbox.batch_core import (
     ItemOutcome,
     ItemRecord,
-    ItemState,
     JobDefinition,
     JobState,
-    write_completion_report,
 )
-from toolbox.job_queue import (
-    QueueCompletion,
-    QueueFinalization,
-    QueueSnapshot,
-    QueueSubmission,
+from toolbox.batch_reporting import (
+    completion_report_path,
+    prepare_batch_completion,
 )
-from toolbox.sqlite_job_store import default_report_dir
+from toolbox.job_queue import QueueCompletion, QueueFinalization, QueueSubmission
 from . import engine as e
 
 
@@ -129,8 +125,6 @@ class VideoCompressorPanel(BaseBatchPanel):
             settings=asdict(opts),
             max_retries=1,
         )
-        self._queue_shown: set[int] = set()
-
         def classify(res: e.Result) -> ItemOutcome:
             data = res.to_dict()
             if res.action == "compressed":
@@ -152,68 +146,33 @@ class VideoCompressorPanel(BaseBatchPanel):
         )
 
     def _prepare_completion(self, report, opts: e.ProcessOptions) -> QueueFinalization:
-        finished_items = [
-            item for item in report.items
-            if item.state in {ItemState.COMPLETED, ItemState.SKIPPED, ItemState.QUARANTINED}
-        ]
-        results = [self._result_from_record(item) for item in finished_items]
-        errors: list[str] = []
-        manifest = None
-        if not report.reused:
-            try:
-                manifest = self._write_manifest(opts, results)
-            except OSError as ex:
-                errors.append(f"manifest write failed: {ex}")
-        report_root = default_report_dir()
-        if opts.out_root and not opts.dry_run:
-            report_root = Path(opts.out_root) / "ks_reports"
-        report_path = report_root / f"video_compressor_{report.job_id}.json"
-        try:
-            write_completion_report(report, report_path)
-        except OSError as ex:
-            errors.append(f"completion report write failed: {ex}")
-            report_path = None
-        payload = {
-            "finished_items": finished_items,
-            "results": results,
-            "manifest": manifest,
-            "report_path": str(report_path) if report_path else None,
-        }
-        return QueueFinalization(payload, tuple(errors))
-
-    def _on_queue_snapshot(self, snapshot: QueueSnapshot) -> None:
-        super()._on_queue_snapshot(snapshot)
-        item = snapshot.last_item
-        if item is not None and item.position not in self._queue_shown:
-            self._queue_shown.add(item.position)
-            self._show(self._result_from_record(item), snapshot.completed_items, snapshot.total_items)
+        return prepare_batch_completion(
+            report,
+            result_from_record=self._result_from_record,
+            write_manifest=lambda results: self._write_manifest(opts, results),
+            report_path=completion_report_path(
+                "video_compressor", report.job_id,
+                out_root=opts.out_root, dry_run=opts.dry_run,
+            ),
+        )
 
     def _queue_complete(self, completion: QueueCompletion) -> None:
         report = completion.report
-        payload = completion.value
-        if not isinstance(payload, dict):
-            self._batch_failed(completion.error or "completion payload missing")
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
             return
-        finished_items = payload["finished_items"]
-        results = payload["results"]
-        for item, result in zip(finished_items, results):
-            if item.position not in self._queue_shown:
-                self._show(result, item.position + 1, len(report.items))
-        for error in completion.warnings:
-            self._logline(error, t.STATE["error"][1])
+        results = payload.results
         compressed = sum(result.action == "compressed" for result in results)
         skipped = sum(result.action in ("skipped", "dry-run") for result in results)
         failed = len(results) - compressed - skipped
-        remaining = len(report.items) - len(finished_items)
+        remaining = len(report.items) - len(payload.finished_items)
         saved_total = sum(
             result.before_mb - result.after_mb for result in results if result.action == "compressed"
         )
-        state = report.state
-        if completion.warnings and state is JobState.COMPLETED:
-            state = JobState.COMPLETED_WITH_WARNINGS
         self._done(
-            compressed, skipped, failed, remaining, saved_total, payload["manifest"],
-            payload["report_path"], state, report.recovered, report.reused,
+            compressed, skipped, failed, remaining, saved_total, payload.manifest,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
         )
 
     @staticmethod

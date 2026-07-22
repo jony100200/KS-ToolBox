@@ -85,9 +85,11 @@ a malformed-file quarantine.
 - tool result data;
 - subscriber diagnostics.
 
-Finalizers may return `QueueFinalization` with non-fatal warnings. The queue
-then records `CompletedWithWarnings`, exposes the warning text in history, and
-keeps the successful item report and output payload available to the panel.
+`prepare_batch_completion()` decodes terminal item records once, writes a
+tool-owned manifest plus the atomic JSON report, and returns typed
+`BatchCompletionArtifacts`. Non-fatal I/O problems become `QueueFinalization`
+warnings. The queue then records `CompletedWithWarnings`, exposes the warning
+text in history, and keeps successful item results available to the panel.
 
 ## Scope still required
 
