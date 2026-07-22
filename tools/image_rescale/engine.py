@@ -183,3 +183,23 @@ def process(path: str | Path, opts: ResizeOptions) -> Result:
 
     return Result(str(src), "resized", f"{before} -> {after}", before=before, after=after,
                   out_path=str(dst), detail=opts.mode)
+
+
+def validate_result(result: Result) -> bool:
+    """Deterministically verify a stored completed result before reusing it."""
+    if result.action != "resized" or not result.out_path:
+        return result.action in {"skipped", "dry-run"}
+    path = Path(result.out_path)
+    if not path.is_file() or path.stat().st_size <= 0:
+        return False
+    try:
+        expected = tuple(int(value) for value in result.after.lower().split("x", 1))
+        if len(expected) != 2:
+            return False
+        from PIL import Image
+        with Image.open(path) as image:
+            actual = image.size
+            image.verify()
+        return actual == expected
+    except (ImportError, OSError, ValueError):
+        return False

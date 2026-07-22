@@ -15,7 +15,7 @@ class AudioTool:
         subtitle="Batch convert, trim, fade & normalize audio",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: keeps discovery/the sidebar working before the panel loads.
         from .panel import AudioToolPanel
         return AudioToolPanel(parent)

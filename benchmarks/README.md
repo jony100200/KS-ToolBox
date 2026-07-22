@@ -12,11 +12,12 @@ touches the app venv).
 |---|---|---|
 | `measure_repo.ps1` | file count, LOC, source/asset/bin sizes | pure filesystem |
 | `measure_startup.py` | import + discovery time, models-at-startup | headless (no window) |
+| `measure_batch_core.py` | durable item transitions, checkpoint size, completed-job reuse | 1,000 no-op local items |
 | `measure_deps.ps1` | installed footprint of base vs Clean Cutout stacks | uv `--target` into temp, then du |
 | `measure_ai_calls.ps1` | every AI / network call site in the source | static sweep |
 | `measure_package.ps1` | built PyInstaller dist size + file count | run after a build |
 
-## Baseline (2026-07-22)
+## Original baseline (2026-07-22)
 
 | Metric | Value |
 |---|---|
@@ -28,3 +29,7 @@ touches the app venv).
 | AI call sites | 1 (specialist ONNX, `clean_cutout`) |
 | Network call sites | 0 |
 | Models loaded at startup | 0 |
+
+The original table predates the 17-tool audit and durable batch-core slice. Use
+`docs/PERFORMANCE_BUDGETS.md` for current measured ranges and rerun the scripts
+before making an optimization claim.

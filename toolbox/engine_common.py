@@ -6,9 +6,12 @@ instead of defining its own copies. Pure refactor, zero behavior change.
 from __future__ import annotations
 
 import os
+import signal
 import shutil
 import subprocess
 import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +78,87 @@ def run_cmd(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedP
     No console window flashes on Windows."""
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           creationflags=(0x08000000 if os.name == "nt" else 0))
+
+
+class CommandCancelled(subprocess.SubprocessError):
+    """Raised after an owned external process is stopped by user cancellation."""
+
+    def __init__(self, cmd: list[str]) -> None:
+        super().__init__(f"command cancelled: {Path(cmd[0]).name}")
+        self.cmd = cmd
+
+
+def run_cancellable_cmd(
+    cmd: list[str],
+    *,
+    timeout: int | None = None,
+    cancelled: Callable[[], bool] | None = None,
+    poll_seconds: float = 0.1,
+) -> subprocess.CompletedProcess:
+    """Run one owned process with captured output and cooperative cancellation.
+
+    This is separate from ``run_cmd`` so existing tools retain their proven
+    subprocess path until explicitly migrated. No shell is involved.
+    """
+    if not cmd:
+        raise ValueError("cmd cannot be empty")
+    if poll_seconds <= 0:
+        raise ValueError("poll_seconds must be positive")
+    started = time.monotonic()
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=(0x08000000 if os.name == "nt" else 0),
+        start_new_session=(os.name != "nt"),
+    )
+    while True:
+        if cancelled is not None and cancelled():
+            _stop_owned_process(process)
+            raise CommandCancelled(cmd)
+        if timeout is not None:
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                stdout, stderr = _stop_owned_process(process)
+                raise subprocess.TimeoutExpired(cmd, timeout, output=stdout, stderr=stderr)
+            wait_for = min(poll_seconds, remaining)
+        else:
+            wait_for = poll_seconds
+        try:
+            stdout, stderr = process.communicate(timeout=wait_for)
+            return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _stop_owned_process(process: subprocess.Popen) -> tuple[str, str]:
+    """Stop the exact process tree started by ``run_cancellable_cmd``."""
+    if process.poll() is None:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=0x08000000,
+                check=False,
+            )
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+    try:
+        return process.communicate(timeout=2.0)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
+        return process.communicate()
 
 
 # --- crash cleanup ------------------------------------------------------------

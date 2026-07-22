@@ -15,7 +15,7 @@ class TilesetCheckerTool:
         subtitle="Score & preview how seamlessly textures tile",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: the panel/engine pull numpy + Pillow. Keeping them out of
         # module import means discovery/the sidebar work before they're installed.
         from .panel import TilesetCheckerPanel

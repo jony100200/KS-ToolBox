@@ -37,6 +37,10 @@ class Icons:
     ARROW   = ""
     CIRCLE  = ""
     WARN    = ""
+    QUEUE   = ""
+    PAUSE   = ""
+    CLOCK   = ""
+    ROTATE  = ""
 
 
 def get_icon_font(size: int = 14) -> ctk.CTkFont:

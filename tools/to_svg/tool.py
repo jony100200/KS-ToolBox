@@ -15,7 +15,7 @@ class ToSvgTool:
         subtitle="Vectorize raster images to SVG (batch)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: the panel/engine pull vtracer at run time. Keeping it out
         # of module import means discovery/the sidebar work even before vtracer
         # is installed — the missing dep is reported when the tool is used.

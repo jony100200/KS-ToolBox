@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 
 from toolbox.engine_common import (
     VIDEO_EXTS, ok as _ok, err as _err,
     resolve_tool as _tool, run_cmd as _run, tools_status as _tools_status_raw,
+    run_cancellable_cmd as _run_cancellable, CommandCancelled,
 )
 
 # Codecs that are already modern/efficient. If a file already uses one of these
@@ -64,7 +66,7 @@ class VideoInfo:
         return self.size_bytes / 1_000_000
 
 
-def probe(path: str | Path) -> dict:
+def probe(path: str | Path, cancelled: Callable[[], bool] | None = None) -> dict:
     """ffprobe a file into a VideoInfo. Returns the standard envelope."""
     p = Path(path)
     if not p.is_file():
@@ -76,7 +78,7 @@ def probe(path: str | Path) -> dict:
            "-show_entries", "format=duration,size,bit_rate:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate",
            str(p)]
     try:
-        r = _run(cmd, timeout=60)
+        r = _run_cancellable(cmd, timeout=60, cancelled=cancelled)
     except subprocess.TimeoutExpired:
         return _err("probe.timeout", f"ffprobe timed out on {p.name}", retryable=True)
     if r.returncode != 0:
@@ -195,7 +197,8 @@ def _estimate_saving(info: VideoInfo, thresh: float, is_efficient_codec: bool) -
 # ---------------------------------------------------------------------------
 
 def compress(src: str | Path, dst: str | Path, *, crf: int = 20,
-             encoder: str = "x265", timeout: int | None = None) -> dict:
+             encoder: str = "x265", timeout: int | None = None,
+             cancelled: Callable[[], bool] | None = None) -> dict:
     """Encode src -> dst. Prefers HandBrakeCLI; falls back to ffmpeg. Envelope out.
 
     encoder: 'x265' (software HEVC, best quality/size) or 'nvenc_hevc' (GPU, fast).
@@ -222,7 +225,10 @@ def compress(src: str | Path, dst: str | Path, *, crf: int = 20,
         tool_used = "ffmpeg"
 
     try:
-        r = _run(cmd, timeout=timeout)
+        r = _run_cancellable(cmd, timeout=timeout, cancelled=cancelled)
+    except CommandCancelled:
+        tmp.unlink(missing_ok=True)
+        raise
     except subprocess.TimeoutExpired:
         tmp.unlink(missing_ok=True)
         return _err("encode.timeout", f"{tool_used} timed out on {src.name}", retryable=True)
@@ -259,7 +265,8 @@ def _ffmpeg_cmd(ff: str, src: Path, dst: Path, crf: int, encoder: str) -> list[s
 # ---------------------------------------------------------------------------
 
 def measure_vmaf(reference: str | Path, distorted: str | Path,
-                 fps: float | None = None, timeout: int | None = None) -> dict:
+                 fps: float | None = None, timeout: int | None = None,
+                 cancelled: Callable[[], bool] | None = None) -> dict:
     """Mean VMAF of distorted vs reference (0-100). Degrades to None if libvmaf
     isn't available — caller must treat a missing score as "unproven".
 
@@ -278,7 +285,7 @@ def measure_vmaf(reference: str | Path, distorted: str | Path,
              f"[d][r]libvmaf=n_threads=6")
     cmd = [ff, "-i", str(distorted), "-i", str(reference), "-lavfi", lavfi, "-f", "null", "-"]
     try:
-        r = _run(cmd, timeout=timeout)
+        r = _run_cancellable(cmd, timeout=timeout, cancelled=cancelled)
     except subprocess.TimeoutExpired:
         return _ok(None, degraded=True, details="VMAF timed out")
     text = (r.stderr or "") + (r.stdout or "")
@@ -346,10 +353,11 @@ class Result:
         return asdict(self)
 
 
-def process(path: str | Path, opts: ProcessOptions) -> Result:
+def process(path: str | Path, opts: ProcessOptions,
+            cancelled: Callable[[], bool] | None = None) -> Result:
     """probe -> assess -> (compress -> verify -> [delete]) for one file."""
     src = Path(path)
-    pr = probe(src)
+    pr = probe(src, cancelled=cancelled)
     if pr["error"]:
         return Result(str(src), "failed", pr["details"], detail=pr["error_type"])
     info: VideoInfo = pr["data"]
@@ -367,36 +375,62 @@ def process(path: str | Path, opts: ProcessOptions) -> Result:
 
     # Resumable: a finished output means this file is already done.
     if opts.skip_existing and dst.is_file() and dst.stat().st_size > 0:
+        existing = probe(dst, cancelled=cancelled)
+        if existing["error"]:
+            return Result(str(src), "failed",
+                          f"existing output is invalid: {existing['details']}",
+                          before_mb=round(info.megabytes, 1), out_path=str(dst),
+                          detail="output.invalid")
+        existing_info: VideoInfo = existing["data"]
+        duration_tolerance = max(0.5, 2.0 / info.fps) if info.fps > 0 else 0.5
+        if ((existing_info.width, existing_info.height) != (info.width, info.height)
+                or abs(existing_info.duration_s - info.duration_s) > duration_tolerance):
+            return Result(str(src), "failed",
+                          "existing output does not match source geometry/duration",
+                          before_mb=round(info.megabytes, 1), out_path=str(dst),
+                          detail="output.mismatch")
         return Result(str(src), "skipped", "already compressed (output exists)",
                       before_mb=round(info.megabytes, 1), after_mb=round(dst.stat().st_size / 1e6, 1),
                       out_path=str(dst), detail="resumable")
 
-    enc = compress(src, dst, crf=decision.target_crf, encoder=opts.policy.encoder)
+    # The final path must never become visible before quality validation. A
+    # crash/cancel during VMAF leaves only this disposable candidate.
+    candidate = dst.with_name(f"{dst.stem}.verify{dst.suffix}")
+    candidate.unlink(missing_ok=True)
+    enc = compress(src, candidate, crf=decision.target_crf,
+                   encoder=opts.policy.encoder, cancelled=cancelled)
     if enc["error"]:
         return Result(str(src), "failed", enc["details"], before_mb=round(info.megabytes, 1),
                       detail=enc["error_type"])
 
-    after = dst.stat().st_size
+    after = candidate.stat().st_size
     saved = 1.0 - (after / info.size_bytes) if info.size_bytes else 0.0
 
     # Quality gate — measure before trusting (sync to source fps).
-    vm = measure_vmaf(src, dst, fps=info.fps)
+    try:
+        vm = measure_vmaf(src, candidate, fps=info.fps, cancelled=cancelled)
+    except Exception:
+        candidate.unlink(missing_ok=True)
+        raise
     vmaf = vm["data"]
 
     # Reject a bad encode: bigger than source, or measurably below the VMAF floor.
     if after >= info.size_bytes:
-        dst.unlink(missing_ok=True)
+        candidate.unlink(missing_ok=True)
         return Result(str(src), "skipped", "re-encode was not smaller — kept original",
                       before_mb=round(info.megabytes, 1), after_mb=round(after / 1e6, 1),
                       vmaf=vmaf, detail="no-gain")
     if vmaf is not None and vmaf < opts.vmaf_floor:
-        dst.unlink(missing_ok=True)
+        candidate.unlink(missing_ok=True)
         return Result(str(src), "skipped", f"VMAF {vmaf:.1f} < {opts.vmaf_floor:.0f} floor — "
                       f"would lose quality, kept original", before_mb=round(info.megabytes, 1),
                       vmaf=vmaf, detail="quality-floor")
 
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    candidate.replace(dst)
+
     removed = False
-    if opts.delete_original:
+    if opts.delete_original and vmaf is not None and vmaf >= opts.vmaf_floor:
         removed = _safe_remove(src)
 
     return Result(
@@ -407,6 +441,20 @@ def process(path: str | Path, opts: ProcessOptions) -> Result:
         detail=("original removed" if removed else "original kept") +
                ("" if vmaf is not None else " (VMAF unproven)"),
     )
+
+
+def validate_result(result: Result) -> bool:
+    """Verify a stored completed video before the batch core reuses it."""
+    if result.action != "compressed" or not result.out_path:
+        return result.action in {"skipped", "dry-run"}
+    output = Path(result.out_path)
+    if not output.is_file() or output.stat().st_size <= 0:
+        return False
+    inspected = probe(output)
+    if inspected["error"]:
+        return False
+    info: VideoInfo = inspected["data"]
+    return info.width > 0 and info.height > 0 and info.duration_s > 0
 
 
 def _safe_remove(path: Path) -> bool:

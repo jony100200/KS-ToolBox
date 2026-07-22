@@ -15,7 +15,7 @@ class IconNormalizerTool:
         subtitle="Trim, square-pad and resize icons/sprites (batch)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: the panel pulls Pillow. Keeping it out of module import
         # means discovery/the sidebar work even before Pillow is installed.
         from .panel import IconNormalizerPanel

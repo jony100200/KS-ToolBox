@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/KSToolBox.png" width="128" alt="KS ToolBox">
+  <img src="assets/KS_ToolBox_GitHub_Banner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
 </p>
-
-<h1 align="center">KS ToolBox</h1>
 
 <p align="center"><b>One window, 17 daily batch tools.</b><br>
 A fast, portable, cross-platform desktop app that brings a suite of practical

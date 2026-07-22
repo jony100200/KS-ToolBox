@@ -15,7 +15,7 @@ class FormatConverterTool:
         subtitle="Convert images, audio/video and documents (batch)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: the panel/engine pull Pillow (and optional doc libs).
         # Discovery/the sidebar work without them; missing deps announce per-file.
         from .panel import FormatConverterPanel

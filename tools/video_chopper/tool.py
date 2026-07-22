@@ -5,7 +5,6 @@ import customtkinter as ctk
 
 from toolbox.tool import ToolMeta
 from toolbox.icons import Icons
-from .panel import VideoChopperPanel
 
 
 class VideoChopperTool:
@@ -16,5 +15,6 @@ class VideoChopperTool:
         subtitle="Split a video into clips at black-frame gaps",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
+        from .panel import VideoChopperPanel
         return VideoChopperPanel(parent)

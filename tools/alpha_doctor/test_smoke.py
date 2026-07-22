@@ -15,12 +15,12 @@ import importlib.util
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-import numpy as np  # noqa: E402
-
-from tools.alpha_doctor import engine as e  # noqa: E402
+np: Any = None
+e: Any = None
 
 
 def test_pure() -> None:
@@ -82,6 +82,15 @@ def test_ai_optional() -> None:
 
 
 def main() -> int:
+    global np, e
+    if importlib.util.find_spec("numpy") is None:
+        print("SKIP: numpy not installed — alpha_doctor tests skipped.")
+        return 0
+    import numpy as _np
+    from tools.alpha_doctor import engine as _engine
+
+    np = _np
+    e = _engine
     test_pure()
     test_deterministic_pipeline()
     test_ai_optional()

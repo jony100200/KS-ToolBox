@@ -53,9 +53,72 @@ def test_full_pipeline() -> None:
     print(f"PASS: image_rescale full pipeline — {res.before} -> {res.after}.")
 
 
+def test_durable_batch() -> None:
+    if importlib.util.find_spec("PIL") is None:
+        print("SKIP: Pillow not installed — durable-batch leg skipped.")
+        return
+    from PIL import Image
+    from toolbox.batch_core import BatchRunner, ItemOutcome, ItemState, JobDefinition, JobState
+    from toolbox.sqlite_job_store import SQLiteJobStore
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        good_a, bad, good_b = tmp / "a.png", tmp / "bad.png", tmp / "b.png"
+        Image.new("RGB", (64, 32), (10, 20, 30)).save(good_a)
+        bad.write_bytes(b"not an image")
+        Image.new("RGB", (32, 64), (30, 20, 10)).save(good_b)
+        opts = e.ResizeOptions(out_root=tmp / "out", mode="longest_side",
+                               longest_side=16, dry_run=False)
+        job = JobDefinition.create(
+            tool_id="image_rescale",
+            tool_version="1",
+            workflow_version="resize.v1",
+            inputs=[good_a, bad, good_b],
+            settings={"mode": "longest_side", "longest_side": 16},
+        )
+
+        def classify(result: e.Result) -> ItemOutcome:
+            if result.action == "resized":
+                return ItemOutcome.completed(result.to_dict(), result.reason)
+            if result.action in ("skipped", "dry-run"):
+                return ItemOutcome.skipped(result.to_dict(), result.reason)
+            return ItemOutcome.failed(result.reason, data=result.to_dict())
+
+        db = tmp / "jobs.sqlite3"
+        with SQLiteJobStore(db) as store:
+            report = BatchRunner(store).run(job, lambda path: e.process(path, opts), classify)
+        assert report.state is JobState.COMPLETED_WITH_WARNINGS
+        assert report.counts[ItemState.COMPLETED.value] == 2
+        assert report.counts[ItemState.QUARANTINED.value] == 1
+        assert (tmp / "out" / "a.png").is_file() and (tmp / "out" / "b.png").is_file()
+
+        with SQLiteJobStore(db) as store:
+            reused = BatchRunner(store).run(
+                job,
+                lambda path: (_ for _ in ()).throw(AssertionError(f"reprocessed {path}")),
+                classify,
+                validate_stored=lambda item: e.validate_result(e.Result(**item.data)),
+            )
+        assert reused.reused, "completed job was not reused"
+
+        (tmp / "out" / "a.png").unlink()
+        rerun: list[str] = []
+        with SQLiteJobStore(db) as store:
+            repaired = BatchRunner(store).run(
+                job,
+                lambda path: rerun.append(path.name) or e.process(path, opts),
+                classify,
+                validate_stored=lambda item: e.validate_result(e.Result(**item.data)),
+            )
+        assert repaired.recovered and rerun == ["a.png"], f"unexpected repair set: {rerun}"
+        assert (tmp / "out" / "a.png").is_file(), "missing output was not repaired"
+    print("PASS: image_rescale durable batch — isolated bad input, checkpointed, reused.")
+
+
 def main() -> int:
     test_sizing_math()
     test_full_pipeline()
+    test_durable_batch()
     return 0
 
 

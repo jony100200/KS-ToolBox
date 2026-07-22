@@ -15,7 +15,7 @@ class MaterialConverterTool:
         subtitle="Pack/convert/rename PBR texture-map sets (Unity/Unreal/Godot/Blender)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: the panel/engine pull numpy + Pillow. Keeping them out of
         # module import means discovery/the sidebar work before those are installed.
         from .panel import MaterialConverterPanel

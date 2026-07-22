@@ -15,7 +15,7 @@ class AlphaDoctorTool:
         subtitle="Remove backgrounds & repair alpha (deterministic; AI optional)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: panel/engine pull numpy/Pillow (and onnxruntime only for the
         # opt-in AI method). Discovery/the sidebar work without them.
         from .panel import AlphaDoctorPanel

@@ -9,9 +9,12 @@ purpose, minimal coupling.)
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import customtkinter as ctk
+
+if TYPE_CHECKING:
+    from toolbox.application import AppServices
 
 
 @dataclass(frozen=True)
@@ -29,7 +32,7 @@ class Tool(Protocol):
     user opens the tool — so nothing idle is ever constructed."""
     meta: ToolMeta
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services: "AppServices") -> ctk.CTkBaseClass:
         """Construct and return the tool's UI, parented under `parent`."""
         ...
 

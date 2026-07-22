@@ -20,6 +20,6 @@ class TextureRendererTool:
         subtitle="Batch-export textures from Substance & Material Maker",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         from .panel import TextureRendererPanel   # lazy: keeps discovery light
         return TextureRendererPanel(parent)

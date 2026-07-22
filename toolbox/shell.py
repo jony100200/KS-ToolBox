@@ -12,6 +12,8 @@ from pathlib import Path
 import customtkinter as ctk
 
 from toolbox.tool import Tool, ToolRegistry
+from toolbox.application import AppServices, create_services
+from toolbox.batch_core import JobState
 from . import components as c
 from . import theme as t
 from . import icons
@@ -37,10 +39,13 @@ def _set_win_app_id() -> None:
 
 
 class ToolBoxShell(ctk.CTk):
+    QUEUE_ID = "__queue__"
+
     def __init__(self, registry: ToolRegistry):
         _set_win_app_id()               # before the window exists, so the taskbar picks up our icon
         super().__init__()
         self._registry = registry
+        self._services: AppServices = create_services()
         self._panels: dict[str, ctk.CTkBaseClass] = {}   # built-once cache
         self._active: str | None = None
         self._nav_buttons: dict[str, ctk.CTkButton] = {}
@@ -53,11 +58,13 @@ class ToolBoxShell(ctk.CTk):
         icons.setup_fonts()
         self._set_window_icon()
         self.configure(fg_color=t.BG_COLOR)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._build_sidebar()
         self._content = ctk.CTkFrame(self, fg_color=t.BG_COLOR, corner_radius=0)
         self._content.pack(side="left", fill="both", expand=True)
         self._content.grid_rowconfigure(0, weight=1); self._content.grid_columnconfigure(0, weight=1)
+        self._queue_poll = self.after(250, self._poll_queue_button)
 
         tools = self._registry.all()
         if tools:
@@ -94,6 +101,15 @@ class ToolBoxShell(ctk.CTk):
         ctk.CTkLabel(bar, text="TOOLS", font=t.font(10, bold=True), text_color=t.TEXT_MUTED
                      ).pack(anchor="w", padx=15, pady=(0, 4))
 
+        self._queue_button = ctk.CTkButton(
+            bar, text=f"  {icons.Icons.QUEUE}  Queue", anchor="w", height=36, corner_radius=6,
+            fg_color="transparent", hover_color=t.CARD_BORDER, text_color=t.TEXT_MUTED,
+            font=icons.get_icon_font(12), command=lambda: self._select(self.QUEUE_ID),
+        )
+        self._queue_button.pack(fill="x", padx=10, pady=(2, 8))
+        self._nav_buttons[self.QUEUE_ID] = self._queue_button
+        ctk.CTkFrame(bar, height=1, fg_color=t.CARD_BORDER).pack(fill="x", padx=15, pady=(0, 8))
+
         for tool in self._registry.all():
             btn = ctk.CTkButton(bar, text=f"  {tool.meta.icon}  {tool.meta.title}",
                                 anchor="w", height=36, corner_radius=6,
@@ -109,14 +125,20 @@ class ToolBoxShell(ctk.CTk):
     def _select(self, tool_id: str):
         if tool_id == self._active:
             return
-        tool: Tool | None = self._registry.get(tool_id)
-        if not tool:
-            return
+        tool: Tool | None = None
+        if tool_id != self.QUEUE_ID:
+            tool = self._registry.get(tool_id)
+            if not tool:
+                return
         # lazy build + cache; hide the previous panel
         if self._active and self._active in self._panels:
             self._panels[self._active].grid_remove()
         if tool_id not in self._panels:
-            self._panels[tool_id] = self._safe_build(tool)
+            if tool_id == self.QUEUE_ID:
+                from toolbox.queue_panel import QueuePanel
+                self._panels[tool_id] = QueuePanel(self._content, self._services.queue)
+            else:
+                self._panels[tool_id] = self._safe_build(tool)
         self._panels[tool_id].grid(row=0, column=0, sticky="nsew")
         # nav highlight
         for tid, btn in self._nav_buttons.items():
@@ -130,7 +152,7 @@ class ToolBoxShell(ctk.CTk):
         uninstalled optional dependency like rembg) crash the whole app —
         show the reason in-place instead. Fallbacks must announce themselves."""
         try:
-            return tool.build_panel(self._content)
+            return tool.build_panel(self._content, self._services)
         except Exception as ex:                 # noqa: BLE001 — any build failure, degrade gracefully
             frame = ctk.CTkFrame(self._content, fg_color=t.BG_COLOR)
             card = c.Card(frame, f"{tool.meta.title} — unavailable", icon=icons.Icons.WARN)
@@ -141,3 +163,20 @@ class ToolBoxShell(ctk.CTk):
             ctk.CTkLabel(card.body, text=msg, justify="left", anchor="w",
                          text_color=t.TEXT_MUTED, font=t.font(12)).pack(anchor="w")
             return frame
+
+    def _poll_queue_button(self) -> None:
+        active = sum(
+            item.state in {
+                JobState.QUEUED, JobState.PREPARING, JobState.RUNNING,
+                JobState.PAUSED, JobState.CANCELLING,
+            }
+            for item in self._services.queue.history()
+        )
+        suffix = f" ({active})" if active else ""
+        self._queue_button.configure(text=f"  {icons.Icons.QUEUE}  Queue{suffix}")
+        self._queue_poll = self.after(250, self._poll_queue_button)
+
+    def _on_close(self) -> None:
+        self.after_cancel(self._queue_poll)
+        self._services.queue.close()
+        self.destroy()

@@ -2,6 +2,8 @@
 
 Child of `../AGENTS.md` (workspace DOX rail) + `M:\KS Apps\CodingPrinciples.md`. Parent rules apply; this doc owns KS-ToolBox local specifics.
 
+`KS_ENGINEERING_STANDARD.md` is the canonical workspace-wide cartridge-grade engineering, measurement, and merge standard. It applies to every KS ToolBox feature, refactor, optimization, and review.
+
 ## Purpose
 
 Cross-platform (Windows/Linux/macOS) CustomTkinter desktop app — **one UI shell, many single-purpose tools** — built for **free public release**. Each tool is a self-contained, auto-discovered plugin folder. Tool #1: Video Compressor.

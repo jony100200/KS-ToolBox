@@ -15,7 +15,7 @@ class AssetAuditorTool:
         subtitle="Find duplicates, corrupt files, and asset issues (report)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: the panel pulls Pillow + numpy. Keeping them out of module
         # import means discovery/the sidebar work even before they're installed.
         from .panel import AssetAuditorPanel

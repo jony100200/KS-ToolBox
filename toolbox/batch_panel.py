@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import threading
+from typing import TYPE_CHECKING
 from pathlib import Path
 from tkinter import filedialog
 
@@ -18,6 +19,9 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.engine_common import sweep_part_files
+
+if TYPE_CHECKING:
+    from toolbox.job_queue import JobQueue, QueueSubmission
 
 
 class BaseBatchPanel(ctk.CTkFrame):
@@ -33,8 +37,10 @@ class BaseBatchPanel(ctk.CTkFrame):
     RESULTS_ICON: str = Icons.CHART
     RUN_LABEL: str = "Run"
 
-    def __init__(self, parent):
+    def __init__(self, parent, queue_service: "JobQueue | None" = None):
         super().__init__(parent, fg_color=t.BG_COLOR)
+        self._queue_service = queue_service
+        self._active_job_id: str | None = None
         self._files: list[Path] = []
         self._worker: threading.Thread | None = None
         self._stop = threading.Event()
@@ -102,6 +108,9 @@ class BaseBatchPanel(ctk.CTkFrame):
         self._run_btn.pack(side="left")
         self._stop_btn = c.danger_button(runrow, "Stop", self._request_stop, width=90)
         self._stop_btn.pack(side="left", padx=10); self._stop_btn.configure(state="disabled")
+        if self._queue_service is not None:
+            self._pause_btn = c.secondary_button(runrow, "Pause", self._request_pause, width=80)
+            self._pause_btn.pack(side="left"); self._pause_btn.configure(state="disabled")
         self._status = c.Pill(runrow, "IDLE", "idle"); self._status.pack(side="right")
         self._progress = ctk.CTkProgressBar(parent, height=7, fg_color=t.CARD_BORDER,
                                             progress_color=t.ACCENT_BLUE)
@@ -150,8 +159,21 @@ class BaseBatchPanel(ctk.CTkFrame):
         self._status.set_state("RUNNING", "running"); self._progress.set(0)
         self._log.configure(state="normal"); self._log.delete("1.0", "end"); self._log.configure(state="disabled")
         files = list(self._files)
-        self._worker = threading.Thread(target=self._work, args=(files, opts), daemon=True)
-        self._worker.start()
+        if self._queue_service is not None:
+            try:
+                submission = self._build_submission(files, opts)
+                self._active_job_id = self._queue_service.submit(submission)
+            except Exception as ex:  # noqa: BLE001 - visible queue submission failure
+                self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
+                self._status.set_state("FAILED", "error")
+                self._logline(f"queue submission failed: {type(ex).__name__}: {ex}", t.STATE["error"][1])
+                return
+            self._status.set_state("QUEUED", "waiting")
+            self._pause_btn.configure(state="normal", text="Pause")
+            self.after(50, self._poll_queue_job, self._active_job_id)
+        else:
+            self._worker = threading.Thread(target=self._work, args=(files, opts), daemon=True)
+            self._worker.start()
 
     def _pre_run_check(self, opts) -> bool:
         """Override for a confirmation dialog before running. Return True to proceed."""
@@ -168,7 +190,66 @@ class BaseBatchPanel(ctk.CTkFrame):
                 self._logline(f"cleaned {n} stale .part temp file(s)", t.TEXT_MUTED)
 
     def _request_stop(self):
-        self._stop.set(); self._status.set_state("STOPPING", "waiting")
+        if self._queue_service is not None and self._active_job_id:
+            self._queue_service.cancel(self._active_job_id)
+        else:
+            self._stop.set()
+        self._status.set_state("STOPPING", "waiting")
+
+    def _request_pause(self):
+        if self._queue_service is None or not self._active_job_id:
+            return
+        snapshot = self._queue_service.snapshot(self._active_job_id)
+        if snapshot and snapshot.state.value == "paused":
+            if self._queue_service.resume(self._active_job_id):
+                self._pause_btn.configure(text="Pause")
+                self._status.set_state("RUNNING", "running")
+        elif self._queue_service.pause(self._active_job_id):
+            self._pause_btn.configure(text="Resume")
+            self._status.set_state("PAUSED", "paused")
+
+    def _queue_cancelled(self) -> None:
+        self._run_btn.configure(state="normal")
+        self._stop_btn.configure(state="disabled")
+        self._pause_btn.configure(state="disabled", text="Pause")
+        self._status.set_state("CANCELLED", "waiting")
+        self._active_job_id = None
+
+    def _poll_queue_job(self, job_id: str) -> None:
+        if self._queue_service is None or self._active_job_id != job_id:
+            return
+        snapshot = self._queue_service.snapshot(job_id)
+        if snapshot is None:
+            self._batch_failed("queue record disappeared")
+            return
+        self._on_queue_snapshot(snapshot)
+        if snapshot.state.value in {"completed", "completed_with_warnings", "failed", "cancelled"}:
+            completion = self._queue_service.completion(job_id)
+            if completion is not None:
+                self._queue_complete(completion)
+            elif snapshot.state.value == "cancelled":
+                self._queue_cancelled()
+            else:
+                self._batch_failed(snapshot.detail or snapshot.state.value)
+            return
+        self.after(100, self._poll_queue_job, job_id)
+
+    def _on_queue_snapshot(self, snapshot) -> None:
+        if snapshot.total_items:
+            self._progress.set(snapshot.completed_items / snapshot.total_items)
+        if snapshot.state.value == "paused":
+            self._status.set_state("PAUSED", "paused")
+            self._pause_btn.configure(text="Resume")
+        elif snapshot.state.value == "running":
+            self._status.set_state("RUNNING", "running")
+            self._pause_btn.configure(text="Pause")
+        elif snapshot.state.value in {"queued", "preparing"}:
+            self._status.set_state("QUEUED", "waiting")
+        elif snapshot.state.value == "cancelling":
+            self._status.set_state("STOPPING", "waiting")
+
+    def _queue_complete(self, completion) -> None:
+        raise NotImplementedError
 
     # --- shared helpers -------------------------------------------------------
 
@@ -195,6 +276,9 @@ class BaseBatchPanel(ctk.CTkFrame):
         raise NotImplementedError
 
     def _work(self, files: list[Path], opts):
+        raise NotImplementedError
+
+    def _build_submission(self, files: list[Path], opts) -> "QueueSubmission":
         raise NotImplementedError
 
     def _write_manifest(self, opts, results: list) -> str | None:

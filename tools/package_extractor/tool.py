@@ -15,7 +15,7 @@ class PackageExtractorTool:
         subtitle="Extract Unity packages & archives, rebuild folders (safe)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import keeps discovery/the sidebar working without loading the
         # panel; the engine is pure stdlib so there is no heavy dependency here.
         from .panel import PackageExtractorPanel

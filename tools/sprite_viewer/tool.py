@@ -20,6 +20,6 @@ class SpriteViewerTool:
         subtitle="View & play sprite sheets and animations",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         from .panel import SpriteViewerPanel   # lazy: keeps discovery light
         return SpriteViewerPanel(parent)

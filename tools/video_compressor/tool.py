@@ -5,7 +5,6 @@ import customtkinter as ctk
 
 from toolbox.tool import ToolMeta
 from toolbox.icons import Icons
-from .panel import VideoCompressorPanel
 
 
 class VideoCompressorTool:
@@ -16,5 +15,6 @@ class VideoCompressorTool:
         subtitle="Shrink videos without losing quality (VMAF-verified)",
     )
 
-    def build_panel(self, parent: ctk.CTkFrame) -> ctk.CTkBaseClass:
-        return VideoCompressorPanel(parent)
+    def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
+        from .panel import VideoCompressorPanel
+        return VideoCompressorPanel(parent, queue_service=services.queue)

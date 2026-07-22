@@ -49,6 +49,12 @@ def main() -> int:
         decision = e.assess(pr["data"], e.Policy())
         assert decision.action == "compress", f"expected compress, got {decision.action}: {decision.reason}"
 
+        try:
+            e.probe(sample, cancelled=lambda: True)
+            raise AssertionError("cancelled ffprobe unexpectedly completed")
+        except e.CommandCancelled:
+            pass
+
         # full pipeline; floor 0 keeps the quality gate out of the way (deterministic).
         opts = e.ProcessOptions(out_root=tmp / "out", policy=e.Policy(crf=28),
                                 vmaf_floor=0.0, dry_run=False, delete_original=False)
@@ -57,6 +63,8 @@ def main() -> int:
         assert Path(res.out_path).is_file() and Path(res.out_path).stat().st_size > 0, "no output written"
         assert res.after_mb < res.before_mb, f"not smaller: {res.before_mb} -> {res.after_mb} MB"
         assert res.vmaf is not None, "VMAF was not measured (libvmaf missing from this ffmpeg?)"
+        assert e.validate_result(res), "stored output validation failed"
+        assert not list((tmp / "out").glob("*.verify.*")), "uncommitted candidate remained"
 
     print(f"PASS: video_compressor — {res.before_mb:.1f}->{res.after_mb:.1f} MB "
           f"(-{res.saved_pct:.0f}%), VMAF {res.vmaf:.1f}.")

@@ -13,7 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-HEAVY = ("rembg", "onnxruntime", "numpy", "torch", "numba", "scipy", "skimage", "PIL")
+# Pillow is a core CustomTkinter dependency and is necessarily imported by the
+# shell.  The regression gate covers optional numeric, AI, and vision stacks.
+HEAVY = ("rembg", "onnxruntime", "numpy", "torch", "numba", "scipy", "skimage")
 
 
 def main() -> int:
