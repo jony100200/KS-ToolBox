@@ -12,6 +12,8 @@ palette, sharp alpha edges. Batch-capable and mirrors the input folder structure
 
 Saves RGBA PNGs. Nothing is written until you turn off **Preview only**; originals
 are never touched. A `pixel_manifest.csv` records every file when an output folder is set.
+Jobs use the shared durable queue, can pause or cancel at item boundaries, and
+reuse only outputs that pass PNG, RGBA, dimension, palette, and hard-alpha checks.
 
 ## Options
 

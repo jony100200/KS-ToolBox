@@ -43,6 +43,24 @@ Tk widgets poll immutable snapshots on the main thread; queue workers never
 touch Tk. `BaseBatchPanel` retains its old worker only as a migration adapter.
 Icon Normalizer is the third migrated slice and adds deterministic square-RGBA
 artifact validation before a stored output is reused.
+Pixel Art Converter is the fourth migrated slice. Reuse validation reopens both
+source and output and verifies PNG/RGBA format, expected native or upscaled
+dimensions, palette limit, and binary alpha before trusting the artifact.
+
+#### Pixel Art change report
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-local compatibility worker → shell queue with the same Pillow transform |
+| Architecture/language | Existing Python/Pillow engine retained; shared Python queue/report contracts reused |
+| Functionality and quality | Pixel size, median-cut palette, dithering, hard alpha, and upscale behavior unchanged; smoke remains ≤8 colors at 64×64 |
+| Code/dependencies | 216 → 311 production lines (+95 for queue adapter and validation); zero dependencies added |
+| Package/startup/runtime | No package component added; ready-to-mainloop 127 → 120 ms (within normal range); transform throughput not claimed changed |
+| RAM/VRAM/CPU/disk/GPU | No model, GPU, or new image buffer; SQLite checkpoint/report metadata is the only new disk work |
+| Batch/cache/AI | Per-item recovery and validated reuse added; no AI calls; processing algorithm unchanged |
+| Reliability/security | Failures isolate per item; manifests no longer fail silently; corrupt or policy-mismatched artifacts are rejected |
+| Tests/benchmarks | Tool smoke, 17 unit tests, 17-panel construction, four-tool queue flow, full 17-tool smoke, compile and startup gates pass |
+| Risk/rollback | Validator adds reopen cost only during reuse; revert panel/tool adapter and `validate_result` to restore the compatibility worker |
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

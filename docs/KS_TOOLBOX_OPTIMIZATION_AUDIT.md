@@ -81,7 +81,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Audio Tool | ffmpeg convert, trim, fade, normalize | Deterministic | two-pass loudness measurement, silence/chapters, optional stem separation |
 | Image Rescale | Pillow resampling and fit modes; durable validated shell-queue execution | Deterministic | content hashes, streaming/native backend benchmark, optional restoration upscale |
 | Format Converter | Pillow/ffmpeg/document adapters | Deterministic | capability matrix, metadata/color handling, modern formats, backend provenance |
-| Pixel Art | nearest-neighbor pixelization, median-cut palette, optional dithering | Deterministic | perceptual palette benchmark, palette locking, alpha-aware quantization |
+| Pixel Art | nearest-neighbor pixelization, median-cut palette, durable queue, validated artifact reuse | Deterministic | perceptual palette benchmark, palette locking, alpha-aware quantization |
 | To SVG | VTracer | Deterministic | expose presets/path controls, score path complexity and reconstruction error |
 | Icon Normalizer | alpha geometry, fixed canvas placement, durable queue, validated RGBA reuse | Deterministic | perceptual visual-mass normalization and platform keyline presets |
 | Showcase | Pillow contact/hero/comparison compositing | Deterministic | attention/entropy smart crop and reusable layout presets |

@@ -19,4 +19,4 @@ class PixelArtTool:
         # Lazy import: the panel pulls Pillow. Keeping it out of module import
         # means discovery/the sidebar work even before Pillow is installed.
         from .panel import PixelArtPanel
-        return PixelArtPanel(parent)
+        return PixelArtPanel(parent, services.queue)

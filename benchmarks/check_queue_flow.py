@@ -9,11 +9,39 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+_TERMINAL_STATES = {"completed", "completed_with_warnings", "failed", "cancelled"}
+
+
+def _run_and_wait(app, panel, label: str, expected_items: int) -> str:
+    panel._run()
+    job_id = panel._active_job_id
+    assert job_id, f"{label} did not submit a queue job"
+    deadline = time.monotonic() + 10
+    snapshot = None
+    while time.monotonic() < deadline:
+        app.update()
+        snapshot = app._services.queue.snapshot(job_id)
+        if snapshot and snapshot.state.value in _TERMINAL_STATES:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError(f"queued {label} job did not finish")
+    control_deadline = time.monotonic() + 2
+    while panel._run_btn.cget("state") != "normal" and time.monotonic() < control_deadline:
+        app.update()
+        time.sleep(0.01)
+    assert snapshot.state.value == "completed", snapshot
+    assert snapshot.completed_items == expected_items, snapshot
+    assert panel._run_btn.cget("state") == "normal", (
+        f"{label} controls did not recover; callback errors="
+        f"{app._services.queue.subscriber_errors}"
+    )
+    return job_id
+
 
 def main() -> int:
     try:
         from PIL import Image
-        from toolbox.batch_core import JobState
         from toolbox.discovery import discover
         from toolbox.engine_common import resolve_tool, run_cmd
         from toolbox.queue_panel import QueuePanel
@@ -35,61 +63,17 @@ def main() -> int:
             app._select("image_rescale")
             panel = app._panels["image_rescale"]
             panel._add([first, second])
-            panel._run()
-            job_id = panel._active_job_id
-            assert job_id, "panel did not submit a queue job"
-
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                app.update()
-                snapshot = app._services.queue.snapshot(job_id)
-                if snapshot and snapshot.state in {
-                    JobState.COMPLETED, JobState.COMPLETED_WITH_WARNINGS,
-                    JobState.FAILED, JobState.CANCELLED,
-                }:
-                    break
-                time.sleep(0.01)
-            else:
-                raise AssertionError("queued Image Rescale job did not finish")
-
-            control_deadline = time.monotonic() + 2
-            while (panel._run_btn.cget("state") != "normal"
-                   and time.monotonic() < control_deadline):
-                app.update()
-                time.sleep(0.01)
-            snapshot = app._services.queue.snapshot(job_id)
-            assert snapshot.state is JobState.COMPLETED, snapshot
-            assert snapshot.completed_items == 2
-            assert panel._run_btn.cget("state") == "normal", (
-                "panel controls did not recover; callback errors="
-                f"{app._services.queue.subscriber_errors}"
-            )
+            job_id = _run_and_wait(app, panel, "Image Rescale", 2)
 
             app._select("icon_normalizer")
             icon_panel = app._panels["icon_normalizer"]
             icon_panel._add([first, second])
-            icon_panel._run()  # default dry run
-            icon_job_id = icon_panel._active_job_id
-            assert icon_job_id, "Icon Normalizer did not submit a queue job"
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                app.update()
-                icon_snapshot = app._services.queue.snapshot(icon_job_id)
-                if icon_snapshot and icon_snapshot.state in {
-                    JobState.COMPLETED, JobState.COMPLETED_WITH_WARNINGS,
-                    JobState.FAILED, JobState.CANCELLED,
-                }:
-                    break
-                time.sleep(0.01)
-            else:
-                raise AssertionError("queued Icon Normalizer job did not finish")
-            control_deadline = time.monotonic() + 2
-            while (icon_panel._run_btn.cget("state") != "normal"
-                   and time.monotonic() < control_deadline):
-                app.update(); time.sleep(0.01)
-            assert icon_snapshot.state is JobState.COMPLETED, icon_snapshot
-            assert icon_snapshot.completed_items == 2
-            assert icon_panel._run_btn.cget("state") == "normal"
+            icon_job_id = _run_and_wait(app, icon_panel, "Icon Normalizer", 2)
+
+            app._select("pixel_art")
+            pixel_panel = app._panels["pixel_art"]
+            pixel_panel._add([first, second])
+            pixel_job_id = _run_and_wait(app, pixel_panel, "Pixel Art Converter", 2)
 
             video_job_id = None
             ffmpeg = resolve_tool("ffmpeg")
@@ -104,27 +88,7 @@ def main() -> int:
                 app._select("video_compressor")
                 video_panel = app._panels["video_compressor"]
                 video_panel._add([sample])
-                video_panel._run()  # default dry run: probe/plan only
-                video_job_id = video_panel._active_job_id
-                assert video_job_id, "Video Compressor did not submit a queue job"
-                deadline = time.monotonic() + 10
-                while time.monotonic() < deadline:
-                    app.update()
-                    video_snapshot = app._services.queue.snapshot(video_job_id)
-                    if video_snapshot and video_snapshot.state in {
-                        JobState.COMPLETED, JobState.COMPLETED_WITH_WARNINGS,
-                        JobState.FAILED, JobState.CANCELLED,
-                    }:
-                        break
-                    time.sleep(0.01)
-                else:
-                    raise AssertionError("queued Video Compressor job did not finish")
-                control_deadline = time.monotonic() + 2
-                while (video_panel._run_btn.cget("state") != "normal"
-                       and time.monotonic() < control_deadline):
-                    app.update(); time.sleep(0.01)
-                assert video_snapshot.state is JobState.COMPLETED, video_snapshot
-                assert video_panel._run_btn.cget("state") == "normal"
+                video_job_id = _run_and_wait(app, video_panel, "Video Compressor", 1)
 
             app._select(app.QUEUE_ID)
             app.update()
@@ -132,13 +96,14 @@ def main() -> int:
             assert isinstance(queue_panel, QueuePanel)
             assert any(item.job_id == job_id for item in app._services.queue.history())
             assert any(item.job_id == icon_job_id for item in app._services.queue.history())
+            assert any(item.job_id == pixel_job_id for item in app._services.queue.history())
             if video_job_id:
                 assert any(item.job_id == video_job_id for item in app._services.queue.history())
         finally:
             app._on_close()
 
-    print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, and "
-          "Video Compressor through shell queue; history UI rendered.")
+    print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
+          "and Video Compressor through shell queue; history UI rendered.")
     return 0
 
 

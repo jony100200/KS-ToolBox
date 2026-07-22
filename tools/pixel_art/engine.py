@@ -123,3 +123,34 @@ def process(path: str | Path, opts: PixelOptions) -> Result:
 
 def _fail_result(src: Path, details: str, etype: str) -> Result:
     return Result(str(src), "failed", details, detail=etype)
+
+
+def validate_result(result: Result, opts: PixelOptions) -> bool:
+    """Verify dimensions, format, palette, and hard alpha before reuse."""
+    if result.action == "dry-run":
+        return True
+    if result.action != "converted" or not result.out_path:
+        return False
+    try:
+        from PIL import Image
+
+        with Image.open(result.src) as source:
+            source.load()
+            source_size = source.size
+        expected_size = source_size if opts.upscale else (
+            max(1, source_size[0] // max(1, opts.pixel_size)),
+            max(1, source_size[1] // max(1, opts.pixel_size)),
+        )
+        with Image.open(result.out_path) as output:
+            output.load()
+            if output.format != "PNG" or output.mode != "RGBA" or output.size != expected_size:
+                return False
+            colors = output.convert("RGB").getcolors(maxcolors=max(2, opts.num_colors))
+            alpha = output.getchannel("A").getcolors(maxcolors=3)
+            return (
+                colors is not None
+                and alpha is not None
+                and all(value in {0, 255} for _, value in alpha)
+            )
+    except (ImportError, OSError, ValueError):
+        return False

@@ -34,15 +34,20 @@ def main() -> int:
         img.save(src)
 
         out = tmp / "out"
-        res = e.process(src, e.PixelOptions(out_root=out, pixel_size=4, num_colors=8,
-                                            upscale=True, dry_run=False))
+        opts = e.PixelOptions(out_root=out, pixel_size=4, num_colors=8,
+                              upscale=True, dry_run=False)
+        res = e.process(src, opts)
         assert res.action == "converted", f"expected converted, got {res.action}: {res.reason}"
         assert Path(res.out_path).is_file(), "no output written"
+        assert e.validate_result(res, opts), "fresh pixel-art output did not pass artifact validation"
 
         with Image.open(res.out_path) as got:     # close the handle so tempdir cleanup works on Windows
             assert got.size == (64, 64), f"upscale should restore size, got {got.size}"
             colors = got.convert("RGB").getcolors(maxcolors=100000) or []
         assert len(colors) <= 8, f"palette not reduced: {len(colors)} colours > 8"
+
+        Path(res.out_path).write_bytes(b"not a png")
+        assert not e.validate_result(res, opts), "corrupt stored output must not be reusable"
 
     print(f"PASS: pixel_art — wrote {Path(res.out_path).name}, {len(colors)} colours (<= 8).")
     return 0
