@@ -5,6 +5,7 @@ instead of defining its own copies. Pure refactor, zero behavior change.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 import shutil
@@ -21,6 +22,17 @@ VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm", ".wmv",
               ".flv", ".mpg", ".mpeg", ".ts", ".m2ts"}
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
+
+
+def sha256_file(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
+    """Stream a file into SHA-256 without loading it into memory."""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 # --- error envelope -----------------------------------------------------------

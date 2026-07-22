@@ -29,7 +29,6 @@ Public interface:
 from __future__ import annotations
 
 import csv
-import hashlib
 import importlib.util
 import json
 import re
@@ -37,7 +36,7 @@ import shutil
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from toolbox.engine_common import IMAGE_EXTS, ok, err
+from toolbox.engine_common import IMAGE_EXTS, err, ok, sha256_file
 
 OPERATIONS = ("pair_report", "replace", "bucket", "split")
 BUCKET_MODES = ("dimensions", "aspect")
@@ -64,15 +63,6 @@ def _norm_exts(exts) -> set[str]:
 def _natural_key(value: str) -> list:
     """Sort key that orders `img2` before `img10` (digits compared numerically)."""
     return [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", value)]
-
-
-def sha256_file(path: str | Path) -> str:
-    """Streamed sha256 of a file's bytes (chunked; never loads the whole file)."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 16), b""):
-            h.update(chunk)
-    return h.hexdigest()
 
 
 def _pillow_available() -> bool:

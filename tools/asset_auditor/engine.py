@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import base64
 import csv
-import hashlib
 import html
 import io
 import json
@@ -51,7 +50,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from toolbox.engine_common import IMAGE_EXTS, ok, err
+from toolbox.engine_common import IMAGE_EXTS, err, ok, sha256_file
 
 # --- filename safety (lifted from RupayanFlow pack_core) ----------------------
 
@@ -90,16 +89,6 @@ _LOW_CONTRAST_MAX = 0.06
 
 
 # --- pure primitives ----------------------------------------------------------
-
-def sha256_file(path: str | Path) -> str:
-    """Streaming sha256 of a file's bytes (1 MiB chunks). Raises on IO error —
-    callers wrap it. From pack_core, unchanged."""
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
 
 def dhash(img, size: int = 8) -> str:
     """Difference hash of a PIL image as a bit-string of length `size*size`.
