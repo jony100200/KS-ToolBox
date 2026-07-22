@@ -1,0 +1,18 @@
+# KS ToolBox - optional per-tool extras. Install only what the tools you use need;
+# every tool degrades with a clear "install X" message if its dep is absent (the
+# app never crashes for a missing optional dependency).
+
+onnxruntime>=1.17        # Clean Cutout — background-removal matte (u2net, downloaded on first use)
+vtracer>=0.6             # To SVG — raster -> vector
+
+# Format Converter — document conversions (each optional, install as needed):
+markdown>=3.5            #   markdown -> html/pdf
+xhtml2pdf>=0.2.17        #   html / markdown -> pdf   (pulls reportlab, pypdf, html5lib)
+mammoth>=1.6             #   docx -> html/pdf
+pypdfium2>=4.0           #   pdf -> image / text      (PDFium; NOT PyMuPDF, which is AGPL)
+
+# Clean Cutout — optional "Hi-Q matte" backend (rembg: alpha matting + extra models).
+# Heavier (~360 MB via pymatting/numba). Only if you want it; the default onnx
+# backend needs none of this.
+#   rembg>=2.0
+#   On Python 3.12 rembg additionally needs:  numba>=0.59   llvmlite>=0.42

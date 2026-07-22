@@ -1,0 +1,51 @@
+# AGENTS.md — KS ToolBox
+
+Child of `../AGENTS.md` (workspace DOX rail) + `M:\KS Apps\CodingPrinciples.md`. Parent rules apply; this doc owns KS-ToolBox local specifics.
+
+## Purpose
+
+Cross-platform (Windows/Linux/macOS) CustomTkinter desktop app — **one UI shell, many single-purpose tools** — built for **free public release**. Each tool is a self-contained, auto-discovered plugin folder. Tool #1: Video Compressor.
+
+## Ownership
+
+- **This doc** owns: the plugin architecture, the tool template, the release/verification bar, and the app-local env decision.
+- **`toolbox/`** owns the shared framework — `tool.py` (contract), `theme.py`, `components.py`, `icons.py`, `shell.py`, `discovery.py`, `engine_common.py` (shared envelope helpers, binary resolution, subprocess runner), `batch_panel.py` (`BaseBatchPanel` — shared file picker, run/stop orchestration, results log for batch tools). Tools depend only on its public names.
+- **`tools/<name>/`** owns one tool end-to-end.
+
+## Local Contracts
+
+- **One tool = one folder** under `tools/`, exposing a module-level `TOOL` (`ToolMeta` + `build_panel`). Discovery finds it; the shell never changes. (LEGO principle.)
+- **Engine ≠ UI** (three-layer Domain/Presentation, per the Unity rules' spirit): pure logic in `engine.py` — headless, no CustomTkinter import, no global state, returns the error-envelope `{error, error_type, retryable, degraded, details, data}`. Thin `panel.py` — CustomTkinter only, work runs on a worker thread, never blocks the UI loop.
+- Tools import **`toolbox`** (theme/components/contract) only — never another tool, never framework internals.
+- **Batch / destructive actions MUST have Preview + Confirm + Logging** (Unity rules §9): a dry-run preview, an explicit confirm before deleting originals, and a per-run log/manifest.
+- **No** `eval()`, **no** swallowed exceptions (`except: pass`), **no** silent fallback — a fallback must announce itself (status/flag). (CodingPrinciples #3, #12.)
+- **Cross-platform:** guard OS-specific calls with `os.name`; resolve external binaries via bundled `bin/` first then PATH; never pop a console (subprocess uses `CREATE_NO_WINDOW` on Windows; ship windowed via PyInstaller `--windowed`).
+- **Heavy/optional deps import lazily.** A tool's `tool.py` (which discovery imports to read `meta`) must NOT pull numpy/rembg/etc. at module load — import the panel/engine inside `build_panel`. This keeps discovery and the sidebar working on a machine that hasn't installed a tool's deps yet; the missing dep is announced when the tool is opened (`shell._safe_build` shows an in-panel "install its dependencies" card), never as a startup crash. `discovery.discover()` also isolates a single broken plugin (skips it with a stderr warning) so one bad tool can't take down the app.
+- **Env deviation (intentional, overrides the shared-venv workspace rule):** KS-ToolBox uses a **dedicated minimal `.venv`** (customtkinter, send2trash), NOT the shared `D:\KSAppDev\.venv`. Rationale: this is a distributable public app whose PyInstaller bundle must contain only its own deps, not the whole workspace's torch/opencv/etc. stack. Deps pinned in `requirements.txt`.
+
+## Work Guidance
+
+Tool template — every tool folder:
+```
+tools/<name>/
+  engine.py      pure logic (Domain+Application), error-envelope, headless
+  panel.py       Presentation only (CustomTkinter, thin, worker-thread)
+  __init__.py    TOOL = <Name>Tool()
+  test_smoke.py  standalone-start + valid-output on a bundled sample
+  README.md      what it does, deps, options
+```
+Add a tool = drop the folder; **no edits** to `toolbox/` or `main.py`.
+- Engine files import shared helpers from `toolbox.engine_common` (`ok`/`err` envelope, `resolve_tool`/`bundled_bin_dir`/`run_cmd` for subprocess tools, `VIDEO_EXTS`/`IMAGE_EXTS` constants) — never duplicate these.
+- Batch-tool panels extend `toolbox.batch_panel.BaseBatchPanel` (shared files card, run/stop row, output-folder picker, results log, worker-thread lifecycle) instead of duplicating that code. Subclasses set `FILE_EXTS`/`FILE_LABEL`/`FILES_ICON`/`RESULTS_ICON`/`RUN_LABEL` and keep only `_build_options_card`, `_collect_options`, `_work`, `_write_manifest`, `_show`, `_done` (plus `_pre_run_check` for a confirm dialog). Use `self._build_output_row(b, hint)` + `self._build_run_row(b)` at the end of the options card; use `self._resolve_input_root()` for mirror mode.
+
+Extracting from RupayanFlow/ChobiEngine: keep the engine logic, drop the `runtime.py` job wrapper, write a thin panel, and **fix anti-patterns on the way in** (this session's verification found: VideoRescaler's bytes/str ffmpeg-detect bug, `eval()` on ffprobe output, `random` instead of `secrets` for passwords).
+
+## Verification
+
+- **No tool ships unverified.** Each must pass `test_smoke.py`: boots with default config and produces a valid output on a real sample. This is the release bar — "can't ship non-working stuff." A smoke test that needs an uninstalled dep should **skip cleanly** (print SKIP, return 0), not fail — see `video_chopper` (skips without ffmpeg) and `clean_cutout` (always tests the pure edge math with numpy+Pillow; runs the full rembg leg only when rembg is installed). To verify a heavy-dep tool without touching the app's `.venv`, use an ephemeral uv overlay — include `customtkinter` (core framework; the package `__init__`→`tool.py`→`icons.py` chain imports it) plus the tool's own deps: `uv run --no-project --with customtkinter --with <pkg> python -m tools.<name>.test_smoke`.
+- **Built as plugins + smoke-tested (each has `test_smoke.py`):** Video Compressor (VMAF-verified, delete-confirm dialog), Video Chopper (ffmpeg blackdetect rebuild), Clean Cutout (rembg + defringe/despill), Pixel Art Converter (pixelize + palettize), Image Rescale (4 sizing modes), Format Converter (images/A-V/docs, dispatch-table). `test_smoke.py` in `tools/video_chopper/` is the reference template.
+- Remaining verified extraction candidates — **WORKS, not yet ported:** Everyday Tools, Unity Extractor. **Fix-first:** Video Rescale (bytes/str ffmpeg-detect bug + `eval()`). *(ToSVG + Icon Normalizer in progress via subagents.)*
+
+## Child DOX Index
+
+(none yet — tools share the uniform template above. Add a child AGENTS.md only if a specific tool grows its own durable contract.)

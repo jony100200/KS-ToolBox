@@ -1,0 +1,201 @@
+"""Base batch panel — shared file picker, run/stop orchestration, results log.
+
+Every batch tool panel extends this. The base owns: file management, run row,
+results card, worker thread lifecycle, output folder picker, mirror input_root.
+Subclasses own: options card, option collection, engine call, result rendering,
+manifest writing. Pure refactor, zero behavior change.
+"""
+from __future__ import annotations
+
+import os
+import threading
+from pathlib import Path
+from tkinter import filedialog
+
+import customtkinter as ctk
+
+from toolbox import components as c
+from toolbox import theme as t
+from toolbox.icons import Icons
+from toolbox.engine_common import sweep_part_files
+
+
+class BaseBatchPanel(ctk.CTkFrame):
+    """Shared batch-processing panel.
+
+    Subclasses MUST set: FILE_EXTS, FILE_LABEL, RESULTS_ICON.
+    Subclasses MUST override: _build_options_card, _collect_options, _work, _write_manifest.
+    """
+
+    FILE_EXTS: set[str] = set()
+    FILE_LABEL: str = "file"
+    FILES_ICON: str = Icons.FOLDER
+    RESULTS_ICON: str = Icons.CHART
+    RUN_LABEL: str = "Run"
+
+    def __init__(self, parent):
+        super().__init__(parent, fg_color=t.BG_COLOR)
+        self._files: list[Path] = []
+        self._worker: threading.Thread | None = None
+        self._stop = threading.Event()
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(2, weight=1)
+        self._build_files_card()
+        self._build_options_card()
+        self._build_results_card()
+
+    # --- files card -----------------------------------------------------------
+
+    def _build_files_card(self):
+        plural = self.FILE_LABEL + "s"
+        card = c.Card(self, plural.capitalize(), icon=self.FILES_ICON)
+        card.grid(row=0, column=0, sticky="nsew", padx=t.PAD_GRID, pady=(t.PAD_GRID, 0))
+        row = ctk.CTkFrame(card.body, fg_color="transparent"); row.pack(fill="x")
+        c.secondary_button(row, "Add files", self._add_files, width=110).pack(side="left")
+        c.secondary_button(row, "Add folder", self._add_folder, width=120).pack(side="left", padx=8)
+        c.ghost_button(row, "Clear", self._clear, width=70).pack(side="left")
+        self._count = ctk.CTkLabel(row, text=f"0 {plural}", text_color=t.TEXT_MUTED, font=t.font(11))
+        self._count.pack(side="right")
+        self._file_list = ctk.CTkTextbox(card.body, height=90, fg_color=t.BG_COLOR,
+                                         border_color=t.CARD_BORDER, border_width=1,
+                                         font=t.mono(11), text_color=t.TEXT_MUTED)
+        self._file_list.pack(fill="x", pady=(10, 0)); self._file_list.configure(state="disabled")
+
+    def _add_files(self):
+        plural = self.FILE_LABEL + "s"
+        paths = filedialog.askopenfilenames(
+            title=f"Choose {plural}",
+            filetypes=[(plural.capitalize(), " ".join(f"*{x}" for x in sorted(self.FILE_EXTS))),
+                       ("All", "*.*")])
+        self._add([Path(p) for p in paths])
+
+    def _add_folder(self):
+        plural = self.FILE_LABEL + "s"
+        d = filedialog.askdirectory(title=f"Choose a folder (recursively scans for {plural})")
+        if not d:
+            return
+        self._add([p for p in Path(d).rglob("*") if p.suffix.lower() in self.FILE_EXTS])
+
+    def _add(self, paths: list[Path]):
+        seen = set(self._files)
+        for p in paths:
+            if p not in seen and p.suffix.lower() in self.FILE_EXTS:
+                self._files.append(p); seen.add(p)
+        self._render_files()
+
+    def _clear(self):
+        self._files.clear(); self._render_files()
+
+    def _render_files(self):
+        n = len(self._files)
+        label = self.FILE_LABEL if n == 1 else self.FILE_LABEL + "s"
+        self._count.configure(text=f"{n} {label}")
+        self._file_list.configure(state="normal"); self._file_list.delete("1.0", "end")
+        self._file_list.insert("1.0", "\n".join(p.name for p in self._files) or "(no files yet)")
+        self._file_list.configure(state="disabled")
+
+    # --- run row (called by subclass at end of _build_options_card) -----------
+
+    def _build_run_row(self, parent: ctk.CTkFrame):
+        runrow = ctk.CTkFrame(parent, fg_color="transparent"); runrow.pack(fill="x", pady=(14, 0))
+        self._run_btn = c.primary_button(runrow, self.RUN_LABEL, self._run, width=200)
+        self._run_btn.pack(side="left")
+        self._stop_btn = c.danger_button(runrow, "Stop", self._request_stop, width=90)
+        self._stop_btn.pack(side="left", padx=10); self._stop_btn.configure(state="disabled")
+        self._status = c.Pill(runrow, "IDLE", "idle"); self._status.pack(side="right")
+        self._progress = ctk.CTkProgressBar(parent, height=7, fg_color=t.CARD_BORDER,
+                                            progress_color=t.ACCENT_BLUE)
+        self._progress.set(0); self._progress.pack(fill="x", pady=(12, 0))
+
+    # --- output folder row helper ---------------------------------------------
+
+    def _build_output_row(self, parent: ctk.CTkFrame, hint: str):
+        outrow = ctk.CTkFrame(parent, fg_color="transparent"); outrow.pack(fill="x", pady=(12, 0))
+        ctk.CTkLabel(outrow, text=hint, text_color=t.TEXT_MUTED, font=t.font(11)).pack(anchor="w")
+        pick = ctk.CTkFrame(outrow, fg_color="transparent"); pick.pack(fill="x", pady=(2, 0))
+        self._out_entry = c.entry(pick); self._out_entry.pack(side="left", fill="x", expand=True)
+        c.secondary_button(pick, "Browse", self._pick_output, width=90).pack(side="left", padx=(8, 0))
+
+    # --- results card ---------------------------------------------------------
+
+    def _build_results_card(self):
+        card = c.Card(self, "Results", icon=self.RESULTS_ICON)
+        card.grid(row=2, column=0, sticky="nsew", padx=t.PAD_GRID, pady=t.PAD_GRID)
+        card.body.grid_rowconfigure(0, weight=1); card.body.grid_columnconfigure(0, weight=1)
+        self._log = ctk.CTkTextbox(card.body, fg_color=t.BG_COLOR, border_color=t.CARD_BORDER,
+                                   border_width=1, font=t.mono(11), text_color=t.TEXT_MAIN)
+        self._log.grid(row=0, column=0, sticky="nsew"); self._log.configure(state="disabled")
+        self._summary = ctk.CTkLabel(card.body, text="", text_color=t.TEXT_MUTED, font=t.font(11))
+        self._summary.grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+    def _logline(self, text: str, color: str = t.TEXT_MAIN):
+        self._log.configure(state="normal"); self._log.insert("end", text + "\n")
+        self._log.see("end"); self._log.configure(state="disabled")
+
+    # --- run orchestration ----------------------------------------------------
+
+    def _run(self):
+        if self._worker and self._worker.is_alive():
+            return
+        if not self._files:
+            self._logline(f"No {self.FILE_LABEL}s added.", t.TEXT_MUTED); return
+        opts = self._collect_options()
+        if opts is None:
+            return
+        if not self._pre_run_check(opts):
+            return
+        self._sweep_stale(opts)
+        self._stop.clear()
+        self._run_btn.configure(state="disabled"); self._stop_btn.configure(state="normal")
+        self._status.set_state("RUNNING", "running"); self._progress.set(0)
+        self._log.configure(state="normal"); self._log.delete("1.0", "end"); self._log.configure(state="disabled")
+        files = list(self._files)
+        self._worker = threading.Thread(target=self._work, args=(files, opts), daemon=True)
+        self._worker.start()
+
+    def _pre_run_check(self, opts) -> bool:
+        """Override for a confirmation dialog before running. Return True to proceed."""
+        return True
+
+    def _sweep_stale(self, opts) -> None:
+        """Clear orphaned `.part` temps in the output root before a run (a prior
+        hard kill can leave them). Only an explicit out_root is swept; beside-source
+        temps are self-healed by the next atomic write. Best-effort, never blocks."""
+        root = getattr(opts, "out_root", None)
+        if root and not getattr(opts, "dry_run", False):
+            n = sweep_part_files(Path(root))
+            if n:
+                self._logline(f"cleaned {n} stale .part temp file(s)", t.TEXT_MUTED)
+
+    def _request_stop(self):
+        self._stop.set(); self._status.set_state("STOPPING", "waiting")
+
+    # --- shared helpers -------------------------------------------------------
+
+    def _pick_output(self):
+        d = filedialog.askdirectory(title="Choose output folder")
+        if d:
+            self._out_entry.delete(0, "end"); self._out_entry.insert(0, d)
+
+    def _resolve_input_root(self) -> Path | None:
+        """Common ancestor of all source folders for mirror mode."""
+        if self._files:
+            try:
+                return Path(os.path.commonpath([str(p.parent) for p in self._files]))
+            except ValueError:
+                pass
+        return None
+
+    # --- subclass MUST implement ----------------------------------------------
+
+    def _build_options_card(self):
+        raise NotImplementedError
+
+    def _collect_options(self):
+        raise NotImplementedError
+
+    def _work(self, files: list[Path], opts):
+        raise NotImplementedError
+
+    def _write_manifest(self, opts, results: list) -> str | None:
+        raise NotImplementedError

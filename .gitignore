@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual env (the build env; recreate from requirements)
+.venv/
+venv/
+
+# Build artifacts
+build/
+dist/
+
+# Bundled external binaries — HUGE (ffmpeg/ffprobe ~460 MB) and separately
+# licensed. Never commit; ship them with the release build, not the repo.
+bin/
+
+# Atomic-write temp files
+*.part
+*.part.*
+
+# Runtime caches / downloaded models
+.kstoolbox_cache/
+*.kstoolbox_cache/
+
+# Generated run manifests (uncomment to ignore)
+# *_manifest.csv
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,155 @@
+"""Alpha Doctor — the tool's UI. Thin over engine.py. Deterministic methods by
+default; the AI method is just one more choice in the dropdown.
+"""
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+import customtkinter as ctk
+
+from toolbox import components as c
+from toolbox import theme as t
+from toolbox.icons import Icons
+from toolbox.batch_panel import BaseBatchPanel
+from . import engine as e
+
+_METHOD_LABELS = {
+    "solid": "Auto solid background",
+    "chroma": "Chroma key (pick colour)",
+    "edge_flood": "Edge flood-fill",
+    "ai": "AI matte (u2net — downloads model)",
+}
+
+
+class AlphaDoctorPanel(BaseBatchPanel):
+    FILE_EXTS = e.IMAGE_EXTS
+    FILE_LABEL = "image"
+    RESULTS_ICON = Icons.BROOM
+    RUN_LABEL = "Preview & Cut"
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self._on_method(self._method.get())
+
+    # -- options ---------------------------------------------------------------
+    def _build_options_card(self):
+        card = c.Card(self, "Options", icon=Icons.GEAR)
+        card.grid(row=1, column=0, sticky="nsew", padx=t.PAD_GRID, pady=(t.PAD_GRID, 0))
+        b = card.body
+        row = ctk.CTkFrame(b, fg_color="transparent"); row.pack(fill="x")
+        ctk.CTkLabel(row, text="Method", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=0, sticky="w")
+        self._method = ctk.CTkOptionMenu(row, values=[_METHOD_LABELS[m] for m in e.METHODS], width=240,
+                                         command=self._on_method, fg_color=t.BG_COLOR,
+                                         button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
+        self._method.set(_METHOD_LABELS["solid"]); self._method.grid(row=1, column=0, sticky="w", padx=(0, 24), pady=(2, 0))
+        ctk.CTkLabel(row, text="Tolerance", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=1, sticky="w")
+        self._tol = c.entry(row, width=70); self._tol.insert(0, "100")
+        self._tol.grid(row=1, column=1, sticky="w", padx=(0, 24), pady=(2, 0))
+        # chroma key colour (shown for chroma method)
+        self._key_label = ctk.CTkLabel(row, text="Key colour", text_color=t.TEXT_MUTED, font=t.font(11))
+        self._key_label.grid(row=0, column=2, sticky="w")
+        self._key = ctk.CTkOptionMenu(row, values=list(e.KEY_PRESETS) + ["custom"], width=90,
+                                      fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
+        self._key.set("green"); self._key.grid(row=1, column=2, sticky="w", padx=(0, 8), pady=(2, 0))
+        self._key_hex = c.entry(row, width=90); self._key_hex.insert(0, "#00FF00")
+        self._key_hex.grid(row=1, column=3, sticky="w", pady=(2, 0))
+        # output folder
+        self._build_output_row(b, "Output folder (blank = ./cutouts beside each source)")
+        # post-op toggles
+        toggles = ctk.CTkFrame(b, fg_color="transparent"); toggles.pack(fill="x", pady=(12, 0))
+        self._dry = ctk.CTkCheckBox(toggles, text="Preview only (no writes)", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._dry.select(); self._dry.pack(side="left")
+        self._defringe = ctk.CTkCheckBox(toggles, text="Defringe", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._defringe.select(); self._defringe.pack(side="left", padx=16)
+        self._green = ctk.CTkCheckBox(toggles, text="Green despill", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._green.pack(side="left", padx=16)
+        self._premul = ctk.CTkCheckBox(toggles, text="Premultiply", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._premul.pack(side="left", padx=16)
+        row2 = ctk.CTkFrame(b, fg_color="transparent"); row2.pack(fill="x", pady=(6, 0))
+        self._mirror = ctk.CTkCheckBox(row2, text="Mirror input structure", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._mirror.select(); self._mirror.pack(side="left")
+        self._hint = ctk.CTkLabel(b, text="", text_color=t.TEXT_MUTED, font=t.font(10)); self._hint.pack(anchor="w", pady=(6, 0))
+        self._build_run_row(b)
+
+    def _on_method(self, _label: str):
+        method = self._current_method()
+        chroma = method == "chroma"
+        for wdg in (self._key_label, self._key, self._key_hex):
+            (wdg.grid() if chroma else wdg.grid_remove())
+        hints = {"solid": "Deterministic — keys out the auto-detected flat background. No model.",
+                 "chroma": "Deterministic — keys the chosen colour. Great for green/blue screen, flat logos.",
+                 "edge_flood": "Deterministic — removes background regions touching the image border.",
+                 "ai": "Optional AI (u2net). Downloads a ~176 MB model on first use; CPU-only."}
+        self._hint.configure(text=hints.get(method, ""))
+
+    def _current_method(self) -> str:
+        label = self._method.get()
+        return next(m for m, lbl in _METHOD_LABELS.items() if lbl == label)
+
+    def _collect_options(self):
+        try:
+            tol = float(self._tol.get())
+        except ValueError:
+            self._logline("Tolerance must be a number.", t.STATE["error"][1]); return None
+        key_hex = self._key_hex.get().strip() if self._key.get() == "custom" else e.KEY_PRESETS.get(self._key.get(), "#00FF00")
+        out = self._out_entry.get().strip()
+        out_root = Path(out) if out else None
+        mirror = bool(self._mirror.get())
+        return e.AlphaOptions(out_root=out_root, input_root=self._resolve_input_root() if mirror else None,
+                              mirror=mirror, method=self._current_method(), key_color=key_hex, tolerance=tol,
+                              do_defringe=bool(self._defringe.get()), green_despill=bool(self._green.get()),
+                              do_premultiply=bool(self._premul.get()), dry_run=bool(self._dry.get()))
+
+    # -- batch loop ------------------------------------------------------------
+    def _work(self, files: list[Path], opts: e.AlphaOptions):
+        cut = skipped = failed = 0; results = []
+        for i, f in enumerate(files, 1):
+            if self._stop.is_set():
+                self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
+            self.after(0, self._logline, f"[{i}/{len(files)}] {f.name} …", t.TEXT_MUTED)
+            res = e.process(f, opts); results.append(res)
+            if res.action == "cut":
+                cut += 1
+            elif res.action in ("skipped", "dry-run"):
+                skipped += 1
+            else:
+                failed += 1
+            self.after(0, self._show, res, i, len(files))
+        manifest = self._write_manifest(opts, results)
+        self.after(0, self._done, cut, skipped, failed, manifest)
+
+    def _write_manifest(self, opts: e.AlphaOptions, results: list) -> str | None:
+        if opts.dry_run or not results or not opts.out_root:
+            return None
+        root = Path(opts.out_root)
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            path = root / "cutout_manifest.csv"
+            new = not path.exists()
+            with open(path, "a", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                if new:
+                    w.writerow(["src", "action", "coverage", "out_path", "detail", "reason"])
+                for r in results:
+                    w.writerow([r.src, r.action, f"{r.coverage:.3f}", r.out_path, r.detail, r.reason])
+            return str(path)
+        except OSError:
+            return None
+
+    def _show(self, res: e.Result, i: int, total: int):
+        self._progress.set(i / total)
+        icon = {"cut": "✓", "skipped": "–", "dry-run": "?", "failed": "✗"}.get(res.action, "•")
+        color = {"cut": t.STATE["done"][1], "failed": t.STATE["error"][1]}.get(res.action, t.TEXT_MUTED)
+        name = Path(res.src).name
+        extra = (f"  {res.coverage*100:.0f}% kept  ({res.detail})  → {res.out_path}"
+                 if res.action == "cut" else f"  — {res.reason}")
+        self._logline(f"  {icon} {name}{extra}", color)
+
+    def _done(self, cut, skipped, failed, manifest=None):
+        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
+        self._status.set_state("DONE", "done" if not failed else "error")
+        self._progress.set(1)
+        self._summary.configure(text=f"cut {cut} · skipped {skipped} · failed {failed}")
+        if manifest:
+            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)

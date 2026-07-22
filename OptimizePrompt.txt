@@ -1,0 +1,777 @@
+# KS Toolbox Deterministic-First Architecture and Optimization Audit
+
+You are working inside the **KS Toolbox** repository.
+
+KS Toolbox is a local-first desktop application containing multiple practical tools for everyday file, document, image, media, development, and batch-processing activities.
+
+Your task is to inspect the entire application and determine whether it follows a **deterministic-first, cartridge-disciplined architecture** without reducing, removing, or weakening any user-facing functionality.
+
+Do not assume that AI is undesirable. AI models are allowed and may be essential for some features.
+
+The governing rule is:
+
+> Use deterministic algorithms, existing structured data, retrieval, rules, reusable procedures, and specialist tools whenever they can produce an equal or better result. Use an AI model only when it provides meaningful functionality or quality that simpler methods cannot provide.
+
+The objective is not merely to reduce application size. Optimize the complete system:
+
+* package size;
+* installed size;
+* startup time;
+* idle RAM;
+* active RAM;
+* VRAM;
+* CPU use;
+* disk reads and writes;
+* temporary storage;
+* model-loading time;
+* processing latency;
+* dependency count;
+* reliability;
+* maintainability;
+* portability;
+* user experience.
+
+Do not remove functionality simply to achieve a smaller measurement.
+
+## Primary objectives
+
+Determine:
+
+1. Which operations are already deterministic.
+2. Which operations unnecessarily invoke AI.
+3. Which operations genuinely benefit from AI.
+4. Which AI calls can be avoided through confidence checks, caching, retrieval, templates, rules, classifiers, or reusable procedures.
+5. Which dependencies are unused, duplicated, oversized, or unnecessarily loaded.
+6. Which workflows repeat work that could be cached or resumed.
+7. Which batch operations can be streamed, fused, parallelized, or processed incrementally.
+8. Which components are initialized even when the current tool does not need them.
+9. Whether KS Toolbox can remain portable and plug-and-play.
+10. How much optimization is possible without losing any existing capability.
+
+## Non-negotiable constraints
+
+Do not:
+
+* remove working features;
+* weaken output quality without explicit evidence and approval;
+* replace a reliable component with a fragile custom implementation merely to reduce size;
+* change public interfaces unnecessarily;
+* silently change file formats or output structures;
+* introduce mandatory cloud services;
+* add Docker as a normal runtime requirement;
+* require users to manually install dependency chains;
+* load an AI model for deterministic operations;
+* load GPU libraries for CPU-only tasks;
+* initialize every module during application startup;
+* introduce unrestricted shell execution;
+* permit model-generated actions to bypass validation;
+* optimize based only on assumptions.
+
+Preserve backward compatibility where practical.
+
+When a breaking change appears necessary, document:
+
+* why it is necessary;
+* what functionality it affects;
+* migration steps;
+* rollback options;
+* measurable benefits.
+
+## Phase 1: Repository inventory
+
+Inspect the complete repository before proposing major changes.
+
+Create an inventory of:
+
+* application entry points;
+* UI modules;
+* core services;
+* worker processes;
+* tools and utilities;
+* background threads;
+* scheduled tasks;
+* model integrations;
+* network integrations;
+* databases;
+* caches;
+* configuration files;
+* bundled binaries;
+* Python packages;
+* native libraries;
+* model files;
+* media assets;
+* duplicate files;
+* tests;
+* build scripts;
+* packaging scripts;
+* update mechanisms.
+
+For each major component, record:
+
+| Field          | Required information                        |
+| -------------- | ------------------------------------------- |
+| Component      | Name and path                               |
+| Purpose        | Exact user-facing or internal function      |
+| Required by    | Features that depend on it                  |
+| Loaded when    | Startup, first use, or always               |
+| Disk cost      | Approximate size                            |
+| Runtime cost   | RAM, CPU, GPU, processes, threads           |
+| Dependencies   | Direct and transitive                       |
+| Deterministic  | Yes, no, or mixed                           |
+| AI involvement | Model and reason                            |
+| Alternatives   | Smaller or simpler approaches               |
+| Recommendation | Keep, optimize, isolate, replace, or remove |
+| Risk           | Low, medium, or high                        |
+
+Do not label a dependency unnecessary until you trace its usage.
+
+## Phase 2: Feature-to-mechanism map
+
+Create a map of every user-facing feature and the mechanisms it uses.
+
+Classify each operation into one of these levels:
+
+### Level 0 — Exact deterministic operation
+
+Examples:
+
+* file copying;
+* renaming;
+* hashing;
+* archive extraction;
+* metadata reading;
+* format validation;
+* dimensions and resolution checks;
+* regular-expression matching;
+* sorting;
+* grouping;
+* checksums;
+* duplicate detection by exact hash;
+* mathematical calculations;
+* deterministic templates.
+
+These operations should never require a generative model.
+
+### Level 1 — Deterministic heuristic or algorithm
+
+Examples:
+
+* perceptual hashing;
+* fuzzy filename matching;
+* image-quality metrics;
+* scene-change detection;
+* anomaly thresholds;
+* rule-based categorization;
+* clustering;
+* ranking;
+* constraint solving;
+* static analysis.
+
+Use AI only when these methods cannot reach acceptable accuracy.
+
+### Level 2 — Small specialist model
+
+Examples:
+
+* compact embeddings;
+* image similarity;
+* language detection;
+* classification;
+* OCR;
+* speech recognition;
+* object detection;
+* face or identity similarity;
+* anomaly detection.
+
+Prefer a specialist model over a general language or vision-language model when it provides sufficient quality.
+
+### Level 3 — Small generative model
+
+Use for:
+
+* interpreting unclear natural-language requests;
+* extracting parameters from flexible instructions;
+* structured workflow planning;
+* captioning ambiguous media;
+* summarizing unstructured content;
+* explaining unusual errors.
+
+Require structured outputs and validation.
+
+### Level 4 — Large model escalation
+
+Use only for:
+
+* genuinely novel reasoning;
+* complicated semantic interpretation;
+* difficult multimodal understanding;
+* advanced code generation or repair;
+* cases where smaller methods demonstrably fail.
+
+For every AI-assisted feature, explain why Levels 0–2 are insufficient.
+
+## Phase 3: AI-call audit
+
+Find every location where KS Toolbox calls:
+
+* local LLMs;
+* local VLMs;
+* remote AI APIs;
+* LM Studio;
+* llama.cpp;
+* ComfyUI;
+* OCR engines;
+* transcription models;
+* embedding models;
+* classifiers;
+* image-generation models;
+* video-generation models.
+
+For each call, record:
+
+* triggering feature;
+* input size;
+* output type;
+* model name;
+* RAM and VRAM usage;
+* cold-start cost;
+* average execution time;
+* whether the model remains loaded;
+* whether results are cached;
+* whether identical work is repeated;
+* whether the output is validated;
+* deterministic alternatives;
+* smaller-model alternatives;
+* conditions under which the call can be skipped.
+
+Identify AI calls that can be avoided by:
+
+* checking whether the answer already exists;
+* exact cache lookup;
+* content hashing;
+* retrieving a previous successful procedure;
+* detecting unchanged inputs;
+* using a template;
+* using a parser;
+* using a classifier;
+* using metadata;
+* using structured extraction;
+* using confidence thresholds;
+* asking the user one precise question;
+* reusing previous outputs.
+
+The correct routing cascade should normally be:
+
+```text
+Exact command or rule
+→ existing compiled procedure
+→ cached previous result
+→ retrieved similar procedure
+→ deterministic heuristic or solver
+→ specialist model
+→ small generative model
+→ optional larger model
+```
+
+Do not invoke every stage. Stop as soon as a trustworthy result is available.
+
+## Phase 4: Batch-processing audit
+
+KS Toolbox performs daily batch operations, so inspect all batch workflows for:
+
+* repeated file decoding;
+* repeated hashing;
+* repeated model inference;
+* unnecessary format conversions;
+* loading complete files when streaming is possible;
+* excessive temporary files;
+* unbounded queues;
+* copying large data between stages;
+* serial execution of independent operations;
+* excessive parallelism causing disk or VRAM contention;
+* restarting completed work after failure;
+* missing progress checkpoints;
+* missing cancellation;
+* missing retry boundaries;
+* GPU initialization for non-GPU work;
+* models repeatedly loading and unloading within one batch.
+
+For each batch tool, design an optimized execution graph.
+
+Example:
+
+```text
+Discover files
+→ calculate content identity
+→ skip unchanged files
+→ validate formats
+→ group compatible operations
+→ execute deterministic stages
+→ route only uncertain items to AI
+→ verify outputs
+→ retry failed items only
+→ commit outputs atomically
+→ update manifest and cache
+```
+
+Measure how many inputs require AI rather than assuming the entire batch needs AI.
+
+## Phase 5: Content-addressed caching
+
+Assess whether KS Toolbox can cache results using a key derived from:
+
+```text
+tool version
++ operation settings
++ input content hashes
++ relevant model version
++ workflow version
++ environment factors affecting the result
+```
+
+Identify reusable intermediate outputs such as:
+
+* file hashes;
+* decoded metadata;
+* thumbnails;
+* perceptual hashes;
+* OCR text;
+* transcripts;
+* embeddings;
+* image masks;
+* quality scores;
+* extracted document text;
+* model captions;
+* converted media;
+* workflow outputs.
+
+Ensure cache entries include provenance and can be invalidated correctly.
+
+Do not cache nondeterministic outputs as though they were deterministic. For AI-generated results, include the model, sampler, seed, prompt, workflow, and configuration where applicable.
+
+## Phase 6: Incremental execution
+
+Determine whether jobs can recompute only affected stages.
+
+Example:
+
+```text
+1,000 files processed
+1 file changes
+```
+
+The system should not repeat work for the other 999 files unless the changed file affects a global result.
+
+Design dependency tracking between:
+
+* source files;
+* intermediate artifacts;
+* workflow stages;
+* final outputs;
+* reports;
+* indexes;
+* model-generated data.
+
+Recommend where incremental recomputation would provide the largest benefit.
+
+## Phase 7: Procedure reuse
+
+Inspect whether repeated workflows are currently reconstructed manually or regenerated by AI.
+
+Design a safe procedure-reuse system where successful work can become a reusable parameterized procedure.
+
+Example requests:
+
+```text
+Resize all PNG files to 1024×1024.
+Resize all JPEG files to 512×512.
+Resize these character images to 2048×2048.
+```
+
+These should become one reusable procedure:
+
+```text
+resize_batch(input, format_filter, width, height, output)
+```
+
+Procedure promotion must require:
+
+* successful execution;
+* validated outputs;
+* parameter identification;
+* removal of file-specific constants;
+* regression tests;
+* versioning;
+* rollback;
+* human approval for risky operations.
+
+Do not treat exact prompt caching as true procedure learning.
+
+## Phase 8: Dependency and package audit
+
+Inspect all direct and transitive dependencies.
+
+Identify:
+
+* unused packages;
+* overlapping packages;
+* duplicate image libraries;
+* duplicate HTTP clients;
+* duplicate serialization libraries;
+* duplicate model runtimes;
+* multiple archive implementations;
+* unnecessary UI frameworks;
+* development-only packages shipping in production;
+* test packages shipping in releases;
+* large optional dependencies imported at startup;
+* packages used for one trivial function;
+* bundled binaries already available through another component.
+
+For each proposed removal or replacement, provide:
+
+* current size;
+* replacement size;
+* affected features;
+* compatibility risk;
+* maintenance impact;
+* benchmark evidence.
+
+Do not reimplement mature security-sensitive components merely to save a small amount of space.
+
+## Phase 9: Startup and lazy loading
+
+Trace application startup.
+
+Report:
+
+* modules imported;
+* files scanned;
+* databases opened;
+* workers started;
+* models loaded;
+* GPU runtimes initialized;
+* network checks performed;
+* update checks performed;
+* caches read;
+* UI resources loaded.
+
+Separate components into:
+
+* required at startup;
+* load after UI appears;
+* load on first feature use;
+* load only during a job;
+* optional cartridge or sidecar.
+
+The application should open without initializing:
+
+* ComfyUI;
+* CUDA;
+* llama.cpp;
+* Whisper;
+* OCR;
+* Blender;
+* FFmpeg;
+* embedding models;
+* unused databases;
+* unused tools.
+
+unless the first requested operation requires them.
+
+## Phase 10: Resource scheduling
+
+Review CPU, RAM, VRAM, disk, and process coordination.
+
+The scheduler should understand:
+
+* CPU-bound jobs;
+* GPU-bound jobs;
+* disk-bound jobs;
+* network-bound jobs;
+* interactive jobs;
+* background batch jobs;
+* exclusive resources;
+* available VRAM;
+* model residency;
+* worker priority;
+* cancellation;
+* deadlines.
+
+Investigate:
+
+* one GPU lock versus per-GPU resource pools;
+* keeping a frequently used model resident;
+* unloading models when memory pressure requires it;
+* batching compatible inference requests;
+* avoiding simultaneous heavy disk scans;
+* limiting worker counts based on measured throughput;
+* prioritizing interactive UI actions over overnight jobs.
+
+Do not maximize concurrency blindly.
+
+## Phase 11: Reliability audit
+
+Check whether every destructive or long-running operation supports:
+
+* preflight validation;
+* dry-run mode;
+* transactional output;
+* temporary output files;
+* atomic rename or replacement;
+* checkpoints;
+* resumability;
+* deterministic retries;
+* failure isolation;
+* cancellation;
+* output verification;
+* provenance;
+* rollback;
+* cleanup after interruption.
+
+Simulate failures at several workflow stages.
+
+Confirm that a crash, power loss, failed model, unavailable GPU, malformed file, or full disk does not corrupt completed output.
+
+## Phase 12: Security audit
+
+Inspect:
+
+* path traversal protection;
+* symlink and junction handling;
+* archive extraction boundaries;
+* decompression-bomb limits;
+* unrestricted subprocess calls;
+* shell-command construction;
+* user-provided filenames;
+* temporary files;
+* network permissions;
+* model-generated paths or commands;
+* plugin permissions;
+* native binaries;
+* downloaded models;
+* update verification;
+* secrets and API keys;
+* audit logging.
+
+AI-generated plans must be treated as untrusted input.
+
+A model may suggest a workflow, but a deterministic policy layer must validate:
+
+* allowed tools;
+* allowed paths;
+* write permissions;
+* network permissions;
+* resource limits;
+* output destinations;
+* destructive operations.
+
+## Phase 13: UI and functionality preservation
+
+Document all current workflows before optimization.
+
+For each proposed change, verify:
+
+* same inputs remain supported;
+* same outputs remain available;
+* settings are preserved;
+* keyboard and batch workflows remain intact;
+* progress reporting remains accurate;
+* error messages remain useful;
+* cancellation still works;
+* output quality is not reduced;
+* previous project files continue to load.
+
+Where an optimized path may produce different results, retain the original path as a compatibility mode until evidence supports removal.
+
+## Required measurements
+
+Collect baseline measurements before making significant changes:
+
+* release package size;
+* installed size;
+* number of files;
+* dependency count;
+* startup time;
+* idle RAM;
+* idle CPU;
+* process count;
+* thread count;
+* simple file-operation time;
+* representative batch-job time;
+* peak RAM;
+* peak VRAM;
+* temporary disk use;
+* cache hit rate;
+* number of AI calls;
+* total model-loading time;
+* number of files requiring AI;
+* failure recovery time.
+
+Repeat the same measurements after each optimization.
+
+Do not claim an improvement without before-and-after evidence.
+
+## Optimization scoring
+
+Score each major tool from 0 to 5 in these categories:
+
+| Category              | Meaning                                          |
+| --------------------- | ------------------------------------------------ |
+| Deterministic-first   | Avoids unnecessary AI use                        |
+| Dependency efficiency | Minimal justified dependencies                   |
+| Lazy loading          | Loads only required components                   |
+| Batch efficiency      | Avoids repeated work and uses safe concurrency   |
+| Cache effectiveness   | Reuses valid previous results                    |
+| Incremental execution | Recomputes only affected stages                  |
+| Memory efficiency     | Controls RAM and VRAM                            |
+| Reliability           | Recovers safely from interruption                |
+| Security              | Enforces capabilities and validation             |
+| Function preservation | Optimization does not reduce capability          |
+| Portability           | Works without fragile installation steps         |
+| Maintainability       | Architecture remains understandable and testable |
+
+Provide:
+
+* current score;
+* target score;
+* supporting evidence;
+* recommended work;
+* estimated implementation risk.
+
+## Required deliverables
+
+Create:
+
+### `docs/KS_TOOLBOX_OPTIMIZATION_AUDIT.md`
+
+Include:
+
+* executive summary;
+* current architecture diagram;
+* repository inventory;
+* feature-to-mechanism map;
+* deterministic-versus-AI analysis;
+* dependency findings;
+* startup findings;
+* batch-processing findings;
+* caching findings;
+* procedure-reuse findings;
+* security findings;
+* reliability findings;
+* benchmark results;
+* scorecard;
+* highest-value opportunities;
+* rejected optimization ideas.
+
+### `docs/KS_TOOLBOX_OPTIMIZATION_PLAN.md`
+
+Organize recommendations into:
+
+#### Immediate low-risk improvements
+
+Changes that preserve behavior and can be implemented safely.
+
+#### Medium-term architectural improvements
+
+Changes requiring controlled refactoring.
+
+#### Experimental improvements
+
+Ideas requiring prototypes and benchmarks before adoption.
+
+#### Rejected approaches
+
+Ideas that would reduce functionality, reliability, maintainability, or portability.
+
+### `benchmarks/`
+
+Add reproducible scripts or tests for:
+
+* startup;
+* memory;
+* dependency size;
+* batch throughput;
+* caching;
+* incremental execution;
+* AI-call reduction;
+* crash recovery;
+* model cold start;
+* model unload;
+* package size.
+
+### Optimization opportunity table
+
+For each recommendation, include:
+
+| Field                 | Required value                         |
+| --------------------- | -------------------------------------- |
+| Opportunity           | What can improve                       |
+| Current behavior      | What happens now                       |
+| Proposed behavior     | What should happen                     |
+| Functionality impact  | Must remain unchanged or improve       |
+| Disk saving           | Estimated and measured                 |
+| RAM saving            | Estimated and measured                 |
+| Runtime saving        | Estimated and measured                 |
+| AI-call reduction     | Estimated and measured                 |
+| Complexity            | Low, medium, or high                   |
+| Risk                  | Low, medium, or high                   |
+| Dependencies affected | Exact list                             |
+| Tests required        | Exact validation                       |
+| Recommendation        | Implement, prototype, defer, or reject |
+
+## Implementation policy
+
+Do not begin broad refactoring immediately.
+
+Follow this order:
+
+1. Inventory.
+2. Baseline measurements.
+3. Architecture analysis.
+4. Deterministic-versus-AI classification.
+5. Opportunity ranking.
+6. Low-risk prototype.
+7. Before-and-after benchmark.
+8. Regression tests.
+9. Implementation only when benefits are demonstrated.
+10. Update documentation and rollback instructions.
+
+You may implement safe, isolated optimizations after the audit when all of the following are true:
+
+* behavior is well understood;
+* tests exist;
+* functionality is preserved;
+* rollback is straightforward;
+* measurable benefit is likely;
+* the change does not force unrelated architectural decisions.
+
+Do not implement high-risk changes without first documenting them and obtaining approval.
+
+## Final questions the audit must answer
+
+1. Which KS Toolbox features currently use AI unnecessarily?
+2. Which features genuinely require AI?
+3. How many model calls can be eliminated without reducing quality?
+4. Which successful AI operations can become reusable procedures?
+5. Which dependencies contribute the most package size?
+6. Which dependencies are duplicated or loaded unnecessarily?
+7. Which tools redo work that can be cached?
+8. Which workflows can become incremental?
+9. Which batch operations can be streamed or fused?
+10. Which models can remain unloaded until required?
+11. What causes the largest startup and idle-memory costs?
+12. Can the application remain fully portable?
+13. What can be reduced safely?
+14. What should not be reduced because it would damage quality or reliability?
+15. What is the smallest practical package that preserves the complete KS Toolbox experience?
+16. What five changes provide the largest benefit for the least risk?
+
+## Final principle
+
+Optimize KS Toolbox as though every megabyte, model call, allocation, process, dependency, and line of code must justify its existence.
+
+However:
+
+> Never confuse minimalism with removing capability.
+
+The goal is to make KS Toolbox smaller, faster, more reliable, more portable, and less dependent on AI while preserving—or improving—everything useful that it already does.
