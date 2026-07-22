@@ -1,6 +1,4 @@
-"""Image Rescale — the tool's UI. Thin over engine.py: collect images + options,
-run on a worker thread, stream results back via after(). No sizing math here.
-"""
+"""Image Rescale UI; execution is submitted to the shell-owned job queue."""
 from __future__ import annotations
 
 import csv
@@ -21,7 +19,12 @@ from toolbox.batch_core import (
     JobState,
     write_completion_report,
 )
-from toolbox.job_queue import QueueCompletion, QueueSnapshot, QueueSubmission
+from toolbox.job_queue import (
+    QueueCompletion,
+    QueueFinalization,
+    QueueSnapshot,
+    QueueSubmission,
+)
 from toolbox.sqlite_job_store import default_report_dir
 from . import engine as e
 
@@ -152,7 +155,7 @@ class ImageRescalePanel(BaseBatchPanel):
             finalize=lambda report: self._prepare_completion(report, opts),
         )
 
-    def _prepare_completion(self, report, opts: e.ResizeOptions) -> dict:
+    def _prepare_completion(self, report, opts: e.ResizeOptions) -> QueueFinalization:
         finished_items = [
             item for item in report.items
             if item.state in {ItemState.COMPLETED, ItemState.SKIPPED, ItemState.QUARANTINED}
@@ -174,13 +177,13 @@ class ImageRescalePanel(BaseBatchPanel):
         except OSError as ex:
             errors.append(f"completion report write failed: {ex}")
             report_path = None
-        return {
+        payload = {
             "finished_items": finished_items,
             "results": results,
             "manifest": manifest,
             "report_path": str(report_path) if report_path else None,
-            "errors": errors,
         }
+        return QueueFinalization(payload, tuple(errors))
 
     def _on_queue_snapshot(self, snapshot: QueueSnapshot) -> None:
         super()._on_queue_snapshot(snapshot)
@@ -200,14 +203,14 @@ class ImageRescalePanel(BaseBatchPanel):
         for item, result in zip(finished_items, results):
             if item.position not in self._queue_shown:
                 self._show(result, item.position + 1, len(report.items))
-        for error in payload["errors"]:
+        for error in completion.warnings:
             self._logline(error, t.STATE["error"][1])
         resized = sum(result.action == "resized" for result in results)
         skipped = sum(result.action in ("skipped", "dry-run") for result in results)
         failed = len(results) - resized - skipped
         remaining = len(report.items) - len(finished_items)
         state = report.state
-        if payload["errors"] and state is JobState.COMPLETED:
+        if completion.warnings and state is JobState.COMPLETED:
             state = JobState.COMPLETED_WITH_WARNINGS
         self._done(
             resized, skipped, failed, remaining, payload["manifest"],

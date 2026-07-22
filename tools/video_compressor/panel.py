@@ -1,7 +1,4 @@
-"""Video Compressor — the tool's UI. Thin over engine.py: collect files + options,
-run the engine on a worker thread, stream results back to the UI via after().
-No encoding logic lives here (that's engine.py); no UI logic lives there.
-"""
+"""Video Compressor UI; execution is submitted to the shell-owned job queue."""
 from __future__ import annotations
 
 import csv
@@ -23,7 +20,12 @@ from toolbox.batch_core import (
     JobState,
     write_completion_report,
 )
-from toolbox.job_queue import QueueCompletion, QueueSnapshot, QueueSubmission
+from toolbox.job_queue import (
+    QueueCompletion,
+    QueueFinalization,
+    QueueSnapshot,
+    QueueSubmission,
+)
 from toolbox.sqlite_job_store import default_report_dir
 from . import engine as e
 
@@ -149,7 +151,7 @@ class VideoCompressorPanel(BaseBatchPanel):
             finalize=lambda report: self._prepare_completion(report, opts),
         )
 
-    def _prepare_completion(self, report, opts: e.ProcessOptions) -> dict:
+    def _prepare_completion(self, report, opts: e.ProcessOptions) -> QueueFinalization:
         finished_items = [
             item for item in report.items
             if item.state in {ItemState.COMPLETED, ItemState.SKIPPED, ItemState.QUARANTINED}
@@ -171,13 +173,13 @@ class VideoCompressorPanel(BaseBatchPanel):
         except OSError as ex:
             errors.append(f"completion report write failed: {ex}")
             report_path = None
-        return {
+        payload = {
             "finished_items": finished_items,
             "results": results,
             "manifest": manifest,
             "report_path": str(report_path) if report_path else None,
-            "errors": errors,
         }
+        return QueueFinalization(payload, tuple(errors))
 
     def _on_queue_snapshot(self, snapshot: QueueSnapshot) -> None:
         super()._on_queue_snapshot(snapshot)
@@ -197,7 +199,7 @@ class VideoCompressorPanel(BaseBatchPanel):
         for item, result in zip(finished_items, results):
             if item.position not in self._queue_shown:
                 self._show(result, item.position + 1, len(report.items))
-        for error in payload["errors"]:
+        for error in completion.warnings:
             self._logline(error, t.STATE["error"][1])
         compressed = sum(result.action == "compressed" for result in results)
         skipped = sum(result.action in ("skipped", "dry-run") for result in results)
@@ -207,7 +209,7 @@ class VideoCompressorPanel(BaseBatchPanel):
             result.before_mb - result.after_mb for result in results if result.action == "compressed"
         )
         state = report.state
-        if payload["errors"] and state is JobState.COMPLETED:
+        if completion.warnings and state is JobState.COMPLETED:
             state = JobState.COMPLETED_WITH_WARNINGS
         self._done(
             compressed, skipped, failed, remaining, saved_total, payload["manifest"],

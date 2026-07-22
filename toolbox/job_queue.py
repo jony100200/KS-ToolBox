@@ -61,6 +61,15 @@ class QueueCompletion:
     report: BatchReport
     value: object = None
     error: str = ""
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class QueueFinalization:
+    """Finalizer output plus non-fatal problems that must remain visible."""
+
+    value: object = None
+    warnings: tuple[str, ...] = ()
 
 
 StoreFactory = Callable[[], object]
@@ -288,17 +297,27 @@ class JobQueue:
             detail = "reused completed job" if report.reused else ""
             value = None
             finalize_error = ""
+            finalize_warnings: tuple[str, ...] = ()
             if submission.finalize is not None:
                 try:
-                    value = submission.finalize(report)
+                    finalized = submission.finalize(report)
+                    if isinstance(finalized, QueueFinalization):
+                        value = finalized.value
+                        finalize_warnings = finalized.warnings
+                    else:
+                        value = finalized
                 except Exception as ex:  # noqa: BLE001 - outputs remain, report warning is visible
                     finalize_error = f"{type(ex).__name__}: {ex}"
                     detail = f"completion finalization failed: {finalize_error}"
+            if finalize_warnings:
+                detail = "; ".join(finalize_warnings)
             with self._lock:
-                self._completions[job_id] = QueueCompletion(report, value, finalize_error)
+                self._completions[job_id] = QueueCompletion(
+                    report, value, finalize_error, finalize_warnings
+                )
             self._call(submission.on_complete, report)
             final_state = report.state
-            if finalize_error and final_state is JobState.COMPLETED:
+            if (finalize_error or finalize_warnings) and final_state is JobState.COMPLETED:
                 final_state = JobState.COMPLETED_WITH_WARNINGS
             self._update(
                 job_id,

@@ -1,9 +1,8 @@
 """Base batch panel — shared file picker, run/stop orchestration, results log.
 
-Every batch tool panel extends this. The base owns: file management, run row,
-results card, worker thread lifecycle, output folder picker, mirror input_root.
-Subclasses own: options card, option collection, engine call, result rendering,
-manifest writing. Pure refactor, zero behavior change.
+Every batch tool panel extends this. The base owns file management, controls,
+queue polling, results, output selection, and the compatibility worker path for
+unmigrated tools. New durable panels submit to the shell-owned queue.
 """
 from __future__ import annotations
 

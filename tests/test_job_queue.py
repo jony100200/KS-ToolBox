@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from toolbox.batch_core import ItemOutcome, JobDefinition, JobState
-from toolbox.job_queue import JobQueue, QueueSubmission
+from toolbox.job_queue import JobQueue, QueueFinalization, QueueSubmission
 from toolbox.sqlite_job_store import SQLiteJobStore
 
 
@@ -146,6 +146,26 @@ class JobQueueTests(unittest.TestCase):
             self.assertTrue(loaded[0].persisted)
         finally:
             reopened.close()
+
+    def test_finalizer_warnings_are_visible_in_snapshot_and_completion(self) -> None:
+        submission = self._submission("warning", lambda path: path.name)
+        submission = QueueSubmission(
+            **{
+                **submission.__dict__,
+                "finalize": lambda report: QueueFinalization(
+                    {"report": report.job_id}, ("manifest write failed",)
+                ),
+            }
+        )
+        job_id = self.queue.submit(submission)
+        snapshot = self._wait(job_id)
+        completion = self.queue.completion(job_id)
+
+        self.assertEqual(snapshot.state, JobState.COMPLETED_WITH_WARNINGS)
+        self.assertIn("manifest write failed", snapshot.detail)
+        self.assertIsNotNone(completion)
+        self.assertEqual(completion.warnings, ("manifest write failed",))
+        self.assertEqual(completion.value, {"report": job_id})
 
 
 if __name__ == "__main__":
