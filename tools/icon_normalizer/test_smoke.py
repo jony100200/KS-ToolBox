@@ -58,10 +58,14 @@ def main() -> int:
                                               trim=True, dry_run=False))
         assert res.action == "converted", f"expected converted, got {res.action}: {res.reason}"
         assert Path(res.out_path).is_file(), "no output written"
+        assert e.validate_result(res), "fresh normalized output did not pass artifact validation"
 
         with Image.open(res.out_path) as got:     # close the handle so tempdir cleanup works on Windows
             assert got.size == (256, 256), f"output should be 256x256, got {got.size}"
             assert got.convert("RGBA").mode == "RGBA", "output must be RGBA"
+
+        Path(res.out_path).write_bytes(b"not a png")
+        assert not e.validate_result(res), "corrupt stored output must not be reusable"
 
     print(f"PASS: icon_normalizer — pure normalize centred+squared; process wrote "
           f"{Path(res.out_path).name} at 256x256 RGBA.")

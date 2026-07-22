@@ -41,6 +41,8 @@ CustomTkinter Queue/History view exposes priority-ordered submissions,
 pause/resume/cancel, progress, finalization warnings, and persisted history.
 Tk widgets poll immutable snapshots on the main thread; queue workers never
 touch Tk. `BaseBatchPanel` retains its old worker only as a migration adapter.
+Icon Normalizer is the third migrated slice and adds deterministic square-RGBA
+artifact validation before a stored output is reused.
 
 ### Slice 4 — next: resource profiles and dependencies
 

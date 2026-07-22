@@ -15,6 +15,8 @@ is the daily "make all my icons the same clean 256×256" batch tool.
 Saves RGBA PNGs. Nothing is written until you turn off **Preview only**; originals
 are never touched. An `icon_manifest.csv` records every file when an output folder
 is set. Fully-transparent images are reported as **skipped** (nothing to centre).
+Jobs run through the shared durable queue, can pause or cancel at item boundaries,
+resume from checkpoints, and reuse only outputs that reopen as square RGBA PNGs.
 
 ## Options
 

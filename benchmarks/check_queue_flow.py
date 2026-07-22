@@ -65,6 +65,32 @@ def main() -> int:
                 f"{app._services.queue.subscriber_errors}"
             )
 
+            app._select("icon_normalizer")
+            icon_panel = app._panels["icon_normalizer"]
+            icon_panel._add([first, second])
+            icon_panel._run()  # default dry run
+            icon_job_id = icon_panel._active_job_id
+            assert icon_job_id, "Icon Normalizer did not submit a queue job"
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                app.update()
+                icon_snapshot = app._services.queue.snapshot(icon_job_id)
+                if icon_snapshot and icon_snapshot.state in {
+                    JobState.COMPLETED, JobState.COMPLETED_WITH_WARNINGS,
+                    JobState.FAILED, JobState.CANCELLED,
+                }:
+                    break
+                time.sleep(0.01)
+            else:
+                raise AssertionError("queued Icon Normalizer job did not finish")
+            control_deadline = time.monotonic() + 2
+            while (icon_panel._run_btn.cget("state") != "normal"
+                   and time.monotonic() < control_deadline):
+                app.update(); time.sleep(0.01)
+            assert icon_snapshot.state is JobState.COMPLETED, icon_snapshot
+            assert icon_snapshot.completed_items == 2
+            assert icon_panel._run_btn.cget("state") == "normal"
+
             video_job_id = None
             ffmpeg = resolve_tool("ffmpeg")
             if ffmpeg:
@@ -105,12 +131,14 @@ def main() -> int:
             queue_panel = app._panels[app.QUEUE_ID]
             assert isinstance(queue_panel, QueuePanel)
             assert any(item.job_id == job_id for item in app._services.queue.history())
+            assert any(item.job_id == icon_job_id for item in app._services.queue.history())
             if video_job_id:
                 assert any(item.job_id == video_job_id for item in app._services.queue.history())
         finally:
             app._on_close()
 
-    print("PASS: CustomTkinter submitted Image Rescale and Video Compressor through shell queue; history UI rendered.")
+    print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, and "
+          "Video Compressor through shell queue; history UI rendered.")
     return 0
 
 

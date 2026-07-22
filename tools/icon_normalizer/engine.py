@@ -146,3 +146,26 @@ def process(path: str | Path, opts: NormalizeOptions) -> Result:
 
     return Result(str(src), "converted", f"{before} -> {after}", before=before, after=after,
                   out_path=str(dst), detail=f"trim={opts.trim} pad={opts.padding_pct}%")
+
+
+def validate_result(result: Result) -> bool:
+    """Reopen a stored artifact before the durable runner trusts it."""
+    if result.action in {"skipped", "dry-run"}:
+        return True
+    if result.action != "converted" or not result.out_path:
+        return False
+    try:
+        from PIL import Image
+
+        with Image.open(result.out_path) as image:
+            image.load()
+            width, height = image.size
+            return (
+                image.format == "PNG"
+                and image.mode == "RGBA"
+                and width > 0
+                and width == height
+                and result.after == f"{width}x{height}"
+            )
+    except (ImportError, OSError, ValueError):
+        return False

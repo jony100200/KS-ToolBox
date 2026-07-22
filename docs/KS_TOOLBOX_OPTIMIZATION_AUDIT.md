@@ -83,7 +83,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Format Converter | Pillow/ffmpeg/document adapters | Deterministic | capability matrix, metadata/color handling, modern formats, backend provenance |
 | Pixel Art | nearest-neighbor pixelization, median-cut palette, optional dithering | Deterministic | perceptual palette benchmark, palette locking, alpha-aware quantization |
 | To SVG | VTracer | Deterministic | expose presets/path controls, score path complexity and reconstruction error |
-| Icon Normalizer | alpha geometry and fixed canvas placement | Deterministic | perceptual visual-mass normalization and platform keyline presets |
+| Icon Normalizer | alpha geometry, fixed canvas placement, durable queue, validated RGBA reuse | Deterministic | perceptual visual-mass normalization and platform keyline presets |
 | Showcase | Pillow contact/hero/comparison compositing | Deterministic | attention/entropy smart crop and reusable layout presets |
 | Alpha Doctor | chroma/solid/edge flood plus optional U2Net ONNX | Hybrid | uncertainty routing, matte cache, better optional high-resolution specialist |
 | Material Converter | map discovery, channel pack/unpack, normal/gloss transforms | Deterministic | canonical MaterialX/OpenPBR mapping, color-space validation, packed-map presets |

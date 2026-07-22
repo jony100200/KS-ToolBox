@@ -21,9 +21,9 @@ Tool registry + lazy single-lane BatchRunner
                          SQLiteJobStore, filesystem, FFmpeg, Pillow, native tools
 ```
 
-The first durable vertical slices are `image_rescale` and `video_compressor`.
-Other tools still use the existing `BaseBatchPanel` loop until migrated and
-verified individually.
+The first durable vertical slices are `image_rescale`, `video_compressor`, and
+`icon_normalizer`. Other tools still use the existing `BaseBatchPanel` loop
+until migrated and verified individually.
 
 ## Allowed dependency directions
 
