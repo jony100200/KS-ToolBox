@@ -53,7 +53,7 @@ tool engine ──► toolbox.engine_common
 | `JobQueue` | `toolbox/job_queue.py` | Lazy priority queue, pause/resume/cancel, snapshots, and history |
 | `QueueSubmission` | `toolbox/job_queue.py` | Tool execution, classification, validation, and finalization contract |
 | `BatchCompletionArtifacts` | `toolbox/batch_reporting.py` | Shared typed results, manifest, and atomic morning-report finalization |
-| `JobDefinition` | `toolbox/batch_core.py` | Stable tool, workflow, inputs, settings, and retry identity |
+| `JobDefinition` | `toolbox/batch_core.py` | Stable executable-item anchors plus complete file-dependency identity |
 | `ItemOutcome` | `toolbox/batch_core.py` | Typed completed, skipped, failed, or quarantined result |
 | `CancellationToken` | `toolbox/batch_core.py` | Cooperative pause/cancel at safe item boundaries |
 | `JobStore` | `toolbox/batch_core.py` | Small persistence boundary used by the runner |

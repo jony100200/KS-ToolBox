@@ -87,6 +87,7 @@ class JobDefinition:
         inputs: list[str | Path] | tuple[str | Path, ...],
         settings: Mapping[str, Any],
         max_retries: int = 0,
+        identity_dependencies: list[str | Path] | tuple[str | Path, ...] | None = None,
     ) -> "JobDefinition":
         if not tool_id.strip():
             raise ValueError("tool_id is required")
@@ -104,6 +105,14 @@ class JobDefinition:
             "settings": normalized_settings,
             "max_retries": max_retries,
         }
+        if identity_dependencies is not None:
+            dependency_by_path = {item["path"]: item for item in identities}
+            for dependency in identity_dependencies:
+                item = _input_identity(Path(dependency))
+                dependency_by_path[item["path"]] = item
+            identity["identity_dependencies"] = sorted(
+                dependency_by_path.values(), key=lambda item: item["path"]
+            )
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         job_id = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
         return cls(

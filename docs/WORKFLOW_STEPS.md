@@ -43,12 +43,15 @@ Implemented job/checkpoint identity:
 ```text
 tool ID + tool version + workflow version
 + normalized settings + retry policy
-+ normalized input paths + size + mtime_ns
++ normalized executable input paths + size + mtime_ns
++ optional normalized identity-dependency paths + size + mtime_ns
 ```
 
 This identity safely locates a matching checkpoint. A tool validator must still
 verify completed artifacts before reuse; missing or invalid outputs are
 recomputed individually. It is not yet a content-addressed artifact cache.
+Identity dependencies support a grouped item whose result depends on several
+files; they affect the job key but do not create extra executable items.
 
 The future artifact cache key must be:
 

@@ -64,6 +64,13 @@ outcome = classify(result)
 quarantine records; they do not stop later items. Progress-subscriber failures
 are isolated and returned in report diagnostics.
 
+`JobDefinition.inputs` are executable item anchors. For grouped work such as a
+PBR texture set, `identity_dependencies` adds every member file to deterministic
+job identity without turning each member into an independently executable item.
+Anchors are always included, dependency order is normalized, and changing any
+member produces a new job ID. This prevents stale set-level reuse while keeping
+one checkpoint and failure boundary per coherent set.
+
 Completed artifact records are reusable only through a tool-supplied
 `validate_stored` function. Invalid or missing artifacts are reset to Pending
 and recomputed individually. Without a validator, completed artifact items are

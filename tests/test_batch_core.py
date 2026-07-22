@@ -180,6 +180,33 @@ class BatchCoreTests(unittest.TestCase):
         self.assertEqual(payload["counts"]["skipped"], 3)
         self.assertFalse(list(self.root.glob("*.part")))
 
+    def test_grouped_job_identity_tracks_every_dependency_not_only_item_anchor(self) -> None:
+        anchor = self.root / "material_BaseColor.png"
+        roughness = self.root / "material_Roughness.png"
+        metallic = self.root / "material_Metallic.png"
+        anchor.write_bytes(b"base")
+        roughness.write_bytes(b"rough-v1")
+        metallic.write_bytes(b"metal")
+
+        def definition(dependencies) -> JobDefinition:
+            return JobDefinition.create(
+                tool_id="material",
+                tool_version="1",
+                workflow_version="set.v1",
+                inputs=[anchor],
+                identity_dependencies=dependencies,
+                settings={"pack_orm": True},
+            )
+
+        first = definition([roughness, metallic])
+        reordered = definition([metallic, roughness])
+        self.assertEqual(first.job_id, reordered.job_id)
+        self.assertEqual(first.inputs, (str(anchor.resolve()),))
+
+        roughness.write_bytes(b"rough-v2-is-different")
+        changed = definition([metallic, roughness])
+        self.assertNotEqual(first.job_id, changed.job_id)
+
 
 if __name__ == "__main__":
     unittest.main()
