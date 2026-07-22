@@ -8,6 +8,10 @@ Run from the repo root. `$py` = the app venv's python (`.venv\Scripts\python.exe
 `$uv` = uv on PATH (dependency measurements use an isolated temp target so nothing
 touches the app venv).
 
+Run package-aware Python checks with module syntax, for example
+`$py -m benchmarks.check_ui`; direct script syntax does not place the repository
+root on `sys.path` for every verifier.
+
 | Script | Measures | Notes |
 |---|---|---|
 | `measure_repo.ps1` | file count, LOC, source/asset/bin sizes | pure filesystem |
