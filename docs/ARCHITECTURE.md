@@ -22,8 +22,9 @@ Tool registry + lazy single-lane BatchRunner
 ```
 
 The first durable vertical slices are `image_rescale`, `video_compressor`,
-`icon_normalizer`, `pixel_art`, and `material_converter`. Other tools still use
-the existing `BaseBatchPanel` loop until migrated and verified individually.
+`icon_normalizer`, `pixel_art`, `material_converter`, and `showcase`. Other tools
+still use the existing `BaseBatchPanel` loop until migrated and verified
+individually.
 
 ## Allowed dependency directions
 

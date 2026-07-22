@@ -46,6 +46,14 @@ on, and the contact sheet is a single `contact_sheet.png`.
 Nothing is written until **Preview only** is off; originals are never touched. A
 `showcase_manifest.csv` records every render when an output folder is set.
 
+The durable queue uses mode-correct work units: a contact sheet is one grouped
+item depending on every source image, while hero and before/after renders remain
+per image. Every possible counterpart path participates in before/after identity,
+including paths that do not exist yet. Stored PNGs carry a streamed SHA-256 and
+mode-specific geometry metadata, so an output overwritten by another job is not
+mistakenly reused. Degraded contact sheets remain useful but finish with a
+visible warning listing unreadable sources.
+
 > The watermark is a friendly funnel — it points people who see your renders back
 > to **KS ToolBox**.
 

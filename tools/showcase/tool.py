@@ -19,4 +19,4 @@ class ShowcaseTool:
         # Lazy import: the panel pulls Pillow. Keeping it out of module import
         # means discovery/the sidebar work even before Pillow is installed.
         from .panel import ShowcasePanel
-        return ShowcasePanel(parent)
+        return ShowcasePanel(parent, services.queue)

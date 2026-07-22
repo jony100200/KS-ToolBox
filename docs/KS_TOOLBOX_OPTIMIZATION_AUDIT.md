@@ -84,7 +84,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Pixel Art | nearest-neighbor pixelization, median-cut palette, durable queue, validated artifact reuse | Deterministic | perceptual palette benchmark, palette locking, alpha-aware quantization |
 | To SVG | VTracer | Deterministic | expose presets/path controls, score path complexity and reconstruction error |
 | Icon Normalizer | alpha geometry, fixed canvas placement, durable queue, validated RGBA reuse | Deterministic | perceptual visual-mass normalization and platform keyline presets |
-| Showcase | Pillow contact/hero/comparison compositing | Deterministic | attention/entropy smart crop and reusable layout presets |
+| Showcase | Pillow compositing, mode-aware durable queue, grouped identity, exact output validation | Deterministic | attention/entropy smart crop and reusable layout presets |
 | Alpha Doctor | chroma/solid/edge flood plus optional U2Net ONNX | Hybrid | uncertainty routing, matte cache, better optional high-resolution specialist |
 | Material Converter | map discovery, channel operations, grouped durable queue, set-wide identity and validated provenance | Deterministic | canonical MaterialX/OpenPBR mapping, color-space validation, packed-map presets |
 | Sprite Viewer | Pillow frames/grid/connected-component slices | Deterministic | Aseprite metadata, trim/extrude/deduplicate, atlas export and timing preservation |

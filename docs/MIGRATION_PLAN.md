@@ -84,6 +84,33 @@ write failure now fails visibly and records any already committed outputs.
 | Reliability/security | Per-set retry boundary prevents partial channel packing; atomic images remain; manifest failure no longer disappears |
 | Tests/benchmarks | 18 unit tests, material smoke including corrupt-output and manifest-failure cases, real two-map/one-set queue flow, 17/17 panels and smokes; durable core 9,876 items/s |
 | Risk/rollback | Validation reopens all set outputs during reuse; revert the panel adapter/validator while retaining the backward-compatible dependency field |
+
+### Slice 3f — implemented grouped/per-file Showcase
+
+Showcase selects work granularity by mode. A contact sheet is one durable item
+whose identity includes every source; hero mode remains one item per source;
+before/after mode also includes every possible counterpart candidate, including
+missing paths, so adding a counterpart invalidates a prior missing-pair result.
+Useful contact sheets that skip unreadable images use the typed warning outcome
+instead of being mislabeled clean or quarantined.
+
+Because different contact jobs share `contact_sheet.png`, each rendered result
+records a streamed SHA-256. Reuse requires the exact bytes plus PNG and
+mode-specific geometry to match, preventing a later job's overwrite from being
+accepted as an earlier result.
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-local mixed loop → mode-correct grouped/per-file queue definitions |
+| Architecture/language | Existing Python/Pillow compositors retained; grouped dependencies, warning outcome, and shared SHA-256 reused |
+| Functionality and quality | Contact, hero, before/after, labels, backdrops, shadow, watermark, and atomic PNG behavior preserved |
+| Code/dependencies | Showcase production source 586 → 692 lines (+106 for mode routing, structured counts, hash/geometry validation); zero dependencies added |
+| Package/startup/runtime | No package component/model added; ready-to-mainloop measured 124 ms; output hashing adds one streamed read after each render |
+| RAM/VRAM/CPU/disk/GPU | Hashing is bounded streaming I/O; existing Pillow buffers unchanged; no GPU/VRAM/AI |
+| Batch/cache/AI | Every relevant source/counterpart affects identity; exact output hash blocks path-collision reuse; no AI calls |
+| Reliability/security | Degraded sheets are warning-bearing; overwritten/corrupt PNGs fail validation; manifest errors remain visible |
+| Tests/benchmarks | 20 unit tests; 17/17 panels and smokes; full contact/hero/before-after, degraded/corrupt overwrite, and real grouped queue checks; durable core 10,725 items/s |
+| Risk/rollback | Extra output read costs disk bandwidth; revert panel/validator/result metadata while retaining compatible core contracts |
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

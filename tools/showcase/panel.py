@@ -1,13 +1,8 @@
-"""Showcase — the tool's UI. Thin over engine.py via BaseBatchPanel.
-
-Collects images + a presentation mode + its options, runs on a worker thread,
-streams results back via after(). No compositing math here — that all lives in
-engine.py. The visible sub-options relabel per mode (contact / hero /
-before_after) like Image Rescale's _on_mode_change.
-"""
+"""Showcase UI; presentation renders execute through the shell-owned queue."""
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict
 from pathlib import Path
 from tkinter import filedialog
 
@@ -17,6 +12,9 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.batch_reporting import completion_report_path, prepare_batch_completion
+from toolbox.job_queue import QueueCompletion, QueueFinalization, QueueSubmission
 from . import engine as e
 
 
@@ -26,8 +24,8 @@ class ShowcasePanel(BaseBatchPanel):
     RESULTS_ICON = Icons.GRID
     RUN_LABEL = "Preview & Render"
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
         self._on_mode_change(self._mode.get())
 
     # -- options (tool-specific) -----------------------------------------------
@@ -170,50 +168,106 @@ class ShowcasePanel(BaseBatchPanel):
         except ValueError:
             return None
 
-    # -- batch loop (tool-specific) --------------------------------------------
+    # -- queue submission (mode-specific work-unit granularity) ----------------
 
-    def _work(self, files: list[Path], opts: e.ShowcaseOptions):
-        rendered = previewed = failed = 0; results = []
+    def _build_submission(self, files: list[Path], opts: e.ShowcaseOptions) -> QueueSubmission:
         if opts.mode == "contact":
-            self.after(0, self._logline, f"building contact sheet from {len(files)} images …", t.TEXT_MUTED)
-            res = e.build_contact_sheet(files, opts); results.append(res)
-            rendered = int(res.action == "rendered")
-            previewed = int(res.action == "dry-run")
-            failed = int(res.action == "failed")
-            self.after(0, self._show, res, 1, 1)
+            anchors = [files[0]]
+            identity_dependencies = files
+            execute = lambda anchor, token: e.build_contact_sheet(files, opts)
+            label = f"Showcase Contact Sheet · {len(files)} image(s)"
         else:
-            for i, f in enumerate(files, 1):
-                if self._stop.is_set():
-                    self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
-                self.after(0, self._logline, f"[{i}/{len(files)}] {f.name} …", t.TEXT_MUTED)
-                res = e.process(f, opts); results.append(res)
-                if res.action == "rendered":
-                    rendered += 1
-                elif res.action == "dry-run":
-                    previewed += 1
-                else:
-                    failed += 1
-                self.after(0, self._show, res, i, len(files))
-        manifest = self._write_manifest(opts, results)
-        self.after(0, self._done, rendered, previewed, failed, manifest)
+            anchors = files
+            identity_dependencies = None
+            if opts.mode == "before_after":
+                identity_dependencies = list(files)
+                for source in files:
+                    identity_dependencies.extend(e.partner_candidates(source, opts))
+            execute = lambda path, token: e.process(path, opts)
+            label = f"Showcase {opts.mode.replace('_', ' ').title()} · {len(files)} image(s)"
+
+        definition = JobDefinition.create(
+            tool_id="showcase",
+            tool_version="1",
+            workflow_version="showcase.v2",
+            inputs=anchors,
+            identity_dependencies=identity_dependencies,
+            settings=asdict(opts),
+        )
+
+        def classify(res: e.Result) -> ItemOutcome:
+            data = res.to_dict()
+            if res.action == "rendered":
+                if res.detail == "degraded":
+                    return ItemOutcome.warning(data, res.reason)
+                return ItemOutcome.completed(data, res.reason)
+            if res.action == "dry-run":
+                return ItemOutcome.skipped(data, res.reason)
+            return ItemOutcome.failed(res.reason, data=data)
+
+        return QueueSubmission(
+            definition=definition,
+            label=label,
+            execute=execute,
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_completion(report, opts),
+        )
+
+    def _prepare_completion(self, report, opts: e.ShowcaseOptions) -> QueueFinalization:
+        return prepare_batch_completion(
+            report,
+            result_from_record=self._result_from_record,
+            write_manifest=lambda results: self._write_manifest(opts, results),
+            report_path=completion_report_path(
+                "showcase", report.job_id,
+                out_root=opts.out_root, dry_run=opts.dry_run,
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        rendered = sum(result.action == "rendered" for result in results)
+        previewed = sum(result.action == "dry-run" for result in results)
+        failed = len(results) - rendered - previewed
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            rendered, previewed, failed, remaining, payload.manifest,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"src", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path,
+            "failed",
+            item.details or "showcase item quarantined",
+            detail="batch.quarantined",
+        )
 
     def _write_manifest(self, opts: e.ShowcaseOptions, results: list) -> str | None:
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            path = root / "showcase_manifest.csv"
-            new = not path.exists()
-            with open(path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["src", "action", "out_path", "detail", "reason"])
-                for r in results:
-                    w.writerow([r.src, r.action, r.out_path, r.detail, r.reason])
-            return str(path)
-        except OSError:
-            return None
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "showcase_manifest.csv"
+        new = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["src", "action", "out_path", "detail", "reason"])
+            for r in results:
+                w.writerow([r.src, r.action, r.out_path, r.detail, r.reason])
+        return str(path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
@@ -223,10 +277,12 @@ class ShowcasePanel(BaseBatchPanel):
         extra = f"  → {res.out_path}" if res.action == "rendered" else f"  — {res.reason}"
         self._logline(f"  {icon} {name}{extra}", color)
 
-    def _done(self, rendered, previewed, failed, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"rendered {rendered} · previewed {previewed} · failed {failed}")
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+    def _done(self, rendered, previewed, failed, remaining=0, manifest=None,
+              report_path=None, job_state=JobState.COMPLETED, recovered=False, reused=False):
+        summary = f"rendered {rendered} · previewed {previewed} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

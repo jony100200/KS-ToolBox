@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from toolbox.engine_common import IMAGE_EXTS
+from toolbox.engine_common import IMAGE_EXTS, sha256_file
 
 MODES = ("contact", "hero", "before_after")
 BG_STYLES = ("solid", "gradient", "checker", "none")
@@ -303,13 +303,17 @@ class Result:
     reason: str
     out_path: str | None = None
     detail: str = ""
+    input_count: int = 0
+    rendered_count: int = 0
+    skipped_count: int = 0
+    output_sha256: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def _fail_result(src, details: str, etype: str) -> Result:
-    return Result(str(src), "failed", details, detail=etype)
+def _fail_result(src, details: str, etype: str, *, input_count: int = 1) -> Result:
+    return Result(str(src), "failed", details, detail=etype, input_count=input_count)
 
 
 # --- output planning ----------------------------------------------------------
@@ -339,19 +343,22 @@ def _contact_output(paths, opts: ShowcaseOptions) -> Path:
     return first.parent / "showcase" / name
 
 
-def _partner_path(src: Path, opts: ShowcaseOptions) -> Path | None:
-    """The before/after counterpart of `src`: same stem, any image ext, in the
-    configured second folder."""
+def partner_candidates(src: Path, opts: ShowcaseOptions) -> tuple[Path, ...]:
+    """All paths whose appearance could change before/after pair resolution."""
     if not opts.ba_folder:
-        return None
+        return ()
     folder = Path(opts.ba_folder)
-    exact = folder / src.name
-    if exact.is_file():
-        return exact
+    candidates = [folder / src.name]
     for ext in sorted(IMAGE_EXTS):
-        cand = folder / (src.stem + ext)
-        if cand.is_file():
-            return cand
+        candidates.append(folder / (src.stem + ext))
+    return tuple(dict.fromkeys(candidates))
+
+
+def _partner_path(src: Path, opts: ShowcaseOptions) -> Path | None:
+    """The first existing same-stem counterpart under the configured folder."""
+    for candidate in partner_candidates(src, opts):
+        if candidate.is_file():
+            return candidate
     return None
 
 
@@ -382,7 +389,7 @@ def process(path, opts: ShowcaseOptions) -> Result:
 
     if opts.dry_run:
         verb = "frame hero" if opts.mode == "hero" else "compose before/after"
-        return Result(str(src), "dry-run", f"would {verb}", out_path=str(dst))
+        return Result(str(src), "dry-run", f"would {verb}", out_path=str(dst), input_count=1)
 
     try:
         from PIL import Image
@@ -395,13 +402,17 @@ def process(path, opts: ShowcaseOptions) -> Result:
                 out = before_after(a, b, labels=("Before", "After"),
                                    cell=opts.cell_size, pad=opts.padding, bg=opts.bg_color)
         _atomic_save_png(out, dst)
+        digest = sha256_file(dst)
     except ImportError:
         return _fail_result(src, "Pillow not installed — pip install pillow", "dep.missing")
     except Exception as ex:                          # PIL raises many types on bad images
         return _fail_result(src, f"could not render {src.name}: {ex}", "render.failed")
 
     detail = opts.bg_style if opts.mode == "hero" else "before/after"
-    return Result(str(src), "rendered", f"{opts.mode} render", out_path=str(dst), detail=detail)
+    return Result(
+        str(src), "rendered", f"{opts.mode} render", out_path=str(dst), detail=detail,
+        input_count=1, rendered_count=1, output_sha256=digest,
+    )
 
 
 def build_contact_sheet(paths, opts: ShowcaseOptions) -> Result:
@@ -413,7 +424,8 @@ def build_contact_sheet(paths, opts: ShowcaseOptions) -> Result:
     dst = _contact_output(paths, opts)
     if opts.dry_run:
         return Result("(contact sheet)", "dry-run",
-                      f"would place {len(paths)} images ({opts.cols} cols)", out_path=str(dst))
+                      f"would place {len(paths)} images ({opts.cols} cols)", out_path=str(dst),
+                      input_count=len(paths))
 
     try:
         from PIL import Image
@@ -428,21 +440,69 @@ def build_contact_sheet(paths, opts: ShowcaseOptions) -> Result:
                 skipped.append(p.name)
         if not images:
             return Result("(contact sheet)", "failed",
-                          f"no readable images ({len(skipped)} unreadable)", detail="input.unreadable")
+                          f"no readable images ({len(skipped)} unreadable)", detail="input.unreadable",
+                          input_count=len(paths), skipped_count=len(skipped))
         sheet = contact_sheet(images, cols=opts.cols, cell=opts.cell_size, pad=opts.padding,
                               bg=opts.bg_color, labels=labels if opts.labels else None,
                               title=(opts.title.strip() or None))
         _atomic_save_png(sheet, dst)
+        digest = sha256_file(dst)
     except ImportError:
         return Result("(contact sheet)", "failed",
-                      "Pillow not installed — pip install pillow", detail="dep.missing")
+                      "Pillow not installed — pip install pillow", detail="dep.missing",
+                      input_count=len(paths))
     except Exception as ex:
         return Result("(contact sheet)", "failed", f"could not build contact sheet: {ex}",
-                      detail="render.failed")
+                      detail="render.failed", input_count=len(paths))
 
     reason = f"{len(images)} images placed"
     detail = "ok"
     if skipped:                                            # a fallback that announces itself
         reason += f" — skipped {len(skipped)} unreadable: {', '.join(skipped[:5])}"
         detail = "degraded"
-    return Result("(contact sheet)", "rendered", reason, out_path=str(dst), detail=detail)
+    return Result(
+        "(contact sheet)", "rendered", reason, out_path=str(dst), detail=detail,
+        input_count=len(paths), rendered_count=len(images), skipped_count=len(skipped),
+        output_sha256=digest,
+    )
+
+
+def validate_result(result: Result, opts: ShowcaseOptions) -> bool:
+    """Verify exact output bytes and mode-specific geometry before reuse."""
+    if result.action == "dry-run":
+        return True
+    if (
+        result.action != "rendered"
+        or not result.out_path
+        or not result.output_sha256
+        or result.rendered_count <= 0
+    ):
+        return False
+    try:
+        from PIL import Image
+
+        output = Path(result.out_path)
+        if sha256_file(output) != result.output_sha256:
+            return False
+        with Image.open(output) as image:
+            image.load()
+            if image.format != "PNG" or image.width <= 0 or image.height <= 0:
+                return False
+            if opts.mode == "hero":
+                expected = max(32, int(opts.cell_size))
+                return image.size == (expected, expected)
+            if opts.mode == "contact":
+                cols = max(1, int(opts.cols))
+                cell = max(8, int(opts.cell_size))
+                pad = max(0, int(opts.padding))
+                rows = max(1, (result.rendered_count + cols - 1) // cols)
+                label_h = _LABEL_H if opts.labels else 0
+                header_h = _HEADER_H if opts.title.strip() else 0
+                expected = (
+                    pad + cols * (cell + pad),
+                    header_h + pad + rows * (cell + label_h + pad),
+                )
+                return image.size == expected
+            return opts.mode == "before_after"
+    except (ImportError, OSError, TypeError, ValueError):
+        return False

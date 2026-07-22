@@ -75,25 +75,55 @@ def _full_checks() -> None:
         out = tmp / "out"
 
         # contact sheet, real write
-        res = e.build_contact_sheet(srcs, e.ShowcaseOptions(mode="contact", cols=2, cell_size=80,
-                                                            padding=10, out_root=out, dry_run=False))
+        contact_opts = e.ShowcaseOptions(
+            mode="contact", cols=2, cell_size=80, padding=10,
+            out_root=out, dry_run=False,
+        )
+        res = e.build_contact_sheet(srcs, contact_opts)
         assert res.action == "rendered", f"contact expected rendered, got {res.action}: {res.reason}"
+        assert e.validate_result(res, contact_opts), "contact artifact validation failed"
         cs = Path(res.out_path)
         assert cs.is_file() and cs.stat().st_size > 0, "contact sheet not written / empty"
         with Image.open(cs) as got:
             assert got.size[0] > 0 and got.size[1] > 0, "contact sheet has no pixels"
 
         # hero, real write on one file
-        hres = e.process(srcs[0], e.ShowcaseOptions(mode="hero", cell_size=160, padding=16,
-                                                    bg_style="gradient", bg_color=(20, 30, 60),
-                                                    watermark=True, out_root=out, dry_run=False))
+        hero_opts = e.ShowcaseOptions(
+            mode="hero", cell_size=160, padding=16, bg_style="gradient",
+            bg_color=(20, 30, 60), watermark=True, out_root=out, dry_run=False,
+        )
+        hres = e.process(srcs[0], hero_opts)
         assert hres.action == "rendered", f"hero expected rendered, got {hres.action}: {hres.reason}"
+        assert e.validate_result(hres, hero_opts), "hero artifact validation failed"
         hp = Path(hres.out_path)
         assert hp.is_file() and hp.stat().st_size > 0, "hero PNG not written / empty"
         with Image.open(hp) as got:
             assert got.size == (160, 160), f"hero PNG size {got.size} != (160, 160)"
 
-    print(f"PASS(full): wrote {cs.name} and {hp.name}")
+        after_dir = tmp / "after"
+        after_dir.mkdir()
+        partner = after_dir / "img0.jpg"
+        Image.new("RGB", (48, 48), (220, 220, 220)).save(partner)
+        before_after_opts = e.ShowcaseOptions(
+            mode="before_after", cell_size=96, padding=10,
+            ba_folder=after_dir, out_root=out, dry_run=False,
+        )
+        assert partner in e.partner_candidates(srcs[0], before_after_opts)
+        ba_res = e.process(srcs[0], before_after_opts)
+        assert ba_res.action == "rendered", ba_res
+        assert e.validate_result(ba_res, before_after_opts), "before/after validation failed"
+
+        unreadable = src_dir / "broken.png"
+        unreadable.write_bytes(b"not an image")
+        degraded = e.build_contact_sheet([*srcs, unreadable], contact_opts)
+        assert degraded.action == "rendered" and degraded.detail == "degraded", degraded
+        assert degraded.rendered_count == 4 and degraded.skipped_count == 1
+        assert e.validate_result(degraded, contact_opts), "degraded contact output should remain valid"
+
+        Path(degraded.out_path).write_bytes(b"not the recorded contact sheet")
+        assert not e.validate_result(degraded, contact_opts), "overwritten output hash must be rejected"
+
+    print(f"PASS(full): wrote {cs.name}, {hp.name}, and {Path(ba_res.out_path).name}")
 
 
 def main() -> int:
