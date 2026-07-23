@@ -39,18 +39,40 @@ def _test_find_projects(tmp: Path) -> None:
     # flat: two .sbsar at the top level
     (tmp / "a.sbsar").write_text("x")
     (tmp / "b.sbsar").write_text("x")
+    (tmp / "upper.SBSAR").write_text("x")
     # nested: one more .sbsar + a .ptex, in a subfolder
     sub = tmp / "nested"; sub.mkdir()
     (sub / "c.sbsar").write_text("x")
     (sub / "mat.ptex").write_text("x")
 
     flat = e.find_projects(tmp, ".sbsar", recursive=False)
-    assert len(flat) == 2, f"flat sbsar: expected 2, got {len(flat)}"
+    assert len(flat) == 3, f"flat sbsar: expected 3, got {len(flat)}"
     rec = e.find_projects(tmp, ".sbsar", recursive=True)
-    assert len(rec) == 3, f"recursive sbsar: expected 3, got {len(rec)}"
+    assert len(rec) == 4, f"recursive sbsar: expected 4, got {len(rec)}"
     ptex = e.find_projects(tmp, "ptex", recursive=True)   # bare ext (no dot) accepted
     assert len(ptex) == 1, f"ptex: expected 1, got {len(ptex)}"
     assert e.find_projects(tmp / "does-not-exist", ".sbsar", True) == [], "missing dir must yield []"
+    excluded = tmp / "output"
+    excluded.mkdir()
+    (excluded / "ignored.sbsar").write_text("x")
+    assert len(e.find_projects(tmp, ".sbsar", True, exclude_dirs=[excluded])) == 4
+    original_limit = e.MAX_RENDER_PROJECTS
+    e.MAX_RENDER_PROJECTS = 2
+    try:
+        try:
+            e.find_projects(tmp, ".sbsar", True, exclude_dirs=[excluded])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("project discovery limit was not enforced")
+    finally:
+        e.MAX_RENDER_PROJECTS = original_limit
+    try:
+        e.find_projects(tmp, ".sbsar", True, cancelled=lambda: True)
+    except e.CommandCancelled:
+        pass
+    else:
+        raise AssertionError("project discovery cancellation did not propagate")
 
 
 def _test_log2_res() -> None:
@@ -59,6 +81,26 @@ def _test_log2_res() -> None:
     assert e.get_log2_res("2048x2048") == "11,11"
     assert e.get_log2_res("4096x4096") == "12,12"
     assert e.get_log2_res("bogus") == "10,10", "unknown label must fall back to 1024²"
+
+
+def _test_options(tmp: Path) -> None:
+    base = dict(
+        engine_path=str(tmp / "sbsrender"),
+        input_dir=str(tmp),
+        output_dir=str(tmp / "out"),
+    )
+    invalid = [
+        ("bad", e.RenderOptions(**base)),
+        ("sbs", e.RenderOptions(**{**base, "resolution": "8192x8192"})),
+        ("mm", e.RenderOptions(**{**base, "target_engine": "Unknown"})),
+        ("mm", e.RenderOptions(**{**base, "resize": 20_000})),
+        ("sbs", e.RenderOptions(**{**base, "timeout_seconds": 0})),
+        ("sbs", e.RenderOptions(**{**base, "timeout_seconds": float("nan")})),
+        ("sbs", e.RenderOptions(**{**base, "output_dir": ""})),
+    ]
+    for kind, options in invalid:
+        normalized, reason = e.normalized_options(options, kind)
+        assert normalized is None and reason
 
 
 def _test_cmds() -> None:
@@ -118,7 +160,9 @@ def _test_dry_run(tmp: Path) -> None:
     eng = tmp / ("sbsrender.exe" if os.name == "nt" else "sbsrender"); eng.write_text("x")
     opts = e.RenderOptions(engine_path=str(eng), input_dir=str(tmp),
                            output_dir=str(tmp / "out"), resolution="2048x2048", dry_run=True)
-    r = e.render_substance(tmp / "thing.sbsar", opts)
+    project = tmp / "thing.sbsar"
+    project.write_text("archive")
+    r = e.render_substance(project, opts)
     assert r.action == "dry-run", f"expected dry-run, got {r.action}: {r.reason}"
     assert "$outputsize@11,11" in r.reason, f"planned cmd missing res: {r.reason}"
     assert not (tmp / "out").exists(), "dry-run must not create the output dir"
@@ -147,7 +191,7 @@ def _test_isolated_publish(tmp: Path) -> None:
 
     original_run = e._run
 
-    def successful_mm(command):
+    def successful_mm(command, **_kwargs):
         stage = Path(command[command.index("-o") + 1])
         assert ".ks-render-stage" in stage.parts
         Image.new("RGB", (24, 12), (100, 60, 20)).save(stage / "generated.png")
@@ -177,7 +221,7 @@ def _test_isolated_publish(tmp: Path) -> None:
     failed_project = tmp / "failed.ptex"
     failed_project.write_text("project")
 
-    def failed_mm(command):
+    def failed_mm(command, **_kwargs):
         stage = Path(command[command.index("-o") + 1])
         Image.new("RGB", (8, 8), (255, 0, 0)).save(stage / "partial.png")
         return SimpleNamespace(returncode=7, stdout="", stderr="render failed")
@@ -197,7 +241,7 @@ def _test_isolated_publish(tmp: Path) -> None:
     assert not (output_root / failed_project.stem).exists()
     assert not (output_root / ".ks-render-stage").exists()
 
-    def successful_sbs(command):
+    def successful_sbs(command, **_kwargs):
         stage = Path(command[command.index("--output-path") + 1])
         (stage / "archive_basecolor.tga").write_bytes(b"rendered")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -229,7 +273,7 @@ def _test_isolated_publish(tmp: Path) -> None:
     sentinel.write_text("not owned by KS")
     called = False
 
-    def must_not_run(_command):
+    def must_not_run(_command, **_kwargs):
         nonlocal called
         called = True
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -248,7 +292,7 @@ def _test_isolated_publish(tmp: Path) -> None:
     protected_project.write_bytes(b"original source bytes")
     protected_before = protected_project.read_bytes()
 
-    def overwrite_source(command):
+    def overwrite_source(command, **_kwargs):
         stage = Path(command[command.index("--output-path") + 1])
         (stage / protected_project.name).write_bytes(b"replacement")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
@@ -267,6 +311,36 @@ def _test_isolated_publish(tmp: Path) -> None:
     assert protected_result.action == "failed"
     assert protected_project.read_bytes() == protected_before
     assert not (protected_root / ".ks-render-stage").exists()
+
+    cancelled_project = tmp / "cancelled.sbsar"
+    cancelled_project.write_text("archive")
+    cancelled_root = tmp / "cancelled_output"
+
+    def cancelled_run(command, **kwargs):
+        stage = Path(command[command.index("--output-path") + 1])
+        (stage / "partial.tga").write_bytes(b"partial")
+        assert kwargs["timeout"] == 60 * 60
+        raise e.CommandCancelled(command)
+
+    e._run = cancelled_run
+    try:
+        try:
+            e.render_substance(
+                cancelled_project,
+                e.RenderOptions(
+                    engine_path=str(sbs_engine), input_dir=str(tmp),
+                    output_dir=str(cancelled_root), group=True,
+                ),
+                cancelled=lambda: False,
+            )
+        except e.CommandCancelled:
+            pass
+        else:
+            raise AssertionError("renderer cancellation did not propagate")
+    finally:
+        e._run = original_run
+    assert not (cancelled_root / cancelled_project.stem).exists()
+    assert not (cancelled_root / ".ks-render-stage").exists()
 
     rollback_stage = tmp / "rollback_stage"
     (rollback_stage / "sub").mkdir(parents=True)
@@ -302,6 +376,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         for name, fn in (("find", _test_find_projects), ("validate", _test_validate_engine),
+                         ("options", _test_options),
                          ("cleanup", _test_cleanup_and_resize), ("dry", _test_dry_run),
                          ("publish", _test_isolated_publish)):
             sub = root / name; sub.mkdir()

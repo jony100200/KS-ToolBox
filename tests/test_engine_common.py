@@ -96,6 +96,29 @@ class CancellableCommandTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.strip(), "ready")
 
+    def test_bounded_capture_retains_only_stream_tails(self) -> None:
+        result = run_cancellable_cmd(
+            [
+                sys.executable,
+                "-c",
+                "import sys; "
+                "sys.stdout.write('A' * 4096 + 'STDOUT_END'); "
+                "sys.stderr.write('B' * 4096 + 'STDERR_END')",
+            ],
+            timeout=5,
+            capture_limit_bytes=128,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertLessEqual(len(result.stdout.encode("utf-8")), 128)
+        self.assertLessEqual(len(result.stderr.encode("utf-8")), 128)
+        self.assertTrue(result.stdout.endswith("STDOUT_END"))
+        self.assertTrue(result.stderr.endswith("STDERR_END"))
+        with self.assertRaises(ValueError):
+            run_cancellable_cmd(
+                [sys.executable, "-c", "pass"],
+                capture_limit_bytes=0,
+            )
+
     def test_cancel_stops_owned_process_promptly(self) -> None:
         stop = threading.Event()
         timer = threading.Timer(0.15, stop.set)
@@ -108,6 +131,7 @@ class CancellableCommandTests(unittest.TestCase):
                     timeout=15,
                     cancelled=stop.is_set,
                     poll_seconds=0.05,
+                    capture_limit_bytes=128,
                 )
         finally:
             timer.cancel()
@@ -119,6 +143,7 @@ class CancellableCommandTests(unittest.TestCase):
                 [sys.executable, "-c", "import time; time.sleep(10)"],
                 timeout=0.15,
                 poll_seconds=0.05,
+                capture_limit_bytes=128,
             )
 
 

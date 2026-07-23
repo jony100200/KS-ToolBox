@@ -20,7 +20,8 @@ Two sub-modes, one per engine, in a tabbed panel over a shared console:
   exported PNGs to a target size.
 
 Each mode runs on a worker thread (the UI never blocks), streams per-project
-progress to the console, and can be stopped between projects.
+progress to the console, and can actively stop the exact renderer process tree.
+Every project has a user-set timeout (60 minutes by default).
 
 External engines never render directly into the final destination. Each
 project receives a confined, KS-owned staging folder. Only nonempty generated
@@ -62,6 +63,7 @@ executable in each tab. Any name form is accepted cross-platform: `sbsrender`,
 | Group into subfolders | both | Each project's maps go into its own named subfolder. |
 | Recursive | both | Scan the input directory recursively. |
 | Dry run | both | Preview the exact command per project; write nothing. |
+| Timeout min | both | Maximum time for one external project render (1–1,440 minutes). |
 
 **Destructive-action safety (Preview + Confirm + Logging):** every real export
 asks for confirmation because generated files may replace same-name maps.
@@ -71,6 +73,13 @@ folder is refused rather than removed. Selected projects and engine
 executables are protected publication targets. Dry run previews the commands
 without touching disk.
 
+Discovery is case-correct on all platforms, prunes the selected output folder,
+rejects symlinked project files, observes cancellation, and caps a batch at
+10,000 projects. Renderer stdout and stderr are continuously drained so the
+native process cannot block, while only the final 1 MiB of each stream stays in
+RAM for diagnostics. Stop normally completes within the process poll/termination
+window and cleans staged work before returning control.
+
 ## Verify
 
 ```powershell
@@ -79,10 +88,10 @@ $env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; H:\Apps\scoop\shims\uv.exe run --no-pr
 
 The smoke test covers discovery, resolution mapping, argv building, engine
 validation, cleanup+resize, dry-run, isolated staged publication, nonzero-exit
-rollback, stage ownership, source protection, and preservation of pre-existing
-destination files. External CLIs are represented by deterministic stubs; no
-Substance or Material Maker install is required. The test skips cleanly if
-Pillow is absent.
+rollback, cancellation cleanup, bounded discovery/settings, stage ownership,
+source protection, and preservation of pre-existing destination files.
+External CLIs are represented by deterministic stubs; no Substance or Material
+Maker install is required. The test skips cleanly if Pillow is absent.
 
 ## Anti-patterns fixed from the source
 
@@ -91,8 +100,8 @@ Pillow is absent.
   errors}`).
 - Hardcoded Windows-only `sbsrender.exe` / `material_maker.exe` name check →
   cross-platform **stem** match, any extension.
-- Windows-only `subprocess.CREATE_NO_WINDOW` flag hardcoded → uses shared
-  `engine_common.run_cmd` (sets the flag only on Windows).
+- Windows-only `subprocess.CREATE_NO_WINDOW` flag hardcoded → uses the shared
+  cancellable runner (sets the flag only on Windows).
 - `*.exe`-only file-picker filter → no forced filter (Linux/macOS engines have
   no extension).
 - Render logic tangled into the `CTk` window → pure, headless `engine.py`;

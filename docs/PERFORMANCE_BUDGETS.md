@@ -7,19 +7,21 @@ They are evidence for this revision, not universal hardware guarantees.
 
 | Metric | Measured | Command |
 |---|---:|---|
-| Ready-to-mainloop, measured range; latest 119 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
-| Discovery + shell import; latest 28 ms | 21–36 ms | same |
+| Ready-to-mainloop, measured range; latest 120 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
+| Discovery + shell import; latest 29 ms | 21–36 ms | same |
 | Optional AI/numeric modules at startup | none | same |
-| Python source after this slice | 112 files / 17,449 lines | bounded repository scan |
-| Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s; latest 92.28 ms / 10,837 items/s | `measure_batch_core.py` |
-| Job identity, 1,000 path/stat inputs | 95.43–122.26 ms | same |
-| Completed-job reuse, 1,000 items | 5.19–6.22 ms / zero executor calls | same |
+| Python source after this slice | 112 files / 17,924 lines | bounded repository scan |
+| Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s; latest 91.16 ms / 10,969 items/s | `measure_batch_core.py` |
+| Job identity, 1,000 path/stat inputs | 88.22–122.26 ms | same |
+| Completed-job reuse, 1,000 items | 5.18–6.22 ms / zero executor calls | same |
 | SQLite checkpoint, 1,000 items | 270,336 bytes | same |
 | Dataset split, 200 image-caption pairs | 722.3 → 910.4 ms (+188.0 ms, +26.0%); exact output reuse validation 508.5 ms | paired five-run in-process benchmark |
 | Alpha Doctor deterministic 512² cutout | 10.6 → 11.2 ms (+0.6 ms, +5.6%) after settings/source/collision guards | paired seven-run in-process benchmark |
 | Alpha Doctor model integrity | 64 MiB first verification 84.7 ms; unchanged session-cache check 0.253 ms | synthetic local model file |
 | Alpha Doctor durable output | 12.3 → 15.4 ms (+3.1 ms, +25.5%) for staged decode/hash/coverage validation; exact reuse validation 2.8 ms | paired seven-run 512² cutout benchmark |
 | Texture Renderer staged publication | 100 × 16 KiB outputs: direct 23.9 ms → isolated/atomic 71.5 ms (+47.6 ms, +199.0%) | paired five-run stubbed Substance export; external render time excluded |
+| Texture Renderer process control | trivial child launch 35.5 → 36.0 ms (+0.4 ms); sleeping process cancelled in 297.0 ms; stdout/stderr RAM tails capped at 1 MiB each | paired nine-run process benchmark + owned-tree cancellation |
+| Texture Renderer discovery | 2,000 files / 500 projects: 9.8 → 20.0 ms (+10.2 ms) for case-correct bounded/cancellable traversal | paired five-run filesystem benchmark |
 | Shell queue integration | PASS for fourteen image/audio/video/document/material/archive/audit/dataset/hybrid workflows, exact reuse/repair, and history UI | `python benchmarks/check_queue_flow.py` |
 | Runtime dependency added by batch core | 0 | SQLite is Python standard library |
 | Runtime dependency added by job queue | 0 | threading/heapq are Python standard library |

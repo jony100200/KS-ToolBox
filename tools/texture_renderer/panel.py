@@ -102,7 +102,11 @@ class TextureRendererPanel(ctk.CTkFrame):
         self._sbs_rec = ctk.CTkCheckBox(opts, text="Recursive", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._sbs_rec.select(); self._sbs_rec.pack(side="left", padx=(0, 16))
         self._sbs_dry = ctk.CTkCheckBox(opts, text="Dry run (preview commands)", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._sbs_dry.pack(side="left")
+        self._sbs_dry.pack(side="left", padx=(0, 16))
+        ctk.CTkLabel(opts, text="Timeout min", text_color=t.TEXT_MUTED,
+                     font=t.font(11)).pack(side="left", padx=(0, 6))
+        self._sbs_timeout = c.entry(opts, width=60)
+        self._sbs_timeout.insert(0, "60"); self._sbs_timeout.pack(side="left")
 
     def _build_material_maker_tab(self, tab):
         tab.grid_columnconfigure(1, weight=1)
@@ -128,7 +132,11 @@ class TextureRendererPanel(ctk.CTkFrame):
         self._mm_rec = ctk.CTkCheckBox(opts, text="Recursive", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._mm_rec.select(); self._mm_rec.pack(side="left", padx=(0, 16))
         self._mm_dry = ctk.CTkCheckBox(opts, text="Dry run (preview commands)", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._mm_dry.pack(side="left")
+        self._mm_dry.pack(side="left", padx=(0, 16))
+        ctk.CTkLabel(opts, text="Timeout min", text_color=t.TEXT_MUTED,
+                     font=t.font(11)).pack(side="left", padx=(0, 6))
+        self._mm_timeout = c.entry(opts, width=60)
+        self._mm_timeout.insert(0, "60"); self._mm_timeout.pack(side="left")
 
     # -- browse helpers --------------------------------------------------------
 
@@ -163,6 +171,12 @@ class TextureRendererPanel(ctk.CTkFrame):
         """Read the active tab into ("sbs"|"mm", RenderOptions) or None on error."""
         active = self._tabs.get()
         if active == "Substance (.sbsar)":
+            try:
+                timeout = int(self._sbs_timeout.get()) * 60
+            except ValueError:
+                self._logline("Timeout must be a whole number of minutes.",
+                              t.STATE["error"][1])
+                return None
             opts = e.RenderOptions(
                 engine_path=self._sbs_engine.get().strip(),
                 input_dir=self._sbs_input.get().strip(),
@@ -170,9 +184,16 @@ class TextureRendererPanel(ctk.CTkFrame):
                 resolution=self._sbs_res.get(),
                 group=bool(self._sbs_group.get()),
                 recursive=bool(self._sbs_rec.get()),
-                dry_run=bool(self._sbs_dry.get()))
+                dry_run=bool(self._sbs_dry.get()),
+                timeout_seconds=timeout)
             return "sbs", opts
         # Material Maker
+        try:
+            timeout = int(self._mm_timeout.get()) * 60
+        except ValueError:
+            self._logline("Timeout must be a whole number of minutes.",
+                          t.STATE["error"][1])
+            return None
         res = self._mm_res.get()
         opts = e.RenderOptions(
             engine_path=self._mm_engine.get().strip(),
@@ -183,7 +204,8 @@ class TextureRendererPanel(ctk.CTkFrame):
             group=bool(self._mm_group.get()),
             recursive=bool(self._mm_rec.get()),
             resize=None if res == "Original" else int(res.split("x")[0]),
-            dry_run=bool(self._mm_dry.get()))
+            dry_run=bool(self._mm_dry.get()),
+            timeout_seconds=timeout)
         return "mm", opts
 
     # -- run orchestration -----------------------------------------------------
@@ -191,18 +213,31 @@ class TextureRendererPanel(ctk.CTkFrame):
     def _start(self):
         if self._worker and self._worker.is_alive():
             return
-        kind, opts = self._collect()
+        collected = self._collect()
+        if collected is None:
+            return
+        kind, opts = collected
         ext = ".sbsar" if kind == "sbs" else ".ptex"
 
-        if not opts.output_dir:
-            self._logline("Error: choose an output directory.", t.STATE["error"][1]); return
+        normalized, options_error = e.normalized_options(opts, kind)
+        if normalized is None:
+            self._logline(f"Error: {options_error}", t.STATE["error"][1])
+            return
+        opts = normalized
         v = e.validate_engine(opts.engine_path, "sbsrender" if kind == "sbs" else "material_maker")
         if v["error"]:
             self._logline(f"Error: {v['details']}", t.STATE["error"][1]); return
         if not Path(opts.input_dir).is_dir():
             self._logline("Error: input directory does not exist.", t.STATE["error"][1]); return
 
-        projects = e.find_projects(opts.input_dir, ext, opts.recursive)
+        try:
+            projects = e.find_projects(
+                opts.input_dir, ext, opts.recursive,
+                exclude_dirs=[opts.output_dir],
+            )
+        except (OSError, ValueError) as ex:
+            self._logline(f"Project scan failed: {ex}", t.STATE["error"][1])
+            return
         if not projects:
             self._logline(f"No {ext} files found in {opts.input_dir}", t.TEXT_MUTED); return
         opts.protected_paths = tuple(str(project) for project in projects)
@@ -238,20 +273,34 @@ class TextureRendererPanel(ctk.CTkFrame):
         self._worker.start()
 
     def _request_stop(self):
-        # Takes effect between projects — run_cmd blocks inside one project and
-        # doesn't expose the child process to terminate mid-render.
+        # The engine polls this flag and terminates its exact owned process tree.
         self._stop.set(); self._status.set_state("STOPPING", "waiting")
 
     def _work(self, kind: str, opts, projects):
         render = e.render_substance if kind == "sbs" else e.render_material_maker
         total = len(projects)
         rendered = skipped = failed = 0
+        stopped = False
         for i, proj in enumerate(projects, 1):
             if self._stop.is_set():
                 self.after(0, self._logline, "--- stopped by user ---", t.TEXT_MUTED)
+                stopped = True
                 break
             self.after(0, self._logline, f"[{i}/{total}] {proj.name} ...", t.TEXT_MUTED)
-            res = render(proj, opts)
+            try:
+                res = render(
+                    proj, opts, cancelled=lambda: self._stop.is_set()
+                )
+            except e.CommandCancelled:
+                self.after(0, self._logline, "--- stopped by user ---", t.TEXT_MUTED)
+                stopped = True
+                break
+            except Exception as ex:  # noqa: BLE001 — isolate one project, report visibly
+                res = e.Result(
+                    str(proj), "failed",
+                    f"unexpected renderer failure: {type(ex).__name__}: {ex}",
+                    detail="render.unexpected",
+                )
             if res.action == "rendered":
                 rendered += 1
             elif res.action in ("dry-run", "skipped"):
@@ -259,7 +308,7 @@ class TextureRendererPanel(ctk.CTkFrame):
             else:
                 failed += 1
             self.after(0, self._show, res, i, total)
-        self.after(0, self._done, rendered, skipped, failed, total)
+        self.after(0, self._done, rendered, skipped, failed, total, stopped)
 
     def _show(self, res, i: int, total: int):
         self._progress.set(i / total)
@@ -268,9 +317,22 @@ class TextureRendererPanel(ctk.CTkFrame):
         name = Path(res.project).name
         self._logline(f"  {icon} {name} — {res.reason}", color)
 
-    def _done(self, rendered: int, skipped: int, failed: int, total: int):
+    def _done(
+        self, rendered: int, skipped: int, failed: int, total: int,
+        stopped: bool = False,
+    ):
         self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE" if not failed else "ERROR", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"rendered {rendered} · skipped/preview {skipped} · failed {failed} "
-                                     f"· {total} total")
+        completed = rendered + skipped + failed
+        if stopped:
+            self._status.set_state("CANCELLED", "waiting")
+            self._progress.set(completed / total if total else 0)
+        else:
+            self._status.set_state(
+                "DONE" if not failed else "ERROR",
+                "done" if not failed else "error",
+            )
+            self._progress.set(1)
+        suffix = f" · cancelled after {completed}/{total}" if stopped else f" · {total} total"
+        self._summary.configure(
+            text=f"rendered {rendered} · skipped/preview {skipped} · failed {failed}{suffix}"
+        )

@@ -489,6 +489,46 @@ cancellable durable execution, completion provenance, exact reuse, and
 restart repair. The 4s retain measured staging cost, unmeasured peaks, necessary
 rollback storage, and the hard-kill multi-file boundary.
 
+### Slice 3o — checkpoint 2: Texture Renderer execution control
+
+The custom two-tab Texture Renderer UI remains because Substance and Material
+Maker have genuinely different settings. Its external execution path is now
+strict, bounded, and actively cancellable without forcing that screen into the
+ordinary `BaseBatchPanel` shape. Discovery is case-correct, prunes the selected
+output tree, rejects project symlinks, observes cancellation, and stops at
+10,000 projects. Both renderers validate normalized settings and enforce a
+user-visible 1–1,440 minute per-project timeout.
+
+The shared subprocess runner gained an opt-in bounded-capture mode. Two
+short-lived reader threads continuously drain stdout and stderr to prevent a
+verbose native process from blocking while retaining only the final 1 MiB of
+each stream. Stop terminates the exact owned process tree, waits for exit, and
+then the renderer removes its owned stage. Other tools retain their existing
+runner behavior because bounded capture is opt-in.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Stop was checked only between projects; one hung renderer could block indefinitely; `capture_output` could retain unbounded native logs; recursive discovery missed uppercase extensions on case-sensitive hosts, could rescan output, and had no item ceiling; invalid headless settings could silently reach fallback values |
+| Proposed behavior | Active owned-process-tree cancellation, a strict per-project timeout, continuously drained 1 MiB stdout/stderr tails, strict normalized settings, case-correct/cancellable discovery, output-tree pruning, project-symlink rejection, and a 10,000-project ceiling |
+| Architecture and language | The existing Python headless engine, custom tabbed CustomTkinter panel, and user-provided native CLIs remain; reusable process ownership and bounded capture live in `engine_common`, while renderer-specific validation/staging stays in the tool |
+| Functionality and quality | Substance/Material Maker modes, recursive/flat scanning, grouping, dry run, all four Substance sizes, all four Material Maker targets, and headless resize values from 16–16,384 remain; rendered pixels and native CLI arguments are unchanged |
+| Code and dependency impact | Shared runner 251 → 350 nonblank lines (+99); Texture Renderer engine/panel/tool 665 → 947 (+282) since checkpoint 1 for validation, bounded discovery, cancellation, timeout, cleanup propagation, UI state, and tests; zero dependencies, models, binaries, services, or resident workers added |
+| Package-size impact | Source-only change; no packaged artifact was rebuilt, so no release-size change is claimed |
+| Startup and runtime impact | Ready-to-mainloop is 120 ms with 29 ms discovery and no optional-heavy imports; nine-run trivial child medians measured 35.5 → 36.0 ms (+0.4 ms), and an owned sleeping process cancelled in 297.0 ms |
+| RAM, VRAM, CPU, disk, and GPU transfer | At most two 1 MiB diagnostic tails plus two reader threads exist for one active renderer process; tails replace unbounded captured logs and create no disk log; no AI/model/VRAM/GPU-transfer change; external-engine peak resources are not claimed measured |
+| Batch, cache, and incremental impact | The active project can now stop instead of waiting for the native CLI; scan work is bounded and output work is isolated per project. Durable queue/checkpoint/history, output provenance, exact reuse, and incremental render caching remain for checkpoint 3 |
+| AI and model-loading impact | Zero AI calls and model loads; deterministic orchestration remains the correct method |
+| Reliability, security, tests, and benchmarks | Focused unit tests cover bounded stream tails, cancellation, timeout, invalid limits, and resource-warning cleanup; renderer smoke covers strict settings, uppercase/output-pruned/capped/cancellable discovery and staged cancellation cleanup; a 2,000-file/500-project scan measured 9.8 → 20.0 ms (+10.2 ms) for the new guarantees |
+| Risks and rollback | Diagnostic output is intentionally limited to final tails; detached grandchildren outside the owned process group may escape platform controls; multi-file publication still has a hard-kill boundary; no render cache/history yet. Revert renderer timeout/cancellation calls independently; omitting `capture_limit_bytes` preserves the prior shared-runner behavior |
+
+Checkpoint cartridge score: functional completeness 5, output quality 5,
+runtime 4, startup 5, memory 5, storage 4, batch 3, cache 2, incremental
+execution 2, AI efficiency 5, reliability 4, maintainability 4, portability 5,
+and security 5. Batch/cache/incremental remain below 4 until durable execution,
+validated provenance, exact reuse, and restart repair are implemented. Storage
+and reliability remain 4 because rollback staging is necessary and a hard kill
+cannot make a multi-file destination transaction atomic.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

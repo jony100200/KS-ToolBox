@@ -12,6 +12,7 @@ import signal
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -152,6 +153,7 @@ def run_cancellable_cmd(
     timeout: int | None = None,
     cancelled: Callable[[], bool] | None = None,
     poll_seconds: float = 0.1,
+    capture_limit_bytes: int | None = None,
 ) -> subprocess.CompletedProcess:
     """Run one owned process with captured output and cooperative cancellation.
 
@@ -162,6 +164,16 @@ def run_cancellable_cmd(
         raise ValueError("cmd cannot be empty")
     if poll_seconds <= 0:
         raise ValueError("poll_seconds must be positive")
+    if capture_limit_bytes is not None:
+        if capture_limit_bytes <= 0:
+            raise ValueError("capture_limit_bytes must be positive")
+        return _run_cancellable_bounded(
+            cmd,
+            timeout=timeout,
+            cancelled=cancelled,
+            poll_seconds=poll_seconds,
+            capture_limit_bytes=capture_limit_bytes,
+        )
     started = time.monotonic()
     process = subprocess.Popen(
         cmd,
@@ -186,6 +198,84 @@ def run_cancellable_cmd(
         try:
             stdout, stderr = process.communicate(timeout=wait_for)
             return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def _run_cancellable_bounded(
+    cmd: list[str],
+    *,
+    timeout: int | None,
+    cancelled: Callable[[], bool] | None,
+    poll_seconds: float,
+    capture_limit_bytes: int,
+) -> subprocess.CompletedProcess:
+    """Drain child pipes continuously while retaining only each stream's tail."""
+    started = time.monotonic()
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+        creationflags=(0x08000000 if os.name == "nt" else 0),
+        start_new_session=(os.name != "nt"),
+    )
+    stdout_tail = bytearray()
+    stderr_tail = bytearray()
+    reader_errors: list[OSError] = []
+
+    def drain(stream, tail: bytearray) -> None:
+        try:
+            while chunk := stream.read(64 * 1024):
+                tail.extend(chunk)
+                overflow = len(tail) - capture_limit_bytes
+                if overflow > 0:
+                    del tail[:overflow]
+        except OSError as ex:
+            reader_errors.append(ex)
+
+    assert process.stdout is not None and process.stderr is not None
+    readers = [
+        threading.Thread(target=drain, args=(process.stdout, stdout_tail), daemon=True),
+        threading.Thread(target=drain, args=(process.stderr, stderr_tail), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+
+    def finish_readers() -> tuple[str, str]:
+        for reader in readers:
+            reader.join()
+        process.stdout.close()
+        process.stderr.close()
+        if reader_errors:
+            raise OSError(f"could not capture child output: {reader_errors[0]}")
+        return (
+            bytes(stdout_tail).decode("utf-8", errors="replace"),
+            bytes(stderr_tail).decode("utf-8", errors="replace"),
+        )
+
+    while True:
+        if cancelled is not None and cancelled():
+            _terminate_owned_process(process)
+            _wait_for_owned_exit(process)
+            finish_readers()
+            raise CommandCancelled(cmd)
+        if timeout is not None:
+            remaining = timeout - (time.monotonic() - started)
+            if remaining <= 0:
+                _terminate_owned_process(process)
+                _wait_for_owned_exit(process)
+                stdout, stderr = finish_readers()
+                raise subprocess.TimeoutExpired(
+                    cmd, timeout, output=stdout, stderr=stderr
+                )
+            wait_for = min(poll_seconds, remaining)
+        else:
+            wait_for = poll_seconds
+        try:
+            returncode = process.wait(timeout=wait_for)
+            stdout, stderr = finish_readers()
+            return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
         except subprocess.TimeoutExpired:
             continue
 
@@ -239,6 +329,22 @@ def probe_media_duration(
 
 def _stop_owned_process(process: subprocess.Popen) -> tuple[str, str]:
     """Stop the exact process tree started by ``run_cancellable_cmd``."""
+    _terminate_owned_process(process)
+    try:
+        return process.communicate(timeout=2.0)
+    except subprocess.TimeoutExpired:
+        if os.name != "nt":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
+        return process.communicate()
+
+
+def _terminate_owned_process(process: subprocess.Popen) -> None:
+    """Request termination without consuming stdout/stderr pipes."""
     if process.poll() is None:
         if os.name == "nt":
             subprocess.run(
@@ -253,8 +359,11 @@ def _stop_owned_process(process: subprocess.Popen) -> tuple[str, str]:
                 os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
+
+
+def _wait_for_owned_exit(process: subprocess.Popen) -> None:
     try:
-        return process.communicate(timeout=2.0)
+        process.wait(timeout=2.0)
     except subprocess.TimeoutExpired:
         if os.name != "nt":
             try:
@@ -263,7 +372,7 @@ def _stop_owned_process(process: subprocess.Popen) -> tuple[str, str]:
                 pass
         else:
             process.kill()
-        return process.communicate()
+        process.wait()
 
 
 # --- crash cleanup ------------------------------------------------------------
