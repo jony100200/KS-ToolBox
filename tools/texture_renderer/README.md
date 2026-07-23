@@ -22,6 +22,18 @@ Two sub-modes, one per engine, in a tabbed panel over a shared console:
 Each mode runs on a worker thread (the UI never blocks), streams per-project
 progress to the console, and can be stopped between projects.
 
+External engines never render directly into the final destination. Each
+project receives a confined, KS-owned staging folder. Only nonempty generated
+artifacts are published with same-volume atomic moves after the engine exits
+successfully. Failed or partial renders are discarded; Substance publishes its
+generated file set, while Material Maker publishes validated PNGs and discards
+its generated sidecars inside staging.
+
+Publication preflights the complete generated set before its first write.
+Existing same-name outputs are backed up inside the owned stage and restored if
+a later artifact fails, so a caught multi-file publication failure does not
+leave a half-updated destination.
+
 ## The two engines are USER-PROVIDED
 
 `sbsrender` and `material_maker` are **not bundled** — they ship with the user's
@@ -51,10 +63,13 @@ executable in each tab. Any name form is accepted cross-platform: `sbsrender`,
 | Recursive | both | Scan the input directory recursively. |
 | Dry run | both | Preview the exact command per project; write nothing. |
 
-**Destructive-action safety (Preview + Confirm + Logging):** a real Material
-Maker export **deletes** every non-PNG file in the output folder during cleanup,
-so a confirmation dialog gates any non-dry-run MM export. Dry run previews the
-commands without touching disk.
+**Destructive-action safety (Preview + Confirm + Logging):** every real export
+asks for confirmation because generated files may replace same-name maps.
+Existing unrelated PNGs and non-PNG files are not resized or deleted.
+Cleanup is confined to a marked KS staging folder; an unmarked pre-existing
+folder is refused rather than removed. Selected projects and engine
+executables are protected publication targets. Dry run previews the commands
+without touching disk.
 
 ## Verify
 
@@ -62,11 +77,12 @@ commands without touching disk.
 $env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; H:\Apps\scoop\shims\uv.exe run --no-project --python 3.12 --with customtkinter --with pillow python -m tools.texture_renderer.test_smoke
 ```
 
-The smoke test covers the pure logic and post-processing (discovery, resolution
-mapping, argv building, engine validation, cleanup+resize, dry-run). The
-external-engine invocation itself is a thin `run_cmd` wrapper and is **not**
-exercised on CI (neither engine is installed there); the smoke test skips
-cleanly if Pillow is absent.
+The smoke test covers discovery, resolution mapping, argv building, engine
+validation, cleanup+resize, dry-run, isolated staged publication, nonzero-exit
+rollback, stage ownership, source protection, and preservation of pre-existing
+destination files. External CLIs are represented by deterministic stubs; no
+Substance or Material Maker install is required. The test skips cleanly if
+Pillow is absent.
 
 ## Anti-patterns fixed from the source
 

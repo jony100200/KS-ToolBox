@@ -443,6 +443,52 @@ validation has a 3.1 ms sample cost, peak resources remain uninstrumented,
 reuse is per-output rather than stage-content-addressed, and native/AI process
 isolation remains a separate evidence-driven decision.
 
+### Slice 3o — checkpoint 1: Texture Renderer output ownership
+
+The audit reproduced a destructive mismatch between the Material Maker
+confirmation and implementation. With a successful stub engine, a pre-existing
+`KEEP_LICENSE.txt` was deleted and an unrelated existing PNG was resized from
+32×16 to 64×64. Cleanup recursively processed the entire selected destination,
+not only files produced by the current export. External engines also wrote
+directly into final folders, so a nonzero exit could leave partial artifacts.
+
+Both Substance and Material Maker now render into a deterministic per-project
+stage under the output root. A marker proves the stage is KS-owned before any
+recursive removal; an unmarked or symlinked collision fails without deletion.
+Only a successful engine exit reaches publication. Substance publishes the
+nonempty generated file set; Material Maker cleans/resizes only its staged
+files, rejects cleanup errors, and publishes only nonempty PNGs. Existing
+unrelated destination files remain untouched.
+
+Publication preflights confinement, duplicate targets, symlinks, selected
+project paths, all batch project paths, and the selected engine executable
+before the first move. Existing same-name outputs are backed up inside the
+owned stage. Generated files move atomically on the same volume, and a caught
+later failure restores prior outputs or removes newly created ones.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | External tools wrote directly to final destinations; Material Maker recursively deleted every non-PNG and resized every PNG already there; nonzero exits cleaned/left partial destination state; no ownership proof preceded recursive stage deletion |
+| Proposed behavior | Isolated marked staging, successful-exit-only publication, complete target preflight, source/engine protection, atomic same-volume moves, existing-output backup, caught-failure rollback, and final preservation of unrelated files |
+| Architecture/language | Existing custom tabbed CustomTkinter screen, headless Python command builder, shared no-shell runner, Pillow post-processing, and user-provided native CLIs remain; safety is localized to the engine output boundary |
+| Functionality and quality | Recursive discovery, Substance resolutions, Material Maker targets, grouping, dry run, PNG resize, generated-sidecar cleanup, and arbitrary Substance output formats remain; cleanup errors now fail instead of claiming a complete render |
+| Code and dependency impact | Texture Renderer production source 460 → 679 nonblank lines (+219 for owned staging, confinement, output enumeration, atomic publication/rollback, batch source protection, and explicit failures); zero dependencies, models, binaries, services, or background processes added |
+| Package-size impact | Source-only change; external engines remain user-provided and no packaged artifact was rebuilt, so no package-size change is claimed |
+| Startup and runtime impact | Ready-to-mainloop measured 119 ms with 28 ms discovery and no optional-heavy imports; five-run 100 × 16 KiB stubbed Substance medians measured direct 23.9 ms → isolated/atomic 71.5 ms (+47.6 ms, +199.0%, 0.476 ms/output), excluding the normally dominant external render |
+| RAM, VRAM, CPU, disk, and GPU transfer | Target plans/backups are O(generated files); new outputs use atomic moves without a duplicate copy; only pre-existing replaced files are copied once for rollback; Pillow resize remains per staged image; peak resources and external GPU behavior are not claimed measured |
+| AI and model-loading impact | Zero AI calls and model loads; this is exact filesystem/process orchestration |
+| Batch, cache, and incremental impact | Per-project stage identity is stable and stale owned work self-heals; this checkpoint does not add durable queue state, output provenance, or reusable render caching |
+| Reliability, security, tests, and benchmarks | Stubbed success proves license/existing-PNG preservation and generated-only resize; nonzero exit publishes nothing; unmarked stages survive; symlink/output confinement checks are explicit; source publication is refused; a forced second-output failure restores the first output; focused smoke passes |
+| Risks and rollback | A hard process kill during the brief multi-file publish can still leave a valid but partial final set because cross-file atomic rename is unavailable; external CLIs are not yet cancellable and have no enforced timeout; generated output names cannot be known before rendering; existing same-name maps are intentionally replaceable after confirmation. Revert the stage/publish helpers and render adapters together; command builders and cleanup primitive are unchanged |
+
+Checkpoint cartridge score: functional completeness 5, output quality 5,
+runtime 4, startup 5, memory 4, storage 4, batch 3, cache 2, incremental
+execution 2, AI efficiency 5, reliability 4, maintainability 4, portability 5,
+and security 4. The sub-4 scores explicitly schedule the next checkpoint:
+cancellable durable execution, completion provenance, exact reuse, and
+restart repair. The 4s retain measured staging cost, unmeasured peaks, necessary
+rollback storage, and the hard-kill multi-file boundary.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

@@ -27,6 +27,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 # Allow standalone `python test_smoke.py` as well as `-m`.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -123,6 +124,173 @@ def _test_dry_run(tmp: Path) -> None:
     assert not (tmp / "out").exists(), "dry-run must not create the output dir"
 
 
+def _test_isolated_publish(tmp: Path) -> None:
+    from PIL import Image
+
+    mm_engine = tmp / ("material_maker.exe" if os.name == "nt" else "material_maker")
+    sbs_engine = tmp / ("sbsrender.exe" if os.name == "nt" else "sbsrender")
+    mm_engine.write_text("stub")
+    sbs_engine.write_text("stub")
+    mm_project = tmp / "material.ptex"
+    sbs_project = tmp / "archive.sbsar"
+    mm_project.write_text("project")
+    sbs_project.write_text("archive")
+
+    output_root = tmp / "output"
+    mm_destination = output_root / mm_project.stem
+    mm_destination.mkdir(parents=True)
+    keep_text = mm_destination / "KEEP_LICENSE.txt"
+    keep_text.write_text("must survive")
+    keep_png = mm_destination / "existing.png"
+    Image.new("RGB", (32, 16), (10, 20, 30)).save(keep_png)
+    keep_png_bytes = keep_png.read_bytes()
+
+    original_run = e._run
+
+    def successful_mm(command):
+        stage = Path(command[command.index("-o") + 1])
+        assert ".ks-render-stage" in stage.parts
+        Image.new("RGB", (24, 12), (100, 60, 20)).save(stage / "generated.png")
+        (stage / "generated.tres").write_text("owned sidecar")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    e._run = successful_mm
+    try:
+        result = e.render_material_maker(
+            mm_project,
+            e.RenderOptions(
+                engine_path=str(mm_engine), input_dir=str(tmp),
+                output_dir=str(output_root), group=True, resize=64,
+            ),
+        )
+    finally:
+        e._run = original_run
+    assert result.action == "rendered", result.reason
+    assert keep_text.read_text() == "must survive"
+    assert keep_png.read_bytes() == keep_png_bytes
+    assert (mm_destination / "generated.png").is_file()
+    assert not (mm_destination / "generated.tres").exists()
+    with Image.open(mm_destination / "generated.png") as generated:
+        assert generated.size == (64, 64)
+    assert not (output_root / ".ks-render-stage").exists()
+
+    failed_project = tmp / "failed.ptex"
+    failed_project.write_text("project")
+
+    def failed_mm(command):
+        stage = Path(command[command.index("-o") + 1])
+        Image.new("RGB", (8, 8), (255, 0, 0)).save(stage / "partial.png")
+        return SimpleNamespace(returncode=7, stdout="", stderr="render failed")
+
+    e._run = failed_mm
+    try:
+        failed = e.render_material_maker(
+            failed_project,
+            e.RenderOptions(
+                engine_path=str(mm_engine), input_dir=str(tmp),
+                output_dir=str(output_root), group=True,
+            ),
+        )
+    finally:
+        e._run = original_run
+    assert failed.action == "failed"
+    assert not (output_root / failed_project.stem).exists()
+    assert not (output_root / ".ks-render-stage").exists()
+
+    def successful_sbs(command):
+        stage = Path(command[command.index("--output-path") + 1])
+        (stage / "archive_basecolor.tga").write_bytes(b"rendered")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    e._run = successful_sbs
+    try:
+        substance = e.render_substance(
+            sbs_project,
+            e.RenderOptions(
+                engine_path=str(sbs_engine), input_dir=str(tmp),
+                output_dir=str(output_root), group=True,
+            ),
+        )
+    finally:
+        e._run = original_run
+    assert substance.action == "rendered"
+    assert (output_root / sbs_project.stem / "archive_basecolor.tga").is_file()
+    assert not (output_root / ".ks-render-stage").exists()
+
+    unowned_project = tmp / "unowned.ptex"
+    unowned_project.write_text("project")
+    unowned_opts = e.RenderOptions(
+        engine_path=str(mm_engine), input_dir=str(tmp),
+        output_dir=str(output_root), group=True,
+    )
+    unowned_stage = e._stage_for(unowned_project, unowned_opts)
+    unowned_stage.mkdir(parents=True)
+    sentinel = unowned_stage / "user-file.txt"
+    sentinel.write_text("not owned by KS")
+    called = False
+
+    def must_not_run(_command):
+        nonlocal called
+        called = True
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    e._run = must_not_run
+    try:
+        refused = e.render_material_maker(unowned_project, unowned_opts)
+    finally:
+        e._run = original_run
+    assert refused.action == "failed" and refused.detail == "output.stage"
+    assert not called and sentinel.read_text() == "not owned by KS"
+
+    protected_root = tmp / "protected"
+    protected_root.mkdir()
+    protected_project = protected_root / "source.sbsar"
+    protected_project.write_bytes(b"original source bytes")
+    protected_before = protected_project.read_bytes()
+
+    def overwrite_source(command):
+        stage = Path(command[command.index("--output-path") + 1])
+        (stage / protected_project.name).write_bytes(b"replacement")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    e._run = overwrite_source
+    try:
+        protected_result = e.render_substance(
+            protected_project,
+            e.RenderOptions(
+                engine_path=str(sbs_engine), input_dir=str(protected_root),
+                output_dir=str(protected_root), group=False,
+            ),
+        )
+    finally:
+        e._run = original_run
+    assert protected_result.action == "failed"
+    assert protected_project.read_bytes() == protected_before
+    assert not (protected_root / ".ks-render-stage").exists()
+
+    rollback_stage = tmp / "rollback_stage"
+    (rollback_stage / "sub").mkdir(parents=True)
+    (rollback_stage / "a.png").write_bytes(b"new first output")
+    (rollback_stage / "sub" / "b.png").write_bytes(b"new second output")
+    rollback_dest = tmp / "rollback_dest"
+    rollback_dest.mkdir()
+    existing = rollback_dest / "a.png"
+    existing.write_bytes(b"original first output")
+    (rollback_dest / "sub").write_bytes(b"blocks second output directory")
+    try:
+        e._publish_stage(
+            rollback_stage,
+            rollback_dest,
+            [rollback_stage / "a.png", rollback_stage / "sub" / "b.png"],
+        )
+    except OSError:
+        pass
+    else:
+        raise AssertionError("publication failure did not propagate")
+    assert existing.read_bytes() == b"original first output"
+    assert not (rollback_dest / "sub" / "b.png").exists()
+
+
 def main() -> int:
     try:
         import PIL  # noqa: F401
@@ -134,14 +302,15 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         for name, fn in (("find", _test_find_projects), ("validate", _test_validate_engine),
-                         ("cleanup", _test_cleanup_and_resize), ("dry", _test_dry_run)):
+                         ("cleanup", _test_cleanup_and_resize), ("dry", _test_dry_run),
+                         ("publish", _test_isolated_publish)):
             sub = root / name; sub.mkdir()
             fn(sub)
         _test_log2_res()
         _test_cmds()
 
-    print("PASS: texture_renderer — discovery, cmd-build, engine validation, "
-          "cleanup/resize, and dry-run all verified.")
+    print("PASS: texture_renderer — discovery, commands, isolated publish, "
+          "source/stage guards, cleanup/resize, and dry-run verified.")
     return 0
 
 
