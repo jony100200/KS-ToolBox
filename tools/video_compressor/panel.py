@@ -41,7 +41,7 @@ class VideoCompressorPanel(BaseBatchPanel):
         # encoder + crf + vmaf row
         row = ctk.CTkFrame(b, fg_color="transparent"); row.pack(fill="x")
         ctk.CTkLabel(row, text="Encoder", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=0, sticky="w")
-        self._encoder = ctk.CTkOptionMenu(row, values=["x265 (best quality)", "nvenc_hevc (GPU fast)", "handbrake"],
+        self._encoder = ctk.CTkOptionMenu(row, values=["AV1 (best quality / size)", "AV1 NVENC (GPU fast)"],
                                           width=180, fg_color=t.BG_COLOR, button_color=t.CARD_BORDER,
                                           button_hover_color=t.NEUTRAL_HOVER)
         self._encoder.grid(row=1, column=0, sticky="w", padx=(0, 24), pady=(2, 0))
@@ -72,12 +72,11 @@ class VideoCompressorPanel(BaseBatchPanel):
 
     def _refresh_tools_hint(self):
         s = e.tools_status()
-        missing = [k for k, v in s.items() if not v and k != "HandBrakeCLI"]
+        missing = [k for k, v in s.items() if not v]
         if missing:
             self._tools_hint.configure(text=f"⚠ missing on PATH: {', '.join(missing)} — install ffmpeg/ffprobe")
         else:
-            hb = "HandBrakeCLI ✓" if s["HandBrakeCLI"] else "HandBrakeCLI ✗ (optional)"
-            self._tools_hint.configure(text=f"tools: ffmpeg ✓  ffprobe ✓  {hb}")
+            self._tools_hint.configure(text="tools: ffmpeg ✓  ffprobe ✓  | bundled LGPL AV1 + VMAF")
 
     def _pre_run_check(self, opts) -> bool:
         # Destructive batch action must be explicitly confirmed (Preview+Confirm+
@@ -99,7 +98,7 @@ class VideoCompressorPanel(BaseBatchPanel):
             vmaf_floor = float(self._vmaf.get())
         except ValueError:
             self._logline("Min VMAF must be a number.", t.STATE["error"][1]); return None
-        enc_map = {"x265 (best quality)": "x265", "nvenc_hevc (GPU fast)": "nvenc_hevc", "handbrake": "handbrake"}
+        enc_map = {"AV1 (best quality / size)": "svt_av1", "AV1 NVENC (GPU fast)": "nvenc_av1"}
         policy = e.Policy(crf=int(self._crf.get()), encoder=enc_map[self._encoder.get()])
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
@@ -115,8 +114,8 @@ class VideoCompressorPanel(BaseBatchPanel):
     def _build_submission(self, files: list[Path], opts: e.ProcessOptions) -> QueueSubmission:
         definition = JobDefinition.create(
             tool_id="video_compressor",
-            tool_version="1",
-            workflow_version="compress.v2",
+            tool_version="2",
+            workflow_version="compress.v3",
             inputs=files,
             settings=asdict(opts),
             max_retries=1,

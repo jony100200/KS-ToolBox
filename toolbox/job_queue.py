@@ -77,8 +77,17 @@ QueueSubscriber = Callable[[QueueSnapshot], None]
 
 
 def _default_store_factory():
-    from toolbox.sqlite_job_store import SQLiteJobStore
-    return SQLiteJobStore()
+    try:
+        from toolbox.sqlite_job_store import SQLiteJobStore
+        return SQLiteJobStore()
+    except ImportError as exc:
+        from toolbox.volatile_job_store import VolatileJobStore
+
+        store = VolatileJobStore()
+        store.degraded_warning = (
+            f"{store.degraded_warning} SQLite load error: {exc}"
+        )
+        return store
 
 
 class JobQueue:
@@ -287,7 +296,9 @@ class JobQueue:
             self._call(submission.on_progress, update)
 
         try:
+            store_warning = ""
             with self._store_factory() as store:
+                store_warning = str(getattr(store, "degraded_warning", ""))
                 report = BatchRunner(store).run(
                     submission.definition,
                     lambda path: submission.execute(path, token),
@@ -300,12 +311,14 @@ class JobQueue:
             value = None
             finalize_error = ""
             finalize_warnings: tuple[str, ...] = ()
+            if store_warning:
+                finalize_warnings = (store_warning,)
             if submission.finalize is not None:
                 try:
                     finalized = submission.finalize(report)
                     if isinstance(finalized, QueueFinalization):
                         value = finalized.value
-                        finalize_warnings = finalized.warnings
+                        finalize_warnings += finalized.warnings
                     else:
                         value = finalized
                 except Exception as ex:  # noqa: BLE001 - outputs remain, report warning is visible

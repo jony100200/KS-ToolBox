@@ -10,8 +10,8 @@ are already efficient.
    - already HEVC/AV1 at a lean bpp → **skip** ("already efficient")
    - H.264 but already lean → **skip** ("not worth re-encoding")
    - bloated → **compress**, with a rough expected saving
-3. **Compress**: x265 CRF (visually-lossless, default 20) — quality-targeted, not
-   bitrate-targeted. NVENC (GPU) and HandBrake are selectable alternatives.
+3. **Compress**: SVT-AV1 CRF (visually-lossless, default 20) — quality-targeted,
+   not bitrate-targeted. AV1 NVENC is the fast GPU alternative.
 4. **Verify**: measure **VMAF** of the result vs the source. If it's below your
    floor (default 92 ≈ "no visible difference"), or not actually smaller, the
    encode is **rejected and the original kept**. Quality is proven, not assumed.
@@ -30,7 +30,7 @@ are already efficient.
 
 | Option | Meaning |
 |---|---|
-| Encoder | `x265` (best quality/size) · `nvenc_hevc` (GPU-fast) · `handbrake` |
+| Encoder | `svt_av1` (best quality/size) · `nvenc_av1` (GPU-fast) |
 | CRF | lower = higher quality (18–24; 20 default) |
 | Min VMAF | quality floor an encode must beat to be accepted (92 default) |
 | Dry run | analyze + report only, no writes (default on — safe) |
@@ -38,5 +38,6 @@ are already efficient.
 
 ## Requirements
 
-`ffmpeg` + `ffprobe` on PATH (VMAF needs ffmpeg built with `libvmaf` — the
-gyan.dev / most distro builds include it). `HandBrakeCLI` optional.
+The portable release bundles an LGPL-3.0-or-later FFmpeg/ffprobe build with
+`libsvtav1`, `av1_nvenc`, and `libvmaf`. A source run may instead use compatible
+`ffmpeg` + `ffprobe` on PATH; the tool reports missing capabilities as an error.

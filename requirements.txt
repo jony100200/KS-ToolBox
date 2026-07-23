@@ -6,7 +6,6 @@ send2trash==2.1.0        # recoverable "delete original" (Recycle Bin / Trash)
 pillow==12.3.0           # image tools + Format Converter (images)
 numpy==2.5.1             # Alpha Doctor edge math + image ops
 
-# External binaries (not pip): required by the video tools + Format Converter A/V.
-#   ffmpeg + ffprobe (required), HandBrakeCLI (optional, Video Compressor only).
-#   Windows: scoop install ffmpeg handbrake-cli
-#   Linux:   apt install ffmpeg handbrake-cli   (or your distro's equivalent)
+# External binaries (not pip): FFmpeg + ffprobe power the video/audio tools and
+# Format Converter A/V. The portable release carries the validated pair in bin/;
+# source users may instead supply compatible binaries on PATH.

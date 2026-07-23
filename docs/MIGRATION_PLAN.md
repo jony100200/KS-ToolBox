@@ -1,5 +1,9 @@
 # Incremental Batch-Core Migration
 
+> **Historical implementation record.** This preserves the sequence and
+> measurements from the migration. For current behavior, use the repository
+> README, tool guides, and the current architecture/recovery documents.
+
 The goal is to strengthen the existing application without replacing working
 tools. Every migration preserves engine output and keeps the old path easy to
 restore until the full release gate passes.

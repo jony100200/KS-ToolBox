@@ -147,6 +147,11 @@ def _model_dirs() -> list[Path]:
     dirs: list[Path] = []
     if getattr(sys, "frozen", False):
         dirs.append(Path(sys.executable).parent / "models")
+    else:
+        # Keep source-worktree models off the system drive.  A bundled app uses
+        # the executable-adjacent directory above; a normal installed app still
+        # falls back to its user cache below.
+        dirs.append(Path(__file__).resolve().parents[2] / "models")
     dirs.append(Path.home() / ".u2net")
     dirs.append(Path.home() / ".cache" / "kstoolbox" / "models")
     return dirs
@@ -164,6 +169,8 @@ def cached_model_path(model: str) -> Path | None:
 
 
 def _download_model_path(model: str) -> Path:
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parents[2] / "models" / f"{model}.onnx"
     return Path.home() / ".u2net" / f"{model}.onnx"
 
 

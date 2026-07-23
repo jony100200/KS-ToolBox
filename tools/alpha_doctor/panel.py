@@ -26,12 +26,17 @@ _METHOD_LABELS = {
     "ai": "AI matte (u2net — model optional)",
 }
 
+_AI_MODEL_LABELS = {
+    "u2netp": "Compact U2NetP (about 5 MB — recommended)",
+    "u2net": "Full U2Net (about 176 MB — higher detail)",
+}
+
 
 class AlphaDoctorPanel(BaseBatchPanel):
     FILE_EXTS = e.IMAGE_EXTS
     FILE_LABEL = "image"
     RESULTS_ICON = Icons.BROOM
-    RUN_LABEL = "Preview & Cut"
+    RUN_LABEL = "Remove Background & Save"
 
     def __init__(self, parent, queue_service):
         super().__init__(parent, queue_service=queue_service)
@@ -59,12 +64,26 @@ class AlphaDoctorPanel(BaseBatchPanel):
         self._key.set("green"); self._key.grid(row=1, column=2, sticky="w", padx=(0, 8), pady=(2, 0))
         self._key_hex = c.entry(row, width=90); self._key_hex.insert(0, "#00FF00")
         self._key_hex.grid(row=1, column=3, sticky="w", pady=(2, 0))
+        # AI model choice (shown only for AI matte).  Keep the small model first:
+        # this tool is intended to stay useful on ordinary CPU-only installs.
+        self._model_label = ctk.CTkLabel(row, text="AI model", text_color=t.TEXT_MUTED, font=t.font(11))
+        self._model_label.grid(row=0, column=4, sticky="w", padx=(24, 0))
+        self._model = ctk.CTkOptionMenu(
+            row, values=[_AI_MODEL_LABELS[name] for name in e.AI_MODELS], width=275,
+            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER,
+            command=lambda _label: self._on_method(self._method.get()),
+        )
+        self._model.set(_AI_MODEL_LABELS["u2netp"])
+        self._model.grid(row=1, column=4, sticky="w", padx=(24, 0), pady=(2, 0))
         # output folder
         self._build_output_row(b, "Output folder (blank = ./cutouts beside each source)")
         # post-op toggles
         toggles = ctk.CTkFrame(b, fg_color="transparent"); toggles.pack(fill="x", pady=(12, 0))
-        self._dry = ctk.CTkCheckBox(toggles, text="Preview only (no writes)", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._dry.select(); self._dry.pack(side="left")
+        self._dry = ctk.CTkCheckBox(
+            toggles, text="Plan only (no cut is calculated or saved)",
+            font=t.font(11), fg_color=t.ACCENT_BLUE, command=self._refresh_run_action,
+        )
+        self._dry.pack(side="left")
         self._defringe = ctk.CTkCheckBox(toggles, text="Defringe", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._defringe.select(); self._defringe.pack(side="left", padx=16)
         self._green = ctk.CTkCheckBox(toggles, text="Green despill", font=t.font(11), fg_color=t.ACCENT_BLUE)
@@ -82,15 +101,37 @@ class AlphaDoctorPanel(BaseBatchPanel):
         chroma = method == "chroma"
         for wdg in (self._key_label, self._key, self._key_hex):
             (wdg.grid() if chroma else wdg.grid_remove())
+        for wdg in (self._model_label, self._model):
+            (wdg.grid() if method == "ai" else wdg.grid_remove())
         hints = {"solid": "Deterministic — keys out the auto-detected flat background. No model.",
                  "chroma": "Deterministic — keys the chosen colour. Great for green/blue screen, flat logos.",
                  "edge_flood": "Deterministic — removes background regions touching the image border.",
-                 "ai": "Optional AI (u2net). A ~176 MB download needs approval; CPU-only."}
+                 "ai": self._ai_hint()}
         self._hint.configure(text=hints.get(method, ""))
+
+    def _ai_hint(self) -> str:
+        model = self._current_model()
+        if importlib.util.find_spec("onnxruntime") is None:
+            return "AI matte needs optional onnxruntime. Install requirements-optional.txt, then reopen ToolBox."
+        if e.cached_model_path(model) is None:
+            return f"{_AI_MODEL_LABELS[model]} will be downloaded only after you approve it. CPU-only."
+        return f"{_AI_MODEL_LABELS[model]} is installed and ready. CPU-only."
+
+    def _refresh_run_action(self) -> None:
+        if not hasattr(self, "_run_btn"):
+            return
+        if bool(self._dry.get()):
+            self._run_btn.configure(text="Plan Outputs (No Files)")
+        else:
+            self._run_btn.configure(text=self.RUN_LABEL)
 
     def _current_method(self) -> str:
         label = self._method.get()
         return next(m for m, lbl in _METHOD_LABELS.items() if lbl == label)
+
+    def _current_model(self) -> str:
+        label = self._model.get()
+        return next(name for name, value in _AI_MODEL_LABELS.items() if value == label)
 
     def _collect_options(self):
         try:
@@ -103,6 +144,7 @@ class AlphaDoctorPanel(BaseBatchPanel):
         mirror = bool(self._mirror.get())
         return e.AlphaOptions(out_root=out_root, input_root=self._resolve_input_root() if mirror else None,
                               mirror=mirror, method=self._current_method(), key_color=key_hex, tolerance=tol,
+                              model=self._current_model(),
                               do_defringe=bool(self._defringe.get()), green_despill=bool(self._green.get()),
                               do_premultiply=bool(self._premul.get()), dry_run=bool(self._dry.get()))
 
@@ -119,7 +161,7 @@ class AlphaDoctorPanel(BaseBatchPanel):
             return True
         if importlib.util.find_spec("onnxruntime") is None:
             self._logline(
-                "AI matte needs the optional onnxruntime dependency.",
+                "AI matte needs onnxruntime. Run: python -m pip install -r requirements-optional.txt, then reopen ToolBox.",
                 t.STATE["error"][1],
             )
             return False
@@ -127,9 +169,9 @@ class AlphaDoctorPanel(BaseBatchPanel):
             return True
         approved = messagebox.askyesno(
             "Download AI matte model?",
-            "AI matte needs the u2net model (about 176 MB). It will be "
-            "downloaded from the rembg GitHub release and stored in your "
-            "user model cache.\n\nAllow this network download?",
+            f"AI matte needs {_AI_MODEL_LABELS[normalized.model]}. It will be "
+            "downloaded from the rembg GitHub release and stored in the "
+            "ToolBox model cache.\n\nAllow this network download?",
             icon="question",
             parent=self,
         )

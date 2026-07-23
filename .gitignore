@@ -27,6 +27,7 @@ bin/
 # Runtime caches / downloaded models
 .kstoolbox_cache/
 *.kstoolbox_cache/
+models/
 
 # Generated run manifests (uncomment to ignore)
 # *_manifest.csv

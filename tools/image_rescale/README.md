@@ -19,17 +19,38 @@ input folder structure into the output.
 |---|---|---|
 | Resample | `auto` (Lanczos down / bilinear up) · lanczos · bicubic · bilinear · nearest | `auto` |
 | Snap to multiple of | round dimensions down to a multiple (0 = off) — handy for model-friendly sizes | `0` |
-| Allow upscaling | permit enlarging (off avoids blurry blow-ups) | off |
+| Allow upscaling | permit deterministic enlarging (off avoids blurry blow-ups) | off |
+| AI upscale (Real-ESRGAN) | run the local NCNN 4× utility model; automatically enables upscaling | off |
+| AI model | `realesrgan-x4plus` for photographs/general assets, or the smaller anime/art model | `realesrgan-x4plus` |
 | Mirror input structure | rebuild the source folder tree under the output | on |
-| Preview only | list planned resizes without writing | on |
+| Preview only | list planned resizes without writing | off |
 
 Output keeps the source format; a JPEG target is flattened to RGB automatically
 (JPEG can't store alpha). A `resize_manifest.csv` records every file when an
 output folder is set.
 
+## AI upscaling
+
+When **AI upscale** is selected, this tool invokes the portable Real-ESRGAN
+NCNN runtime, not Pillow. It runs only for an actual enlargement and writes the
+requested final dimensions; non-native requested scales use the next native
+2×/3×/4× model output followed by one final Lanczos resize. The UI shows whether
+the local bundle is ready and fails the job clearly if it is not.
+
+The Windows bundle is stored locally under `models/realesrgan-ncnn-20220424/`
+(ignored by Git), including the general 4× model (~32 MiB) and compact anime/art
+4× model (~9 MiB). It is lazy: it does not add PyTorch, load at application
+startup, or leave a model process running after an item completes.
+
+Chobi's optional bounding-box face/region refinement is a distinct enhancement
+pipeline, not a prerequisite for normal image super-resolution. It should only
+be added as a separate explicit feature with its own face-restoration runtime.
+
 ## Dependencies
 
 - **Pillow** (`pip install pillow`).
+- Optional local AI runtime: bundled/cacheable Real-ESRGAN NCNN executable and
+  models (no Python AI package required).
 
 ## Verify
 

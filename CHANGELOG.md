@@ -2,6 +2,14 @@
 
 All notable changes to KS ToolBox. Format loosely follows Keep a Changelog.
 
+## Unreleased
+
+- Added a documentation map, direct links to all 18 tool guides, documentation
+  link/coverage validation, current queue/recovery guidance, and clear historical
+  labels on older migration/audit records.
+- Replaced the previous FFmpeg/x265 runtime path with the validated portable
+  FFmpeg build and SVT-AV1 / AV1 NVENC Video Compressor encoders.
+
 ## [1.0.0] — 2026-07-22
 
 First public release. **17 deterministic-first batch tools** under one portable,

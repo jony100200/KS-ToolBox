@@ -42,7 +42,8 @@ recomputed.
 | external process cancellation | owned process tree stops; candidate is removed; item returns to Pending |
 | process/power loss | prior Running item resets to Pending on next prepare |
 | report/manifest write failure | queue and panel show CompletedWithWarnings; database state and outputs remain |
-| SQLite open/write failure | panel reports batch-core failure; tool output is not assumed complete |
+| SQLite load failure before a queue starts | queue announces session-only `VolatileJobStore`; work can continue but restart recovery/history are unavailable |
+| SQLite write failure after a durable queue starts | panel reports batch-core failure; tool output is not assumed complete |
 
 Tool engines remain responsible for temporary output cleanup and atomic
 replacement. Existing `.part` sweeping remains scoped to declared output roots.
@@ -51,6 +52,8 @@ the final destination only after acceptance. A crash cannot make an unverified
 candidate look like a completed output.
 
 The Queue/History view loads the most recent SQLite reports only when opened.
+In explicit volatile mode it shows only the current process session and the
+visible degraded warning; it must not imply that restart recovery is available.
 Terminal records retain their stored state. A nonterminal record from a prior
 process is displayed as `Recovered` with an explicit instruction to resubmit it
 from the owning tool; submission then reuses valid item checkpoints.

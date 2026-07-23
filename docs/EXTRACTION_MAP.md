@@ -1,5 +1,9 @@
 # Extraction Map — deterministic modules to lift for the public tool line
 
+> **Historical source-research map.** It records reusable ideas from the former
+> engines at the time of review. It is not a catalogue of unbuilt features and
+> does not override the shipped Toolbox tool guides.
+
 Folded from two source-engine inventories (RupayanFlow `D:\KSAppDev\KS-RupayanFlow`,
 ChobiEngine `M:\KS Apps\KS ChobiEngine`). Only **deterministic, CPU-only** targets
 are listed here (numpy / Pillow / OpenCV-with-fallback / ffmpeg). AI/GPU/network

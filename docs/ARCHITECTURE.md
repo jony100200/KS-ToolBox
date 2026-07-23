@@ -1,8 +1,8 @@
 # KS ToolBox Architecture
 
-Verified against the repository on 2026-07-22. KS ToolBox is an existing
-CustomTkinter modular monolith. This document describes the current system and
-the allowed direction of incremental migration; it is not a rewrite brief.
+Verified against the repository on 2026-07-23. KS ToolBox is a CustomTkinter
+modular monolith with 18 first-party tools. This document describes the current
+system and its allowed incremental direction; it is not a rewrite brief.
 
 ## System shape
 
@@ -21,14 +21,11 @@ Tool registry + lazy single-lane BatchRunner
                          SQLiteJobStore, filesystem, FFmpeg, Pillow, native tools
 ```
 
-The first durable vertical slices are `image_rescale`, `video_compressor`,
-`video_chopper`, `audio_tool`, `icon_normalizer`, `pixel_art`,
-`format_converter`, `material_converter`, `showcase`, `tileset_checker`, and
-`package_extractor`, validated hybrid `alpha_doctor`, plus grouped
-`asset_auditor` and `dataset_manager`, and custom-tabbed external
-`texture_renderer`, plus validated vector `to_svg`.
-Other tools still use the existing `BaseBatchPanel` loop until migrated and
-verified individually.
+Seventeen tools submit work through the shell-owned queue: the media, image,
+asset, archive, audit, dataset, and external-render tools. `image_enhancer`
+uses the same durable queue with local optional models. `Sprite Viewer` is the
+one purpose-built interactive panel: its bounded worker owns loading and export,
+not an unattended batch workflow.
 
 ## Allowed dependency directions
 
@@ -71,6 +68,7 @@ tool engine ──► toolbox.engine_common
 | `CancellationToken` | `toolbox/batch_core.py` | Cooperative pause/cancel at safe item boundaries |
 | `JobStore` | `toolbox/batch_core.py` | Small persistence boundary used by the runner |
 | `SQLiteJobStore` | `toolbox/sqlite_job_store.py` | Transactional jobs and per-item checkpoints |
+| `VolatileJobStore` | `toolbox/volatile_job_store.py` | Explicit session-only fallback when SQLite cannot load in the current process |
 | error envelope | `toolbox/engine_common.py` | Headless engine error-as-value convention |
 | file integrity/collision helpers | `toolbox/engine_common.py` | Shared cancellable streaming hashes and normalized output-path safety checks |
 | media-duration probe | `toolbox/engine_common.py` | Shared cancellable ffprobe execution and finite-positive duration validation |

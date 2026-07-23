@@ -35,7 +35,7 @@ tools/<name>/      one tool, end to end
    to a dry-run preview, confirms before deleting originals, and writes a per-run
    manifest CSV.
 4. **Heavy deps import lazily.** `tool.py` must import its panel/engine *inside*
-   `build_panel`, and the engine imports numpy/rembg/vtracer/etc. inside the
+   `build_panel`, and the engine imports numpy/onnxruntime/vtracer/etc. inside the
    function that uses them — so the app discovers and lists the tool even on a
    machine that hasn't installed that tool's deps. A missing dep is announced
    in-panel, never a startup crash. (customtkinter is core and always present.)
@@ -46,7 +46,8 @@ tools/<name>/      one tool, end to end
 6. **No tool ships unverified.** `test_smoke.py` must boot the tool with default
    config and produce a valid output on a real sample. If it needs an uninstalled
    dep, it **skips cleanly** (prints SKIP, returns 0) — it never fails for a
-   missing optional dependency.
+   missing optional dependency. Update the tool README and any affected current
+   document in `docs/` in the same change; historical records stay dated.
 
 ## Writing a file-batch tool the easy way
 
@@ -77,6 +78,13 @@ And confirm discovery still lists everything (runs in the app `.venv`):
 
 ```
 python -c "from toolbox.discovery import discover; print(sorted(t.meta.id for t in discover().all()))"
+```
+
+Before a release-facing change, also run:
+
+```
+python -m benchmarks.check_docs
+python benchmarks/run_all_smoke.py
 ```
 
 ## Style

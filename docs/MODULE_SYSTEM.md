@@ -20,8 +20,9 @@ Heavy dependencies must be imported inside panel construction or execution.
 The shell calls `build_panel(parent, services)`. `services` is an explicit
 `AppServices` instance containing the shared queue. A durable batch panel accepts
 `services.queue`; tools must not locate services through globals or widget-tree
-inspection. Unmigrated tools may ignore the argument while retaining their
-verified compatibility worker.
+inspection. The interactive Sprite Viewer is the intentional exception: it
+accepts the service context but retains its bounded, cancellable viewer worker
+instead of pretending to be an unattended file batch.
 
 ## Current metadata schema
 

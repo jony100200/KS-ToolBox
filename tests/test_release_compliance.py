@@ -9,6 +9,7 @@ from benchmarks.build_release_compliance import (
     _validate_spdx_references,
     classify_ffmpeg_license,
     discover_distribution_names,
+    require_supported_bundled_ffmpeg,
 )
 
 
@@ -50,6 +51,11 @@ class ReleaseComplianceTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(RuntimeError, "must not be distributed"):
             classify_ffmpeg_license("--enable-gpl --enable-nonfree")
+
+    def test_portable_release_rejects_non_lgpl_ffmpeg(self) -> None:
+        require_supported_bundled_ffmpeg({"license": "LGPL-3.0-or-later"})
+        with self.assertRaisesRegex(RuntimeError, "must remain LGPL"):
+            require_supported_bundled_ffmpeg({"license": "GPL-3.0-or-later"})
 
     def test_actual_toc_modules_map_to_distribution_owners(self) -> None:
         payload = (

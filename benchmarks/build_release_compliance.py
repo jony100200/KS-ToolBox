@@ -38,6 +38,7 @@ from toolbox import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX_NOTICE_BYTES = 2 * 1024 * 1024
+REQUIRED_BUNDLED_FFMPEG_LICENSE = "LGPL-3.0-or-later"
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,7 @@ def inspect_ffmpeg(executable: Path) -> dict[str, str]:
     lines = completed.stdout.splitlines()
     if not lines:
         raise RuntimeError(f"{executable.name} returned no version information")
-    match = re.match(r"ffmpeg version ([^\s-]+)", lines[0])
+    match = re.match(r"ffmpeg version (\S+)", lines[0])
     if match is None:
         raise RuntimeError(f"could not parse FFmpeg version line: {lines[0]}")
     configuration = next(
@@ -175,14 +176,27 @@ def inspect_ffmpeg(executable: Path) -> dict[str, str]:
     if not configuration:
         raise RuntimeError("FFmpeg did not report its build configuration")
     version = match.group(1)
+    commit = re.search(r"-g([0-9a-f]{7,40})(?:-|$)", version)
     return {
         "version": version,
         "license": classify_ffmpeg_license(configuration),
         "configuration": configuration,
         "version_line": lines[0],
-        "source": f"https://github.com/FFmpeg/FFmpeg/tree/n{version}",
-        "binary_provider": "https://www.gyan.dev/ffmpeg/builds/",
+        "source": (
+            f"https://github.com/FFmpeg/FFmpeg/tree/{commit.group(1)}"
+            if commit else "https://github.com/FFmpeg/FFmpeg"
+        ),
+        "binary_provider": "https://github.com/BtbN/FFmpeg-Builds/releases",
     }
+
+
+def require_supported_bundled_ffmpeg(info: dict[str, str]) -> None:
+    """Reject a portable runtime that is not the approved LGPL build class."""
+    if info.get("license") != REQUIRED_BUNDLED_FFMPEG_LICENSE:
+        raise RuntimeError(
+            "bundled FFmpeg must remain LGPL-3.0-or-later; audit before release: "
+            + str(info.get("license", "unknown"))
+        )
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -403,14 +417,10 @@ def generate_release_compliance(
     ffmpeg_info: dict[str, str] | None = None
     if ffmpeg.is_file():
         ffmpeg_info = inspect_ffmpeg(ffmpeg)
-        if ffmpeg_info["license"] != "GPL-3.0-or-later":
-            raise RuntimeError(
-                "bundled FFmpeg license changed; audit before release: "
-                + ffmpeg_info["license"]
-            )
+        require_supported_bundled_ffmpeg(ffmpeg_info)
         _atomic_copy(
-            ROOT / "licenses" / "FFmpeg-COPYING.GPLv3",
-            licenses_dir / "FFmpeg-COPYING.GPLv3",
+            ROOT / "licenses" / "FFmpeg-COPYING.LGPLv3",
+            licenses_dir / "FFmpeg-COPYING.LGPLv3",
         )
         _atomic_write(
             licenses_dir / "FFmpeg-BUILD-AND-SOURCE.txt",

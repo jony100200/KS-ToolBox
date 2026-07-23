@@ -1,7 +1,7 @@
 # CustomTkinter UI Guidelines
 
 CustomTkinter is the official KS ToolBox presentation framework. Replacing it
-would rewrite 17 verified panels without improving batch reliability or output
+would rewrite 18 verified panels without improving batch reliability or output
 quality. A framework change requires measured failure against a current need.
 
 ## Standard flow
@@ -21,7 +21,7 @@ recently used tools, and a direct queue route. Category and search pages use the
 same cards and explicit Open action. Opening a tool preserves category context
 and provides a visible Back action.
 
-All sixteen batch workflows use the shared queue. Sprite Viewer intentionally
+All seventeen batch workflows use the shared queue. Sprite Viewer intentionally
 keeps its verified interactive worker because it is not an unattended batch.
 
 ## Separation

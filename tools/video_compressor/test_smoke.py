@@ -21,13 +21,12 @@ from tools.video_compressor import engine as e  # noqa: E402
 
 
 def _make_bloated(dst: Path) -> bool:
-    """A near-lossless H.264 clip — high bitrate, so assess() says 'compress'."""
+    """A near-lossless native FFV1 clip — high bitrate, so assess() says compress."""
     ff = e._tool("ffmpeg")
     if not ff:
         return False
-    cmd = [ff, "-y", "-f", "lavfi", "-i", "testsrc=size=640x480:rate=30:duration=3",
-           "-c:v", "libx264", "-preset", "ultrafast", "-qp", "0",
-           "-pix_fmt", "yuv420p", str(dst)]
+    cmd = [ff, "-y", "-f", "lavfi", "-i", "testsrc2=size=640x480:rate=30:duration=3",
+           "-c:v", "ffv1", "-level", "3", "-pix_fmt", "yuv420p", str(dst)]
     return e._run(cmd, timeout=120).returncode == 0
 
 
@@ -38,7 +37,7 @@ def main() -> int:
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        sample = tmp / "bloated.mp4"
+        sample = tmp / "bloated.mkv"
         if not _make_bloated(sample):
             print("SKIP: could not synthesize a sample with this ffmpeg build.")
             return 0
@@ -65,6 +64,8 @@ def main() -> int:
         assert res.vmaf is not None, "VMAF was not measured (libvmaf missing from this ffmpeg?)"
         assert e.validate_result(res), "stored output validation failed"
         assert not list((tmp / "out").glob("*.verify.*")), "uncommitted candidate remained"
+        out_probe = e.probe(res.out_path)
+        assert not out_probe["error"] and out_probe["data"].codec == "av1", "output is not AV1"
 
     print(f"PASS: video_compressor — {res.before_mb:.1f}->{res.after_mb:.1f} MB "
           f"(-{res.saved_pct:.0f}%), VMAF {res.vmaf:.1f}.")

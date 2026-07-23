@@ -8,7 +8,7 @@ tools resolved via PATH.
 LEGO block. Public interface:
     probe(path)            -> VideoInfo
     assess(info, policy)   -> Decision            (skip vs compress + why)
-    compress(src, dst, ..) -> envelope            (runs HandBrakeCLI/ffmpeg)
+    compress(src, dst, ..) -> envelope            (runs FFmpeg)
     measure_vmaf(src, dst) -> float | None
     process(path, opts)    -> Result              (orchestrates all of the above)
 
@@ -37,12 +37,7 @@ EFFICIENT_CODECS = {"hevc", "h265", "av1", "vp9"}
 
 def tools_status() -> dict[str, str | None]:
     """What's available on this machine. UI/status can show this."""
-    s = _tools_status_raw(["ffprobe", "ffmpeg", "HandBrakeCLI"])
-    # HandBrakeCLI may also ship as .exe explicitly
-    if not s.get("HandBrakeCLI"):
-        from toolbox.engine_common import resolve_tool
-        s["HandBrakeCLI"] = resolve_tool("HandBrakeCLI.exe")
-    return s
+    return _tools_status_raw(["ffprobe", "ffmpeg"])
 
 
 # ---------------------------------------------------------------------------
@@ -139,8 +134,8 @@ class Policy:
     bpp_efficient_hevc: float = 0.045   # already-HEVC/AV1 at/below this -> skip
     bpp_efficient_h264: float = 0.070   # already-H.264 at/below this -> already lean, skip
     min_expected_saving: float = 0.15   # skip if we don't expect >=15% smaller
-    crf: int = 20                        # x265 visually-lossless target
-    encoder: str = "x265"               # x265 (software, best quality/size) | nvenc_hevc (fast)
+    crf: int = 20                        # SVT-AV1 visually-lossless target
+    encoder: str = "svt_av1"            # SVT-AV1 (quality/size) | NVENC AV1 (fast)
 
 
 @dataclass
@@ -187,7 +182,7 @@ def _estimate_saving(info: VideoInfo, thresh: float, is_efficient_codec: bool) -
         return 0.30
     ratio = thresh / info.bits_per_pixel          # <1 when bloated
     base = max(0.0, 1.0 - ratio)                  # bloat headroom
-    # H.264 -> HEVC gives an extra structural ~25% at equal quality.
+    # H.264 -> AV1 gives an extra structural ~25% at equal quality.
     codec_bonus = 0.0 if is_efficient_codec else 0.20
     return round(min(0.85, base * 0.9 + codec_bonus), 3)
 
@@ -197,11 +192,11 @@ def _estimate_saving(info: VideoInfo, thresh: float, is_efficient_codec: bool) -
 # ---------------------------------------------------------------------------
 
 def compress(src: str | Path, dst: str | Path, *, crf: int = 20,
-             encoder: str = "x265", timeout: int | None = None,
+             encoder: str = "svt_av1", timeout: int | None = None,
              cancelled: Callable[[], bool] | None = None) -> dict:
-    """Encode src -> dst. Prefers HandBrakeCLI; falls back to ffmpeg. Envelope out.
+    """Encode src -> dst through the bundled LGPL FFmpeg build. Envelope out.
 
-    encoder: 'x265' (software HEVC, best quality/size) or 'nvenc_hevc' (GPU, fast).
+    encoder: 'svt_av1' (software AV1, best quality/size) or 'nvenc_av1' (GPU, fast).
     """
     src, dst = Path(src), Path(dst)
     if not src.is_file():
@@ -209,20 +204,16 @@ def compress(src: str | Path, dst: str | Path, *, crf: int = 20,
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".part")     # atomic: write .part, rename on success
 
-    # Default encoder is ffmpeg libx265: it preserves geometry/timing exactly,
-    # which keeps VMAF honest. HandBrake is opt-in (encoder="handbrake").
-    if encoder == "handbrake":
-        hb = _tool("HandBrakeCLI") or _tool("HandBrakeCLI.exe")
-        if not hb:
-            return _err("dep.missing", "HandBrakeCLI requested but not found on PATH")
-        cmd = _handbrake_cmd(hb, src, tmp, crf, "x265")
-        tool_used = "HandBrakeCLI"
-    else:
-        ff = _tool("ffmpeg")
-        if not ff:
-            return _err("dep.missing", "ffmpeg not found on PATH")
-        cmd = _ffmpeg_cmd(ff, src, tmp, crf, encoder)  # "x265" (default) or "nvenc_hevc"
-        tool_used = "ffmpeg"
+    if encoder not in {"svt_av1", "nvenc_av1"}:
+        return _err(
+            "config.encoder",
+            f"unsupported encoder {encoder!r}; choose svt_av1 or nvenc_av1",
+        )
+    ff = _tool("ffmpeg")
+    if not ff:
+        return _err("dep.missing", "ffmpeg not found on PATH")
+    cmd = _ffmpeg_cmd(ff, src, tmp, crf, encoder)
+    tool_used = "ffmpeg"
 
     try:
         r = _run_cancellable(cmd, timeout=timeout, cancelled=cancelled)
@@ -241,19 +232,13 @@ def compress(src: str | Path, dst: str | Path, *, crf: int = 20,
                 "out_bytes": dst.stat().st_size}, details=f"encoded via {tool_used}")
 
 
-def _handbrake_cmd(hb: str, src: Path, dst: Path, crf: int, encoder: str) -> list[str]:
-    enc = "nvenc_h265" if encoder == "nvenc_hevc" else "x265"
-    return [hb, "-i", str(src), "-o", str(dst),
-            "-e", enc, "-q", str(crf), "--encoder-preset", "medium",
-            "-E", "copy", "--audio-fallback", "aac",   # keep audio; AAC only if passthrough impossible
-            "--all-subtitles", "--format", "av_mkv", "--optimize"]
-
-
 def _ffmpeg_cmd(ff: str, src: Path, dst: Path, crf: int, encoder: str) -> list[str]:
-    if encoder == "nvenc_hevc":
-        vcodec = ["-c:v", "hevc_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", str(crf)]
+    if encoder == "nvenc_av1":
+        vcodec = ["-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", str(crf)]
     else:
-        vcodec = ["-c:v", "libx265", "-preset", "medium", "-crf", str(crf)]
+        # SVT-AV1 is BSD-2-Clause and is included by the verified LGPL FFmpeg
+        # bundle. Preset 6 is a quality/speed balance for unattended batches.
+        vcodec = ["-c:v", "libsvtav1", "-preset", "6", "-crf", str(crf)]
     # -f matroska: the temp file is "<name>.mkv.part", so ffmpeg can't infer the
     # muxer from the extension — state it. The pipeline always targets MKV.
     return [ff, "-y", "-i", str(src), *vcodec,

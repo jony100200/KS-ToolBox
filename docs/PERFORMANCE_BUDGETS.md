@@ -1,7 +1,9 @@
 # Performance Budgets
 
-Measurements below were recorded on 2026-07-22 on the current Windows machine.
-They are evidence for this revision, not universal hardware guarantees.
+Measurements below were recorded on 2026-07-22 on the reference Windows machine.
+They are historical baseline evidence, not universal hardware guarantees. The
+current product has 18 tools; re-measure before treating a 17-tool result as a
+release claim.
 
 ## Current measurements
 
@@ -29,7 +31,7 @@ They are evidence for this revision, not universal hardware guarantees.
 | To SVG validated artifact | 26,829-byte / 1,002-element stub: legacy staged write 0.47 ms → bounded XML/SHA-256 validated write 9.56 ms (+9.09 ms); exact reuse validation 1.83 ms | paired 21-run local filesystem benchmark; native trace time excluded |
 | Sprite detection, 1,024² / 100 components | 124.37 → 149.61 ms (+25.24 ms, +20.3%); Python traced peak 10.16 → 2.13 MiB (−79.0%) | paired five-run runtime benchmark; one-run `tracemalloc` peak |
 | Sprite GIF validation, 48 × 64² frames | 17.48 → 25.91 ms (+8.43 ms, +48.2%) with full frame decode/read-back before commit | paired five-run in-process benchmark |
-| Shell queue integration | PASS for sixteen image/vector/audio/video/document/material/archive/audit/dataset/external-render/hybrid workflows, exact reuse/repair, provenance repair, and history UI | `python benchmarks/check_queue_flow.py` |
+| Shell queue integration | PASS for seventeen batch workflows plus the separate interactive Sprite Viewer, with exact reuse/repair, provenance repair, and history UI | `python benchmarks/check_queue_flow.py` |
 | Runtime dependency added by batch core | 0 | SQLite is Python standard library |
 | Runtime dependency added by job queue | 0 | threading/heapq are Python standard library |
 
@@ -42,7 +44,7 @@ optional numeric/AI stacks and passes. No startup-speed improvement is claimed.
 | Area | Gate |
 |---|---|
 | Ready-to-mainloop | ≤250 ms on the reference machine; investigate >10% regression |
-| Discovery/shell import | ≤50 ms for the current 17 tools |
+| Discovery/shell import | ≤50 ms for the current 18 tools |
 | Idle optional systems | no model, CUDA, FFmpeg, Blender, or SQLite store opened |
 | Idle CPU | no polling worker or background service |
 | Batch checkpoint overhead | ≥5,000 item transitions/s for trivial local work |

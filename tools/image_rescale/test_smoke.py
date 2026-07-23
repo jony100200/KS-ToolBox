@@ -53,6 +53,31 @@ def test_full_pipeline() -> None:
     print(f"PASS: image_rescale full pipeline — {res.before} -> {res.after}.")
 
 
+def test_optional_realesrgan_pipeline() -> None:
+    """Exercise the portable AI bundle only when the local bundle is present."""
+    if importlib.util.find_spec("PIL") is None:
+        print("SKIP: Pillow not installed — AI pipeline leg skipped.")
+        return
+    status = e.ai_runtime_status()
+    if not status["ready"]:
+        print("SKIP: Real-ESRGAN NCNN bundle not installed — AI pipeline leg skipped.")
+        return
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src = tmp / "small.png"
+        Image.new("RGB", (48, 24), (80, 100, 160)).save(src)
+        res = e.process(src, e.ResizeOptions(
+            out_root=tmp / "out", mode="scale_factor", scale_factor=2.0,
+            allow_upscale=True, ai_upscale=True, dry_run=False,
+        ))
+        assert res.action == "resized", f"expected AI resize, got {res.action}: {res.reason}"
+        assert res.detail == "ai.realesrgan.realesrgan-x4plus", res.detail
+        with Image.open(res.out_path) as got:
+            assert got.size == (96, 48), f"AI output size wrong: {got.size}"
+    print("PASS: image_rescale Real-ESRGAN NCNN 2× pipeline.")
+
+
 def test_durable_batch() -> None:
     if importlib.util.find_spec("PIL") is None:
         print("SKIP: Pillow not installed — durable-batch leg skipped.")
@@ -118,6 +143,7 @@ def test_durable_batch() -> None:
 def main() -> int:
     test_sizing_math()
     test_full_pipeline()
+    test_optional_realesrgan_pipeline()
     test_durable_batch()
     return 0
 

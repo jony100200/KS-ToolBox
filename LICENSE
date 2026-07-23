@@ -23,6 +23,4 @@ SOFTWARE.
 ---
 NOTE: The MIT license above covers the KS ToolBox source code only. Binaries and
 third-party libraries bundled or downloaded with the app carry their own licenses
-— see THIRD_PARTY_NOTICES.md. In particular, a bundled FFmpeg build that includes
-x264/x265 is licensed under the GPL, which imposes obligations on redistribution
-of that binary.
+— see THIRD_PARTY_NOTICES.md.

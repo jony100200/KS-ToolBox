@@ -1,45 +1,31 @@
-# KS ToolBox — benchmarks
+# KS ToolBox verification and benchmarks
 
-Reproducible baseline measurements backing `docs/KS_TOOLBOX_OPTIMIZATION_AUDIT.md`.
-Re-run after each optimization and record before/after in the plan doc. **No
-improvement is claimed without the paired measurement.**
+Run checks from the repository root with the dedicated Toolbox environment:
 
-Run from the repo root. `$py` = the app venv's python (`.venv\Scripts\python.exe`);
-`$uv` = uv on PATH (dependency measurements use an isolated temp target so nothing
-touches the app venv).
+```powershell
+$py = '.\.venv\Scripts\python.exe'
+& $py -m benchmarks.check_docs
+& $py benchmarks\run_all_smoke.py
+```
 
-Run package-aware Python checks with module syntax, for example
-`$py -m benchmarks.check_ui`; direct script syntax does not place the repository
-root on `sys.path` for every verifier.
+The documentation check is dependency-free: it validates local Markdown links,
+requires one guide for each first-party tool, and rejects selected stale claims
+from current operator/developer pages. The smoke suite discovers every tool;
+optional dependencies may skip their optional leg, but an installed path that
+breaks must fail.
 
-| Script | Measures | Notes |
-|---|---|---|
-| `measure_repo.ps1` | file count, LOC, source/asset/bin sizes | pure filesystem |
-| `measure_startup.py` | import + discovery time, models-at-startup | headless (no window) |
-| `measure_shell_runtime.py` | real first paint, one-second idle CPU, working set, Python threads, lazy panel count | opens then hides the real shell |
-| `measure_batch_core.py` | durable item transitions, checkpoint size, completed-job reuse | 1,000 no-op local items |
-| `check_queue_flow.py` | real CustomTkinter submission across sixteen durable image/vector/audio/video/document/material/archive/audit/dataset/external-render/hybrid workflows, exact reuse/repair, provenance repair, and history rendering | uses temporary state and generated media |
-| `check_ui.py` | construction of every discovered tool panel | no processing |
-| `check_shell_navigation.py` | grouped navigation, category reachability, search, lazy tool creation, and minimum-size scroll host | real isolated CustomTkinter process |
-| `capture_ui.py` | review images for Home, category, search, tool, minimum-size custom tool, and Queue | saves to the requested directory or OS temp |
-| `run_all_smoke.py` | every tool's real standalone smoke contract | optional dependencies skip cleanly |
-| `measure_deps.ps1` | installed footprint of base vs Clean Cutout stacks | uv `--target` into temp, then du |
-| `measure_ai_calls.ps1` | every AI / network call site in the source | static sweep |
-| `measure_package.ps1` | built PyInstaller dist size + file count | run after a build |
-
-## Original baseline (2026-07-22)
-
-| Metric | Value |
+| Command | Purpose |
 |---|---|
-| Python files / LOC | 34 / 2,908 |
-| Startup (headless-ready) | 232 ms (ctk 198 + discover/shell 34) |
-| Base install footprint | 1.3 MB |
-| Clean Cutout install footprint | 358.6 MB (≈237 MB recoverable) |
-| Bundled ffmpeg + ffprobe | 462 MB |
-| AI call sites | 1 (specialist ONNX, `clean_cutout`) |
-| Network call sites | 0 |
-| Models loaded at startup | 0 |
+| `python -m benchmarks.check_docs` | Documentation links, guide coverage, current-state wording |
+| `python benchmarks/run_all_smoke.py` | Every tool's standalone real-output contract |
+| `python -m benchmarks.check_ui` | Construct every discovered panel without processing files |
+| `python -m benchmarks.check_shell_navigation` | Catalog/search/navigation and minimum-size shell behavior |
+| `python -m benchmarks.measure_startup` | Import/discovery readiness and lazy-load boundary |
+| `python -m benchmarks.measure_shell_runtime` | First paint, idle working set, CPU, thread, and lazy-panel evidence |
+| `python benchmarks/measure_batch_core.py` | Queue transitions, checkpoint size, and reuse evidence |
+| `powershell -File benchmarks/measure_package.ps1` | Built portable-artifact size and file count |
 
-The original table predates the 17-tool audit and durable batch-core slice. Use
-`docs/PERFORMANCE_BUDGETS.md` for current measured ranges and rerun the scripts
-before making an optimization claim.
+The dated figures in [Performance Budgets](../docs/PERFORMANCE_BUDGETS.md) are
+baseline evidence, not release claims. Re-run the relevant measurement after a
+meaningful change and record the machine, command, and result before claiming
+an improvement.

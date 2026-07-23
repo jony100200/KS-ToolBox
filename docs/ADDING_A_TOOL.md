@@ -23,7 +23,10 @@ tools/example_tool/
    confirmation, recoverable behavior, and a manifest.
 5. Add a real sample/output smoke test. Missing optional dependencies must print
    `SKIP` and return success; broken installed behavior must fail.
-6. Run the standalone smoke, real UI construction check, and full smoke suite.
+6. Write `README.md` for the operator: purpose, supported inputs/outputs,
+   options, safety behavior, dependencies, and the exact smoke command.
+7. Run the standalone smoke, real UI construction check, documentation check,
+   and full smoke suite.
 
 ## Minimal registration example
 
@@ -77,3 +80,10 @@ resample = "auto"
 
 Do not ship this as executable configuration until a strict parser and version
 validator exist.
+
+## Documentation closeout
+
+Add the new guide to the repository README tool table and, when it changes a
+shared contract, update the relevant current document in [the docs map](README.md).
+Do not edit historical migration/audit records merely to make their counts look
+current; add a dated status note instead.

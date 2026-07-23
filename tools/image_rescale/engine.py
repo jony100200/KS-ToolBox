@@ -21,11 +21,20 @@ Public interface:
 from __future__ import annotations
 
 import math
+import os
+import subprocess
+import warnings
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from toolbox.engine_common import IMAGE_EXTS
+from toolbox.engine_common import CommandCancelled, IMAGE_EXTS, run_cancellable_cmd
 MODES = ("longest_side", "max_mp", "scale_factor", "fit_inside")
+
+_AI_MODELS = {
+    "realesrgan-x4plus": "Real-ESRGAN general 4×",
+    "realesrgan-x4plus-anime": "Real-ESRGAN anime/art 4×",
+}
+_AI_BUNDLE_DIRNAME = "realesrgan-ncnn-20220424"
 
 _MAX_DIM = 16384
 _MAX_UPSCALE = 8.0
@@ -73,8 +82,57 @@ class ResizeOptions:
     allow_upscale: bool = False       # by default never enlarge (avoids blurry blow-ups)
     snap: int = 0                     # round dims down to a multiple of this (0 = off)
     resample: str = "auto"            # auto | nearest | bilinear | bicubic | lanczos
+    ai_upscale: bool = False            # explicit local Real-ESRGAN/NCNN execution
+    ai_model: str = "realesrgan-x4plus"
+    ai_tile_size: int = 0               # 0 = runtime auto; smaller values use less VRAM
     keep_format: bool = True          # keep the source extension (else force PNG)
     dry_run: bool = True
+
+
+def ai_model_choices() -> tuple[str, ...]:
+    """Stable model identifiers exposed by the UI and command line."""
+    return tuple(_AI_MODELS)
+
+
+def ai_runtime_status() -> dict[str, str | bool]:
+    """Report the source-worktree Real-ESRGAN NCNN bundle without importing AI libs.
+
+    The portable NCNN executable owns GPU inference.  It is deliberately kept
+    under the ignored ``models/`` cache, so this tool does not add PyTorch or a
+    background model service to Toolbox startup.
+    """
+    root = Path(__file__).resolve().parents[2] / "models" / _AI_BUNDLE_DIRNAME
+    executable_name = "realesrgan-ncnn-vulkan.exe" if os.name == "nt" else "realesrgan-ncnn-vulkan"
+    executable = root / executable_name
+    models_dir = root / "models"
+    missing = []
+    if not executable.is_file():
+        missing.append("portable NCNN executable")
+    for model_name in _AI_MODELS:
+        if not (models_dir / f"{model_name}.param").is_file() or not (models_dir / f"{model_name}.bin").is_file():
+            missing.append(model_name)
+    ready = not missing
+    return {
+        "ready": ready,
+        "root": str(root),
+        "executable": str(executable),
+        "models_dir": str(models_dir),
+        "details": "Real-ESRGAN NCNN 4× models ready." if ready else f"Missing: {', '.join(missing)}.",
+    }
+
+
+def ai_runtime_dependencies(opts: ResizeOptions) -> tuple[Path, ...]:
+    """Files that make an AI job's durable identity reproducible."""
+    if not opts.ai_upscale:
+        return ()
+    status = ai_runtime_status()
+    root = Path(str(status["root"]))
+    model = opts.ai_model if opts.ai_model in _AI_MODELS else "realesrgan-x4plus"
+    return (
+        Path(str(status["executable"])),
+        root / "models" / f"{model}.param",
+        root / "models" / f"{model}.bin",
+    )
 
 
 def _factor_for(mode: str, orig_w: int, orig_h: int, opts: ResizeOptions) -> float:
@@ -142,7 +200,12 @@ class Result:
         return asdict(self)
 
 
-def process(path: str | Path, opts: ResizeOptions) -> Result:
+def process(
+    path: str | Path,
+    opts: ResizeOptions,
+    *,
+    cancelled=None,
+) -> Result:
     """load -> compute target size -> resize -> save, for one image."""
     src = Path(path)
     if not src.is_file():
@@ -169,6 +232,9 @@ def process(path: str | Path, opts: ResizeOptions) -> Result:
                 return Result(str(src), "dry-run", f"would resize {before} -> {after}",
                               before=before, after=after, out_path=str(dst))
 
+            if opts.ai_upscale:
+                return _process_ai_upscale(src, dst, tw, th, before, after, opts, cancelled=cancelled)
+
             factor = tw / orig_w if orig_w else 1.0
             resized = im.resize((tw, th), _pick_resample(opts.resample, factor))
             # JPEG can't hold alpha — flatten to RGB when saving a jpg.
@@ -183,6 +249,74 @@ def process(path: str | Path, opts: ResizeOptions) -> Result:
 
     return Result(str(src), "resized", f"{before} -> {after}", before=before, after=after,
                   out_path=str(dst), detail=opts.mode)
+
+
+def _process_ai_upscale(
+    src: Path,
+    dst: Path,
+    target_w: int,
+    target_h: int,
+    before: str,
+    after: str,
+    opts: ResizeOptions,
+    *,
+    cancelled,
+) -> Result:
+    """Run one explicit NCNN job then precisely resize its output if required.
+
+    NCNN supports native 2×/3×/4× outputs.  A non-native requested target is
+    produced by the next native scale and a final deterministic resize, never a
+    hidden Pillow-only fallback.
+    """
+    status = ai_runtime_status()
+    if not status["ready"]:
+        return Result(str(src), "failed", f"AI upscale unavailable — {status['details']}", detail="ai.not_ready")
+    model = opts.ai_model if opts.ai_model in _AI_MODELS else "realesrgan-x4plus"
+    source_w, source_h = (int(value) for value in before.split("x", 1))
+    requested_scale = max(target_w / source_w, target_h / source_h)
+    native_scale = 2 if requested_scale <= 2 else 3 if requested_scale <= 3 else 4
+    work_output = dst.with_name(f".{dst.stem}.realesrgan.part.png")
+    final_tmp = dst.with_name(f"{dst.stem}.part{dst.suffix}")
+    cmd = [
+        str(status["executable"]), "-i", str(src), "-o", str(work_output),
+        "-s", str(native_scale), "-m", str(status["models_dir"]), "-n", model,
+        "-t", str(max(0, int(opts.ai_tile_size))), "-f", "png",
+    ]
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        completed = run_cancellable_cmd(
+            cmd, timeout=300, cancelled=cancelled, capture_limit_bytes=16 * 1024,
+        )
+        if completed.returncode != 0 or not work_output.is_file() or work_output.stat().st_size <= 0:
+            message = (completed.stderr or completed.stdout or "unknown NCNN failure").strip()
+            return Result(str(src), "failed", f"AI upscale failed: {message[-800:]}", detail="ai.failed")
+        from PIL import Image
+        with Image.open(work_output) as generated:
+            image = generated.convert("RGBA") if generated.mode in ("RGBA", "LA", "P") else generated.convert("RGB")
+            if image.size != (target_w, target_h):
+                image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            if dst.suffix.lower() in (".jpg", ".jpeg") and image.mode == "RGBA":
+                image = image.convert("RGB")
+            image.save(final_tmp)
+        final_tmp.replace(dst)
+    except CommandCancelled:
+        return Result(str(src), "failed", "AI upscale cancelled", detail="ai.cancelled")
+    except subprocess.TimeoutExpired:
+        return Result(str(src), "failed", "AI upscale timed out after 300 seconds", detail="ai.timeout")
+    except (OSError, ValueError) as ex:
+        return Result(str(src), "failed", f"AI upscale failed: {ex}", detail="ai.failed")
+    finally:
+        for temporary in (work_output, final_tmp):
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as ex:
+                warnings.warn(f"Could not clean temporary AI upscale output {temporary.name}: {ex}", RuntimeWarning)
+
+    label = _AI_MODELS[model]
+    return Result(
+        str(src), "resized", f"{before} -> {after} ({label})", before=before, after=after,
+        out_path=str(dst), detail=f"ai.realesrgan.{model}",
+    )
 
 
 def validate_result(result: Result) -> bool:

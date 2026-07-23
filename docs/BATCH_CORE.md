@@ -11,8 +11,9 @@ analytical `tileset_checker`, and secure multi-artifact `package_extractor` are
 joined by grouped, exact-report-set `asset_auditor` as the first production
 whole-collection audit integration, and grouped `dataset_manager` with
 JSON-last output provenance and exact repair-on-corruption reuse. Hybrid
-`alpha_doctor` adds per-image validated output reuse while keeping optional
-model residency and explicit download consent inside its tool boundary.
+`alpha_doctor` and `image_enhancer` add per-image validated output reuse while
+keeping optional local model residency and explicit download consent inside
+their tool boundaries.
 
 ## Job lifecycle
 
@@ -29,7 +30,7 @@ Interrupted Running item → Pending; job → Recovered → Running
 Pause and cancellation are cooperative at item boundaries. A codec or native
 process already executing must provide its own cancellable adapter before its
 tool can promise mid-item interruption. Video Compressor uses the implemented
-owned-process adapter and can stop FFmpeg, ffprobe, VMAF, or HandBrake mid-item.
+owned-process adapter and can stop FFmpeg, ffprobe, or VMAF mid-item.
 
 ## Item lifecycle
 
@@ -57,13 +58,19 @@ and timestamps. `job_items` stores ordered input paths, state, attempts,
 diagnostics, and JSON result data. Each item transition is transactional. WAL
 mode and `synchronous=NORMAL` balance crash safety and unattended throughput.
 
-The store is opened lazily on batch submission. Default locations are:
+The SQLite store is opened lazily on batch submission. Default locations are:
 
 - Windows: `%LOCALAPPDATA%/KS Toolbox/jobs.sqlite3`
 - macOS: `~/Library/Application Support/KS Toolbox/jobs.sqlite3`
 - Linux: `$XDG_STATE_HOME/ks-toolbox/jobs.sqlite3`, or `~/.local/state/ks-toolbox`
 
 `KS_TOOLBOX_STATE_DIR` provides an explicit portable/test override.
+
+If CPython cannot load SQLite because a third-party DLL has conflicted with its
+extension module, the queue announces degraded mode and uses `VolatileJobStore`
+for the current session. Processing, isolation, manifests, and reports continue;
+restart recovery and persisted history are unavailable until SQLite loads again.
+This is an explicit fallback, not a silent change of durability.
 
 ## Current executor protocol
 

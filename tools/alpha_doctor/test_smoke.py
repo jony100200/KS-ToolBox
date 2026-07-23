@@ -206,8 +206,12 @@ def test_safety_contracts() -> None:
 def test_ai_optional() -> None:
     if importlib.util.find_spec("onnxruntime") is None or importlib.util.find_spec("PIL") is None:
         print("SKIP: onnxruntime not installed — AI method skipped (optional)."); return
-    if not any((d / "u2net.onnx").is_file() for d in e._model_dirs()):
-        print("SKIP: u2net model not cached — AI method skipped (no download in tests)."); return
+    model = next(
+        (name for name in ("u2netp", "u2net") if e.cached_model_path(name) is not None),
+        None,
+    )
+    if model is None:
+        print("SKIP: no AI model cached — AI method skipped (no download in tests)."); return
     from PIL import Image
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -215,9 +219,14 @@ def test_ai_optional() -> None:
         yy, xx = np.ogrid[:128, :128]
         img[(yy - 64) ** 2 + (xx - 64) ** 2 <= 44 ** 2] = (230, 60, 60)
         src = tmp / "s.png"; Image.fromarray(img, "RGB").save(src)
-        res = e.process(src, e.AlphaOptions(out_root=tmp / "out", method="ai", dry_run=False))
+        res = e.process(
+            src,
+            e.AlphaOptions(
+                out_root=tmp / "out", method="ai", model=model, dry_run=False,
+            ),
+        )
         assert res.action in ("cut", "skipped"), f"ai: {res.reason}"
-    print("PASS: alpha_doctor AI method (u2net) — optional path works.")
+    print(f"PASS: alpha_doctor AI method ({model}) — optional path works.")
 
 
 def main() -> int:

@@ -13,7 +13,7 @@ class ImageRescaleTool:
         title="Image Rescale",
         icon=Icons.EXPAND,
         category="images",
-        subtitle="Batch-resize images (longest-side, megapixels, factor, fit)",
+        subtitle="Batch resize + optional local Real-ESRGAN AI upscale",
     )
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:

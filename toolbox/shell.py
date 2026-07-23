@@ -6,7 +6,10 @@ does not know how any tool processes files.
 from __future__ import annotations
 
 import sys
+import os
+import subprocess
 from pathlib import Path
+from tkinter import messagebox
 
 import customtkinter as ctk
 
@@ -46,6 +49,20 @@ def _set_win_app_id() -> None:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KS.ToolBox")
     except Exception:
         pass  # cosmetic only
+
+
+def restart_command() -> tuple[list[str], Path]:
+    """Return the matching source or frozen relaunch command and working root."""
+    if getattr(sys, "frozen", False):
+        executable = Path(sys.executable)
+        return [str(executable)], executable.parent
+    root = Path(__file__).resolve().parent.parent
+    launcher = Path(sys.executable)
+    if os.name == "nt":
+        windowed = Path(sys.prefix) / "Scripts" / "pythonw.exe"
+        if windowed.is_file():
+            launcher = windowed
+    return [str(launcher), str(root / "main.py")], root
 
 
 class ToolBoxShell(ctk.CTk):
@@ -176,6 +193,9 @@ class ToolBoxShell(ctk.CTk):
             text_color=t.TEXT_MUTED,
         )
         help_text.pack(side="bottom", anchor="w", padx=16, pady=(0, 14))
+        c.secondary_button(
+            bar, "Restart ToolBox", self._restart, width=196
+        ).pack(side="bottom", padx=12, pady=(0, 10))
 
     def _add_nav(
         self, view_id: str, label: str, command
@@ -434,6 +454,36 @@ class ToolBoxShell(ctk.CTk):
         suffix = f"  ·  {active}" if active else ""
         self._queue_button.configure(text=f"Queue{suffix}")
         self._queue_poll = self.after(250, self._poll_queue_button)
+
+    def _restart(self) -> None:
+        active = sum(
+            item.state
+            in {
+                JobState.QUEUED,
+                JobState.PREPARING,
+                JobState.RUNNING,
+                JobState.PAUSED,
+                JobState.CANCELLING,
+            }
+            for item in self._services.queue.history()
+        )
+        detail = "The current window will close and a fresh Toolbox process will open."
+        if active:
+            detail += f"\n\n{active} queued or active job(s) will be cancelled."
+        if not messagebox.askyesno("Restart KS ToolBox?", detail, parent=self):
+            return
+        command, cwd = restart_command()
+        try:
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            subprocess.Popen(command, cwd=cwd, creationflags=flags)
+        except OSError as exc:
+            messagebox.showerror(
+                "Could not restart KS ToolBox",
+                f"The replacement process could not start:\n\n{exc}",
+                parent=self,
+            )
+            return
+        self._on_close()
 
     def _on_close(self) -> None:
         self._cancel_pending_search()

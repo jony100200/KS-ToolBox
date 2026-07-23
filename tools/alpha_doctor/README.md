@@ -17,7 +17,8 @@ existing custom Alpha Doctor screen remains the control surface.
 | **Auto solid background** (default) | detects the flat border colour and keys it out | ✅ |
 | **Chroma key** | keys a chosen colour (green/blue/white/custom) — green/blue screen, flat logos | ✅ |
 | **Edge flood-fill** | removes background regions connected to the image border | ✅ |
-| **AI matte (u2net)** | ONNX Runtime salient-object matte for hard photographic subjects | optional — a ~176 MB download requires approval, CPU-only |
+| **AI matte — Compact U2NetP** | ONNX Runtime salient-object matte for hard photographic subjects | optional — about 5 MB, recommended for ordinary CPU-only installs |
+| **AI matte — Full U2Net** | Higher-detail ONNX Runtime salient-object matte | optional — about 176 MB, requires approval, CPU-only |
 
 ## Post-processing (all deterministic)
 
@@ -25,8 +26,10 @@ existing custom Alpha Doctor screen remains the control surface.
 - **Green despill** — remove green-screen tint that bleeds into edges.
 - **Premultiply** — output premultiplied alpha (for engines that expect it).
 
-Nothing is written until you turn off **Preview only**; originals are never
-touched. A `cutout_manifest.csv` records every file when an output folder is set.
+The normal action writes transparent PNG cutouts and never touches originals.
+**Plan only** is available when you only want to validate the output paths; it
+does not calculate a matte or create files. A `cutout_manifest.csv` records every
+file when an output folder is set.
 
 Before a real batch starts, Alpha Doctor resolves every destination. It refuses
 an output that would replace a selected source and refuses two inputs that
@@ -35,9 +38,11 @@ keys must use `#RRGGBB`, and unknown methods/models fail visibly.
 
 AI stays opt-in at both levels: selecting AI does not silently authorize a
 network request. If the model is absent, the UI asks before downloading it.
-Cached and downloaded models are checksum-verified; a corrupt cached model is
-rejected rather than handed to ONNX Runtime. A verified unchanged model is
-remembered for the app session so batch items do not repeat the hash.
+In the source workspace, downloaded models live in the app's local `models/`
+folder; a bundled build stores them beside the executable. Cached and downloaded
+models are checksum-verified; a corrupt cached model is rejected rather than
+handed to ONNX Runtime. A verified unchanged model is remembered for the app
+session so batch items do not repeat the hash.
 
 Successful cutouts are staged, decoded as RGBA, checked for original dimensions
 and alpha coverage, hashed, and only then atomically committed. Stored results

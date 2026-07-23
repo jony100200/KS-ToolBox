@@ -32,7 +32,7 @@ class ImageRescalePanel(BaseBatchPanel):
     FILE_EXTS = e.IMAGE_EXTS
     FILE_LABEL = "image"
     RESULTS_ICON = Icons.EXPAND
-    RUN_LABEL = "Preview & Resize"
+    RUN_LABEL = "Resize / Upscale Selected"
 
     def __init__(self, parent, queue_service):
         super().__init__(parent, queue_service=queue_service)
@@ -69,14 +69,40 @@ class ImageRescalePanel(BaseBatchPanel):
         self._build_output_row(b, "Output folder (blank = ./resized beside each source)")
         # toggles
         toggles = ctk.CTkFrame(b, fg_color="transparent"); toggles.pack(fill="x", pady=(12, 0))
-        self._dry = ctk.CTkCheckBox(toggles, text="Preview only (list resizes — no writes)", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._dry.select(); self._dry.pack(side="left")
+        self._dry = ctk.CTkCheckBox(toggles, text="Preview only (no writes)", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._dry.pack(side="left")
         self._upscale = ctk.CTkCheckBox(toggles, text="Allow upscaling", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._upscale.pack(side="left", padx=20)
         self._mirror = ctk.CTkCheckBox(toggles, text="Mirror input structure", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._mirror.select(); self._mirror.pack(side="left", padx=20)
+        ai_row = ctk.CTkFrame(b, fg_color="transparent"); ai_row.pack(fill="x", pady=(8, 0))
+        self._ai_upscale = ctk.CTkCheckBox(
+            ai_row, text="AI upscale (Real-ESRGAN)", font=t.font(11),
+            fg_color=t.ACCENT_BLUE, command=self._on_ai_change,
+        )
+        self._ai_upscale.pack(side="left", padx=(0, 16))
+        ctk.CTkLabel(ai_row, text="Model", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left")
+        self._ai_model = ctk.CTkOptionMenu(
+            ai_row, values=list(e.ai_model_choices()), width=210,
+            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER,
+        )
+        self._ai_model.set("realesrgan-x4plus")
+        self._ai_model.pack(side="left", padx=(8, 16))
+        self._ai_status = ctk.CTkLabel(ai_row, text="", text_color=t.TEXT_MUTED, font=t.font(11))
+        self._ai_status.pack(side="left")
+        self._refresh_ai_status()
         # run row
         self._build_run_row(b)
+
+    def _refresh_ai_status(self):
+        status = e.ai_runtime_status()
+        color = t.STATE["done"][1] if status["ready"] else t.STATE["error"][1]
+        self._ai_status.configure(text=str(status["details"]), text_color=color)
+
+    def _on_ai_change(self):
+        if self._ai_upscale.get():
+            self._upscale.select()
+        self._refresh_ai_status()
 
     def _on_mode_change(self, mode: str):
         """The value fields relabel to match the chosen mode; height shows only for fit_inside."""
@@ -111,18 +137,24 @@ class ImageRescalePanel(BaseBatchPanel):
         out_root = Path(out) if out else None
         mirror = bool(self._mirror.get())
         input_root = self._resolve_input_root() if mirror else None
+        ai_upscale = bool(self._ai_upscale.get())
+        if ai_upscale and not e.ai_runtime_status()["ready"]:
+            self._logline("AI model is not ready: " + str(e.ai_runtime_status()["details"]), t.STATE["error"][1])
+            return None
         return e.ResizeOptions(out_root=out_root, input_root=input_root, mirror=mirror, mode=mode,
-                               allow_upscale=bool(self._upscale.get()), snap=snap,
-                               resample=self._resample.get(), dry_run=bool(self._dry.get()), **kw)
+                               allow_upscale=bool(self._upscale.get()) or ai_upscale, snap=snap,
+                               resample=self._resample.get(), ai_upscale=ai_upscale,
+                               ai_model=self._ai_model.get(), dry_run=bool(self._dry.get()), **kw)
 
     # -- queue submission (tool-specific) --------------------------------------
     def _build_submission(self, files: list[Path], opts: e.ResizeOptions) -> QueueSubmission:
         definition = JobDefinition.create(
             tool_id="image_rescale",
-            tool_version="1",
-            workflow_version="resize.v1",
+            tool_version="2",
+            workflow_version="resize.v2",
             inputs=files,
             settings=asdict(opts),
+            identity_dependencies=e.ai_runtime_dependencies(opts),
         )
         def classify(res: e.Result) -> ItemOutcome:
             data = res.to_dict()
@@ -139,7 +171,7 @@ class ImageRescalePanel(BaseBatchPanel):
         return QueueSubmission(
             definition=definition,
             label=f"Image Rescale · {len(files)} file(s)",
-            execute=lambda path, token: e.process(path, opts),
+            execute=lambda path, token: e.process(path, opts, cancelled=lambda: token.is_cancelled),
             classify=classify,
             validate_stored=validate_stored,
             finalize=lambda report: self._prepare_queue_completion(

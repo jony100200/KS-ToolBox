@@ -8,10 +8,59 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import sys
 import time
 from pathlib import Path
+
+
+_SQLITE_DLL_DIRECTORY = None
+
+
+def _without_conflicting_sqlite_dll_dirs(path_value: str, expected_dll: Path) -> str:
+    """Remove PATH directories that contain a different ``sqlite3.dll``."""
+    expected = expected_dll.resolve(strict=False)
+    kept: list[str] = []
+    for raw_dir in path_value.split(os.pathsep):
+        if not raw_dir:
+            continue
+        candidate = Path(raw_dir) / "sqlite3.dll"
+        try:
+            conflicts = candidate.is_file() and candidate.resolve(strict=False) != expected
+        except OSError:
+            conflicts = False
+        if not conflicts:
+            kept.append(raw_dir)
+    return os.pathsep.join(kept)
+
+
+def _prepare_stdlib_sqlite_dll() -> None:
+    """Keep a foreign Windows ``sqlite3.dll`` from breaking Python's extension.
+
+    Shell extensions can put an older SQLite DLL on the process search path.
+    The queue requires the SQLite version bundled with the active interpreter,
+    so add that DLL directory to Python's extension-module search path and
+    remove PATH directories containing a different SQLite DLL before importing
+    the standard-library wrapper.  This affects only the Toolbox process and
+    its children; it never changes the user's system PATH or SageThumbs files.
+    If Windows still rejects the extension, ``job_queue`` uses its explicit
+    session-only fallback and shows a visible degraded-mode warning.
+    """
+    if os.name != "nt":
+        return
+    sqlite_dll = Path(sys.base_prefix) / "DLLs" / "sqlite3.dll"
+    if not sqlite_dll.is_file():
+        return
+    global _SQLITE_DLL_DIRECTORY
+    _SQLITE_DLL_DIRECTORY = os.add_dll_directory(str(sqlite_dll.parent))
+    safe_path = _without_conflicting_sqlite_dll_dirs(
+        os.environ.get("PATH", ""), sqlite_dll
+    )
+    os.environ["PATH"] = str(sqlite_dll.parent) + os.pathsep + safe_path
+
+
+_prepare_stdlib_sqlite_dll()
+
+import sqlite3
 
 from toolbox.batch_core import (
     BatchReport,
