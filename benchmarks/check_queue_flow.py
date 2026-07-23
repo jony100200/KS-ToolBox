@@ -95,6 +95,7 @@ def main() -> int:
             tileset_job_id = _run_and_wait(app, tileset_panel, "Tileset Checker", 2)
 
             audio_job_id = None
+            chopper_job_id = None
             video_job_id = None
             ffmpeg = resolve_tool("ffmpeg")
             if ffmpeg:
@@ -132,6 +133,28 @@ def main() -> int:
                 audio_panel._mirror.deselect()
                 assert not audio_panel._pre_run_check(audio_panel._collect_options())
 
+                chop_sample = root / "chop_sample.mp4"
+                made_chop = run_cmd([
+                    ffmpeg, "-y",
+                    "-f", "lavfi", "-i", "testsrc=size=160x120:rate=15:duration=0.4",
+                    "-f", "lavfi", "-i", "color=c=black:size=160x120:rate=15:duration=0.3",
+                    "-f", "lavfi", "-i", "testsrc=size=160x120:rate=15:duration=0.4",
+                    "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]",
+                    "-map", "[v]", "-pix_fmt", "yuv420p", str(chop_sample),
+                ], timeout=30)
+                assert made_chop.returncode == 0 and chop_sample.is_file(), made_chop.stderr[-300:]
+                app._select("video_chopper")
+                chopper_panel = app._panels["video_chopper"]
+                chopper_panel._add([chop_sample])
+                chopper_panel._dry.deselect()
+                chopper_panel._min_clip.delete(0, "end")
+                chopper_panel._min_clip.insert(0, "0.2")
+                chop_out = root / "chop_out"
+                chopper_panel._out_entry.insert(0, str(chop_out))
+                chopper_job_id = _run_and_wait(app, chopper_panel, "Video Chopper", 1)
+                assert len(list(chop_out.rglob("*_clip_*.mp4"))) == 2
+                assert (chop_out / "chop_manifest.csv").is_file()
+
             app._select(app.QUEUE_ID)
             app.update()
             queue_panel = app._panels[app.QUEUE_ID]
@@ -144,14 +167,16 @@ def main() -> int:
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
             if audio_job_id:
                 assert any(item.job_id == audio_job_id for item in app._services.queue.history())
+            if chopper_job_id:
+                assert any(item.job_id == chopper_job_id for item in app._services.queue.history())
             if video_job_id:
                 assert any(item.job_id == video_job_id for item in app._services.queue.history())
         finally:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "Material Converter, Showcase, Tileset Checker, Audio Tool, and Video Compressor "
-          "through shell queue; history UI rendered.")
+          "Material Converter, Showcase, Tileset Checker, Audio Tool, Video Compressor, "
+          "and Video Chopper through the shell queue; history UI rendered.")
     return 0
 
 

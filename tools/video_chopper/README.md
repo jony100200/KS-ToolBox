@@ -14,7 +14,17 @@ folder of hundreds of videos and it mirrors the input structure into the output.
 4. **Cut** each clip — lossless stream-copy by default, or frame-accurate H.264.
 
 Nothing is written until you turn off **Preview only**; originals are never
-touched. A `chop_manifest.csv` records every file when an output folder is set.
+touched. A source with no black gaps is left unchanged instead of being copied
+into one redundant clip. A `chop_manifest.csv` records every file when an output
+folder is set.
+
+The shared durable queue provides pause/resume, process-tree cancellation,
+per-source retry and quarantine, checkpoints, crash recovery, manifests, and
+completion reports. Every clip stays staged until ffprobe confirms a positive
+duration; then its exact size and cancellable SHA-256 are recorded before atomic
+commit. Reuse requires the complete planned clip set, ranges, sizes, durations,
+and hashes to remain valid. Two sources that would share a flat output directory
+are blocked before a real run.
 
 ## Options
 
@@ -40,8 +50,10 @@ chopper, which re-encoded every frame to mpeg4 (large, lossy, slow).
 python -m tools.video_chopper.test_smoke
 ```
 
-Synthesizes a real `content · black · content` sample and asserts the engine
-cuts exactly two clips. Skips cleanly if ffmpeg isn't installed.
+Synthesizes real black-gap and continuous samples; verifies planning, two-clip
+output, exact reuse validation, corruption detection, collision rejection,
+cancellation cleanup, no-gap skipping, and malformed settings. Skips cleanly if
+ffmpeg isn't installed.
 
 ## Notes
 

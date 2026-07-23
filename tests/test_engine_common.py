@@ -7,16 +7,46 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from toolbox.engine_common import (
     CommandCancelled,
     find_output_collisions,
+    probe_media_duration,
     run_cancellable_cmd,
     sha256_file,
 )
 
 
 class CancellableCommandTests(unittest.TestCase):
+    def test_shared_duration_probe_requires_finite_positive_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "sample.bin"
+            source.write_bytes(b"media")
+            with mock.patch(
+                "toolbox.engine_common.resolve_tool", return_value="ffprobe"
+            ), mock.patch(
+                "toolbox.engine_common.run_cancellable_cmd",
+                return_value=subprocess.CompletedProcess(
+                    ["ffprobe"], 0, stdout="2.5\n", stderr=""
+                ),
+            ):
+                result = probe_media_duration(source)
+            self.assertFalse(result["error"])
+            self.assertEqual(result["data"], 2.5)
+
+            with mock.patch(
+                "toolbox.engine_common.resolve_tool", return_value="ffprobe"
+            ), mock.patch(
+                "toolbox.engine_common.run_cancellable_cmd",
+                return_value=subprocess.CompletedProcess(
+                    ["ffprobe"], 0, stdout="nan\n", stderr=""
+                ),
+            ):
+                invalid = probe_media_duration(source)
+            self.assertTrue(invalid["error"])
+            self.assertEqual(invalid["error_type"], "probe.parse")
+
     def test_output_collisions_cover_shared_targets_and_selected_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

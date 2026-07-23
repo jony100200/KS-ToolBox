@@ -6,6 +6,7 @@ instead of defining its own copies. Pure refactor, zero behavior change.
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 import signal
 import shutil
@@ -187,6 +188,53 @@ def run_cancellable_cmd(
             return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
         except subprocess.TimeoutExpired:
             continue
+
+
+def probe_media_duration(
+    path: str | Path,
+    *,
+    timeout: int = 60,
+    cancelled: Callable[[], bool] | None = None,
+) -> dict:
+    """Return a finite positive ffprobe duration through the shared envelope."""
+    source = Path(path)
+    if not source.is_file():
+        return err("file.missing", f"not a file: {source}")
+    ffprobe = resolve_tool("ffprobe")
+    if not ffprobe:
+        return err(
+            "dep.missing",
+            "ffprobe not found (bundle a bin/ or install ffmpeg)",
+            retryable=False,
+        )
+    command = [
+        ffprobe,
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(source),
+    ]
+    try:
+        completed = run_cancellable_cmd(
+            command, timeout=timeout, cancelled=cancelled
+        )
+    except subprocess.TimeoutExpired:
+        return err(
+            "probe.timeout", f"ffprobe timed out on {source.name}", retryable=True
+        )
+    if completed.returncode != 0:
+        return err(
+            "probe.failed",
+            f"ffprobe failed: {(completed.stderr or '').strip()[:200]}",
+        )
+    text = (completed.stdout or "").strip()
+    try:
+        duration = float(text)
+    except ValueError:
+        return err("probe.parse", f"could not read duration from ffprobe ({text!r})")
+    if not math.isfinite(duration) or duration <= 0:
+        return err("probe.parse", f"invalid duration from ffprobe ({text!r})")
+    return ok(duration)
 
 
 def _stop_owned_process(process: subprocess.Popen) -> tuple[str, str]:

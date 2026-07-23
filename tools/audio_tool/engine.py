@@ -37,6 +37,7 @@ from toolbox.engine_common import (
     find_output_collisions as _find_collisions,
     ok,
     err,
+    probe_media_duration,
     resolve_tool,
     run_cancellable_cmd,
     sha256_file,
@@ -116,29 +117,8 @@ def probe_duration(
     path: str | Path,
     cancelled: Callable[[], bool] | None = None,
 ) -> dict:
-    """Total duration in seconds. Standard envelope."""
-    p = Path(path)
-    if not p.is_file():
-        return err("file.missing", f"not a file: {p}")
-    fp = resolve_tool("ffprobe")
-    if not fp:
-        return err("dep.missing", "ffprobe not found (bundle a bin/ or install ffmpeg)", retryable=False)
-    cmd = [fp, "-v", "error", "-show_entries", "format=duration",
-           "-of", "default=noprint_wrappers=1:nokey=1", str(p)]
-    try:
-        r = run_cancellable_cmd(cmd, timeout=60, cancelled=cancelled)
-    except subprocess.TimeoutExpired:
-        return err("probe.timeout", f"ffprobe timed out on {p.name}", retryable=True)
-    if r.returncode != 0:
-        return err("probe.failed", f"ffprobe failed: {(r.stderr or '').strip()[:200]}")
-    text = (r.stdout or "").strip()
-    try:
-        duration = float(text)
-    except ValueError:
-        return err("probe.parse", f"could not read duration from ffprobe ({text!r})")
-    if not math.isfinite(duration) or duration <= 0:
-        return err("probe.parse", f"invalid duration from ffprobe ({text!r})")
-    return ok(duration)
+    """Compatibility wrapper around the shared cancellable ffprobe adapter."""
+    return probe_media_duration(path, cancelled=cancelled)
 
 
 # --- filter chain (pure) ------------------------------------------------------

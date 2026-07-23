@@ -17,4 +17,4 @@ class VideoChopperTool:
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         from .panel import VideoChopperPanel
-        return VideoChopperPanel(parent)
+        return VideoChopperPanel(parent, services.queue)

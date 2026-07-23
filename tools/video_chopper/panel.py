@@ -1,9 +1,9 @@
-"""Video Chopper — the tool's UI. Thin over engine.py: collect files + options,
-run on a worker thread, stream results back via after(). No cutting logic here.
-"""
+"""Video Chopper UI; multi-clip FFmpeg work uses the shell-owned queue."""
 from __future__ import annotations
 
 import csv
+import math
+from dataclasses import asdict
 from pathlib import Path
 
 import customtkinter as ctk
@@ -12,6 +12,8 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 
@@ -22,8 +24,8 @@ class VideoChopperPanel(BaseBatchPanel):
     RESULTS_ICON = Icons.SCISSORS
     RUN_LABEL = "Preview & Chop"
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
         self._refresh_tools_hint()
 
     # -- options (tool-specific) ----------------------------------------------
@@ -73,6 +75,19 @@ class VideoChopperPanel(BaseBatchPanel):
             min_clip = float(self._min_clip.get())
         except ValueError:
             self._logline("Gap / threshold / clip length must be numbers.", t.STATE["error"][1]); return None
+        if (
+            not math.isfinite(min_black)
+            or min_black <= 0
+            or not math.isfinite(pix_th)
+            or not 0 <= pix_th <= 1
+            or not math.isfinite(min_clip)
+            or min_clip <= 0
+        ):
+            self._logline(
+                "Gap and clip length must be positive; threshold must be between 0 and 1.",
+                t.STATE["error"][1],
+            )
+            return None
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
         mirror = bool(self._mirror.get())
@@ -82,42 +97,92 @@ class VideoChopperPanel(BaseBatchPanel):
                              min_black_s=min_black, pix_th=pix_th, min_clip_s=min_clip,
                              reencode=bool(self._reencode.get()), dry_run=bool(self._dry.get()))
 
-    # -- batch loop (tool-specific) --------------------------------------------
-    def _work(self, files: list[Path], opts: e.ChopOptions):
-        chopped = skipped = failed = 0; total_clips = 0; results = []
-        for i, f in enumerate(files, 1):
-            if self._stop.is_set():
-                self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
-            self.after(0, self._logline, f"[{i}/{len(files)}] {f.name} …", t.TEXT_MUTED)
-            res = e.process(f, opts); results.append(res)
+    # -- queue submission (tool-specific) --------------------------------------
+
+    def _pre_run_check(self, opts: e.ChopOptions) -> bool:
+        if opts.dry_run:
+            return True
+        return self._check_output_collisions(e.find_output_collisions(self._files, opts))
+
+    def _build_submission(self, files: list[Path], opts: e.ChopOptions) -> QueueSubmission:
+        definition = JobDefinition.create(
+            tool_id="video_chopper",
+            tool_version="1",
+            workflow_version="black-gap-chop.v2",
+            inputs=files,
+            settings=asdict(opts),
+            max_retries=1,
+        )
+
+        def classify(res: e.Result) -> ItemOutcome:
+            data = res.to_dict()
             if res.action == "chopped":
-                chopped += 1; total_clips += res.clips
-            elif res.action in ("skipped", "dry-run"):
-                skipped += 1; total_clips += res.clips
-            else:
-                failed += 1
-            self.after(0, self._show, res, i, len(files))
-        manifest = self._write_manifest(opts, results)
-        self.after(0, self._done, chopped, skipped, failed, total_clips, manifest)
+                return ItemOutcome.completed(data, res.reason)
+            if res.action in {"skipped", "dry-run"}:
+                return ItemOutcome.skipped(data, res.reason)
+            return ItemOutcome.failed(res.reason, retryable=res.retryable, data=data)
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Video Chopper · {len(files)} file(s)",
+            execute=lambda path, token: e.process(
+                path, opts, cancelled=lambda: token.is_cancelled
+            ),
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="video_chopper"
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        chopped = sum(result.action == "chopped" for result in results)
+        skipped = sum(result.action in {"skipped", "dry-run"} for result in results)
+        failed = len(results) - chopped - skipped
+        total_clips = sum(
+            result.clips for result in results
+            if result.action in {"chopped", "dry-run"}
+        )
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            chopped, skipped, failed, total_clips, remaining, payload.manifest,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"src", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path,
+            "failed",
+            item.details or "video-chop item quarantined",
+            detail="batch.quarantined",
+        )
 
     def _write_manifest(self, opts: e.ChopOptions, results: list) -> str | None:
         """CSV row per file — essential for auditing a 100s-of-videos run."""
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            path = root / "chop_manifest.csv"
-            new = not path.exists()
-            with open(path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["src", "action", "clips", "out_dir", "detail", "reason"])
-                for r in results:
-                    w.writerow([r.src, r.action, r.clips, r.out_dir, r.detail, r.reason])
-            return str(path)
-        except OSError:
-            return None
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "chop_manifest.csv"
+        new = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["src", "action", "clips", "out_dir", "detail", "reason"])
+            for r in results:
+                w.writerow([r.src, r.action, r.clips, r.out_dir, r.detail, r.reason])
+        return str(path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
@@ -130,11 +195,13 @@ class VideoChopperPanel(BaseBatchPanel):
             extra = f"  — {res.reason}"
         self._logline(f"  {icon} {name}{extra}", color)
 
-    def _done(self, chopped, skipped, failed, total_clips, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"chopped {chopped} · skipped {skipped} · failed {failed} · "
-                                     f"{total_clips} clips total")
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+    def _done(self, chopped, skipped, failed, total_clips, remaining=0, manifest=None,
+              report_path=None, job_state=JobState.COMPLETED, recovered=False, reused=False):
+        summary = (f"chopped {chopped} · skipped {skipped} · failed {failed} · "
+                   f"{total_clips} clips total")
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

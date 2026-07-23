@@ -166,6 +166,36 @@ outputs are reused only while their planned path, size, and exact hash match.
 | Tests/benchmarks | 21 unit tests; full audio convert/trim/normalize/fade/hash/collision/cancellation smoke; real WAV→MP3 queue output + manifest + UI collision gate; eight-tool queue flow; 17/17 panels and smokes; durable core 10,387 items/s |
 | Risk/rollback | Independent validation adds measured latency, most visible on tiny clips; revert Audio panel/tool adapter and engine metadata/candidate probe while retaining backward-compatible shared helpers |
 
+### Slice 3i — implemented multi-output Video Chopper
+
+Video Chopper retains its existing FFmpeg black-gap detection, clip planning,
+stream-copy default, and optional H.264 re-encode. It now submits one durable
+item per source through the shell queue. Every generated clip is staged,
+ffprobe-validated, hashed with the shared cancellable streaming helper, and
+atomically committed. The result records the exact ordered clip paths, planned
+ranges, byte counts, durations, and hashes; reuse succeeds only while the whole
+recorded set still validates.
+
+Continuous sources with no detected black gaps are now explicit skips instead
+of redundant full-video copies. Different selected sources that would share a
+generated clip directory are rejected before processing. Cancellation reaches
+active FFmpeg/ffprobe work, retryable failures receive one controlled retry,
+partial committed clips remain visible in failure provenance, and manifest
+errors surface as finalization warnings.
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-owned blocking loop and commit-on-FFmpeg-exit → shell queue with process-tree cancellation, staged validation, exact multi-artifact records, retry, checkpoint, and report |
+| Architecture/language | Existing Python planner and native FFmpeg/ffprobe retained; the shared media-duration, process, hash, collision, queue, and completion primitives are reused |
+| Functionality and quality | Black detection, minimum clip filtering, lossless stream-copy, optional H.264/CRF, naming, mirroring, dry run, and clip order remain; no-gap input now avoids an unnecessary copy; invalid/non-finite settings fail before media work |
+| Code/dependencies | Video Chopper production source 353 → 661 nonblank lines (+308 for queue adapter, staged multi-output provenance, cancellation, and validation); shared `engine_common` plus Audio engine 594 → 620 (+26 net while replacing Audio's duplicate probe); zero dependencies added |
+| Package/startup/runtime | No dependency, model, or binary added; ready-to-mainloop measured 139 ms; isolated 5 s/two-clip stream-copy median 136.4 → 198.5 ms (+62.1 ms, +45.5%) from two per-clip probes and streamed hashes |
+| RAM/VRAM/CPU/disk/GPU | Clips remain sequential with one FFmpeg/ffprobe process at a time; hashing uses a 1 MiB buffer; staged files do not add a second full output copy; no model, GPU, VRAM, or transfer change; child peak RAM is not claimed measured |
+| Batch/cache/AI | Per-source pause boundary, active-process cancellation, one retry for retryable failures, quarantine, checkpointing, and exact whole-set reuse validation; zero AI calls |
+| Reliability/security | Invalid candidates never replace destinations; cancellation removes the active staged file; shared output directories are blocked; subprocesses never use a shell; partial artifacts and manifest failures remain visible |
+| Tests/benchmarks | 22 unit tests; focused real-media chop/duration/hash/corruption/collision/cancellation/no-gap smoke; Audio regression smoke; nine-workflow real queue flow; 17/17 panels and tool smokes; durable core 10,843 items/s |
+| Risk/rollback | Independent validation adds measured latency, especially for tiny clips; committed clips before a later clip failure remain for inspection and are reported rather than group-rolled back; revert the Video Chopper panel/tool adapter and staged metadata/validator while retaining compatible shared helpers |
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.
