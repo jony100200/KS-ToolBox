@@ -17,7 +17,7 @@ Cross-platform (Windows/Linux/macOS) CustomTkinter desktop app — **one UI shel
 ## Local Contracts
 
 - **One tool = one folder** under `tools/`, exposing a module-level `TOOL` (`ToolMeta` + `build_panel(parent, services)`). Discovery finds it; the shell never changes. The explicit service context contains the shell-owned queue; do not replace it with a singleton or widget-tree lookup. (LEGO principle.)
-- **Engine ≠ UI** (three-layer Domain/Presentation, per the Unity rules' spirit): pure logic in `engine.py` — headless, no CustomTkinter import, no global state, returns the error-envelope `{error, error_type, retryable, degraded, details, data}`. Thin `panel.py` — CustomTkinter only; work never runs on the UI thread. Durable tools submit to the shell queue, while unmigrated panels temporarily use the compatibility worker.
+- **Engine ≠ UI** (three-layer Domain/Presentation, per the Unity rules' spirit): pure logic in `engine.py` — headless, no CustomTkinter import, no global state, returns the error-envelope `{error, error_type, retryable, degraded, details, data}`. Thin `panel.py` — CustomTkinter only; work never runs on the UI thread. All current batch workflows submit to the shell queue; the compatibility worker remains only as a tested rollback seam.
 - Tools import **`toolbox`** (theme/components/contract) only — never another tool, never framework internals.
 - **Batch / destructive actions MUST have Preview + Confirm + Logging** (Unity rules §9): a dry-run preview, an explicit confirm before deleting originals, and a per-run log/manifest.
 - **No** `eval()`, **no** swallowed exceptions (`except: pass`), **no** silent fallback — a fallback must announce itself (status/flag). (CodingPrinciples #3, #12.)

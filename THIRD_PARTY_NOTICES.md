@@ -1,39 +1,47 @@
 # Third-Party Notices
 
 KS ToolBox's own code is MIT-licensed (see `LICENSE`). It builds on, bundles, or
-optionally downloads the components below. **This matters for public
-distribution** — especially FFmpeg. Verify each component's exact license for the
-specific build you ship.
+can integrate with the components below. The build generates
+`RELEASE_COMPONENTS.md`, `DEPENDENCY_MANIFEST.json`, and `SBOM.spdx.json` from
+the actual PyInstaller analysis and bundled FFmpeg configuration. Those
+generated files are the authority for a particular release; an unknown bundled
+Python distribution stops the build.
 
 ## Bundled with the app
 
-| Component | Used by | Typical license | Note |
+| Component | Used by | Licence | Note |
 |---|---|---|---|
-| **FFmpeg / ffprobe** (`bin/`) | Video Compressor, Video Chopper, Format Converter (A/V) | **GPL** if built with x264/x265 (as ours is); LGPL otherwise | ⚠️ **Redistributing a GPL FFmpeg binary carries GPL obligations for that binary** (you must offer its corresponding source and license text). This does NOT relicense KS ToolBox's own code. This is the same arrangement HandBrake and many apps use. Ship FFmpeg's `LICENSE`/`COPYING` and a source offer/link alongside the build. |
-| **Font Awesome 6 Free (Solid)** (`assets/fa-solid-900.ttf`) | all icons | Icons **CC BY 4.0**, Font **SIL OFL 1.1**, code MIT | Attribution appreciated; no redistribution restriction. |
+| **FFmpeg / ffprobe** (`bin/`) | Video Compressor, Video Chopper, Audio Tool, Format Converter (A/V) | Derived at build time; the current Gyan 8.1.2 full build is **GPL-3.0-or-later** | Keep the shipped GPL text, recorded configure flags, and equivalent no-charge access to the corresponding source beside every binary download. This requirement applies to FFmpeg; it does not change the licence of KS ToolBox's separate original code. |
+| **Python and Tcl/Tk** | application runtime | PSF-2.0 / TCL | Exact runtime version and notices are copied into each release. |
+| **PyInstaller bootloader** | portable executable | GPL-2.0-or-later WITH Bootloader-exception | The exact PyInstaller notice is copied into each release. |
+| **Font Awesome 6 Free (Solid) font** (`assets/fonts/fa-solid-900.ttf`) | all icons | SIL OFL-1.1 | Only the font file is bundled; its exact upstream licence is copied into each release. |
 | **CustomTkinter** | the whole UI | MIT | — |
 | **send2trash** | recoverable "delete original" | BSD-3-Clause | — |
+| **Pillow** | image decoding, transforms, and export | HPND | — |
+| **NumPy** | Alpha Doctor, asset inspection, and texture analysis | BSD-3-Clause | — |
 
-## Optional Python dependencies (installed/downloaded on demand, per tool)
+Transitive Python packages present in the actual frozen build are also listed in
+the generated release inventory with their exact installed versions and copied
+notices.
+
+## Optional integrations (not bundled in the default portable build)
 
 | Package | Tool | License |
 |---|---|---|
-| Pillow | image tools, Format Converter | MIT-CMU (HPND) — permissive |
-| numpy | Clean Cutout | BSD-3-Clause |
-| onnxruntime | Clean Cutout | MIT |
-| rembg (+ u2net model) | Clean Cutout | MIT (code); the u2net model weights are Apache-2.0 — downloaded on first use |
+| onnxruntime | Alpha Doctor optional inference runtime | MIT |
+| Segmentation model weights | Alpha Doctor optional AI path | Not shipped; audit the exact model licence separately before any bundled distribution |
 | vtracer | To SVG | MIT |
 | markdown | Format Converter (docs) | BSD-3-Clause |
 | xhtml2pdf (+ reportlab, pypdf, html5lib) | Format Converter (→PDF) | Apache-2.0 |
 | mammoth | Format Converter (DOCX) | BSD-2-Clause |
 | pypdfium2 (PDFium) | Format Converter (PDF) | Apache-2.0 / BSD-3-Clause |
 
-**Deliberately avoided:** PyMuPDF (AGPL-3.0 — viral for a distributed app). `pypdfium2`
-provides PDF rendering under a permissive license instead.
+**Deliberately avoided:** PyMuPDF (AGPL-3.0 copyleft). `pypdfium2` provides PDF
+rendering under a permissive licence instead.
 
-**External CLIs (user-provided, NOT bundled):** Substance Designer `sbsrender` and
-Material Maker `material_maker` are located by the user for the Texture Renderer
-tool; KS ToolBox does not ship or relicense them.
+**External CLIs (user-provided, NOT bundled):** HandBrakeCLI, Substance Designer
+`sbsrender`, Material Maker `material_maker`, and other user-selected workers are
+located at runtime; KS ToolBox does not ship or relicense them.
 
-If in doubt for a commercial or wide release, run a license scan over the exact
-`requirements` set you freeze and the FFmpeg build you bundle.
+This file is an engineering compliance record, not legal advice. Re-run the
+release gate and review its generated inventory for every public artifact.

@@ -2,7 +2,7 @@
   <img src="assets/KS_ToolBox_GitHub_Banner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
 </p>
 
-<p align="center"><b>One window, 17 daily batch tools.</b><br>
+<p align="center"><b>One window, 16 batch tools and one custom sprite viewer.</b><br>
 A fast, portable, cross-platform desktop app that brings a suite of practical
 file / image / video / audio / asset batch utilities under a single UI —
 free, offline, no credits, no cloud.</p>
@@ -10,11 +10,13 @@ free, offline, no credits, no cloud.</p>
 ---
 
 KS ToolBox is a **plugin toolbox**: one CustomTkinter shell that auto-discovers
-self-contained tools. Every tool works the same way — a **dry-run preview**, a
-**mirror-the-input-folder** batch, atomic writes, a per-run manifest, and clear
-errors instead of crashes. It is **deterministic-first**: 16 of 17 tools use no AI
-at all, and the one that can (Alpha Doctor) is deterministic by default with an
-*optional* utility model. Nothing heavy loads at startup (~230 ms to open).
+self-contained tools. Its 16 batch workflows share preview, safe output,
+durable queue/recovery, validation, manifests, and morning reports. Sprite
+Viewer keeps a purpose-built interactive screen. It is **deterministic-first**:
+16 of 17 tools use no AI at all, and the one that can (Alpha Doctor) is
+deterministic by default with an *optional* utility model. Nothing heavy loads
+at startup (113 ms median on the reference machine; the regression budget is
+250 ms).
 
 ## Tools
 
@@ -52,7 +54,8 @@ at all, and the one that can (Alpha Doctor) is deterministic by default with an
 | **Dataset Manager** | Pair images with captions, split train/val/test, bucket by resolution, batch-edit captions — copy-only, never destroys originals. |
 
 Every batch tool **previews before it writes**, **never touches originals** unless
-you explicitly opt in (with a confirmation), and writes a CSV manifest.
+you explicitly opt in (with a confirmation), and writes a manifest plus
+machine-readable completion report.
 
 ## Run it
 
@@ -76,6 +79,9 @@ powershell -File build.ps1
 ```
 Produces `dist/KS ToolBox/` — a portable folder with a bundled Python. See
 `THIRD_PARTY_NOTICES.md` for FFmpeg's license obligations when redistributing.
+The build fails on unknown bundled package licences and generates
+`SBOM.spdx.json`, `DEPENDENCY_MANIFEST.json`, `RELEASE_COMPONENTS.md`, exact
+licence texts, binary hashes, and FFmpeg build/source evidence.
 
 ## Design
 

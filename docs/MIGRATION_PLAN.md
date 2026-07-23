@@ -654,6 +654,49 @@ against the intentional one-source interactive contract; the remaining 4s
 record measured validation/runtime cost, no persistent reload cache, and the
 necessary custom worker/poller code.
 
+### Slice 3r — release inventory and licence gate
+
+The Windows build previously installed an unpinned PyInstaller at build time,
+depended on whatever `bin/` happened to remain in an ignored release folder,
+and shipped only incidental dependency notices. Its 488.4 MiB artifact was
+stale: it contained 462.3 MiB of FFmpeg binaries but omitted the lazily imported
+Pillow and NumPy runtimes needed by several discovered tools. There was no
+machine-readable dependency manifest, SPDX SBOM, exact FFmpeg configuration,
+binary hash evidence, or fail-closed unknown-licence gate.
+
+The build now verifies a separately pinned PyInstaller, starts from a clean
+folder, copies the required media workers deterministically, inventories the
+actual PyInstaller analysis, derives FFmpeg's licence from its configure flags,
+rejects nonfree or changed FFmpeg builds, rejects unknown Python distributions,
+copies exact notices, and atomically emits a human table, JSON manifest, and
+SPDX 2.3 document. The generated SPDX graph and JSON are read back and
+reference-validated before the release passes.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Runtime package ranges were open-ended; the uv-managed environment had no `pip`, so the old build-time install path was fragile; ignored binaries could be absent or stale; release notices were hand-maintained and did not prove what the frozen artifact contained |
+| Proposed behavior | Exact core/build pins, deterministic clean bundle, required FFmpeg/ffprobe copy, actual-TOC package discovery, strict audited licence policy, exact notice copy, FFmpeg flag/source evidence, SHA-256 release evidence, atomic manifest/table/SPDX output, and fail-closed validation |
+| Architecture and language | A stdlib-only Python build gate reads PyInstaller's existing TOC instead of adding a runtime service or package scanner. PowerShell remains the Windows packaging entry point. No application framework, UI, tool, or custom panel was replaced |
+| Functionality and quality | The clean artifact now includes all 17 discovered tools and the Pillow/NumPy runtime they use. A hidden frozen-app launch remained alive after four seconds. Processing algorithms and output bytes were not changed |
+| Code and dependency impact | The gate is 541 nonblank build-only Python lines with 127 nonblank focused test lines; PyInstaller 6.21.0 is pinned in a separate build-only requirement; no new runtime dependency, model, worker, service, or startup import was added |
+| Package-size impact | Stale artifact: 488.4 MiB/1,024 files. Fresh complete artifact: 534.7 MiB/1,103 files (+46.3 MiB, +9.5%) because NumPy/Pillow and all current tools are now actually frozen. FFmpeg/ffprobe remain 462.3 MiB (86.5%); compliance outputs and 32 notice files add 324,410 bytes. This is correctness evidence, not a size optimization claim |
+| Startup and runtime impact | Build completed in 58.4 seconds. The gate is build-only, so it adds zero application calls or runtime imports. Frozen working set was 56.3 MiB after a four-second startup observation; there is no equivalent pre-change frozen baseline, so no improvement is claimed. Source ready-to-mainloop remains at the prior 113 ms median |
+| RAM, VRAM, CPU, disk, and GPU transfer | Build analysis and hashing consume development-machine CPU/disk only. Release hashes stream in 1 MiB chunks; notice copies and metadata are bounded at 2 MiB per notice. No runtime RAM/VRAM/GPU transfer, model load, thread, process, or idle cost was added |
+| Batch, cache, and incremental impact | Batch execution and cache keys are unchanged. Packaging is deliberately a clean deterministic rebuild rather than incremental; each public artifact gets fresh hashes and provenance |
+| AI and model-loading impact | Zero AI calls and model loads. Exact metadata, installed distribution records, configure flags, hashes, and SPDX identifiers are sufficient |
+| Reliability and security | Unknown bundled distributions, missing notices, a missing media worker, malformed/nonfree/unexpected FFmpeg, incomplete atomic writes, invalid JSON, duplicate SPDX IDs, or dangling SPDX references stop the build. The generator never executes package code; it reads metadata and the literal PyInstaller TOC |
+| Tests and benchmarks | Six focused compliance tests cover FFmpeg classification/nonfree rejection, actual TOC ownership, scoped PyInstaller runtime-hook handling, unknown-package failure, atomic replacement, and SPDX reference rejection. Windows PowerShell 5.1 parsing, clean PyInstaller build, 12-component inventory, zero staging residue, and frozen startup pass |
+| Risks and rollback | The bundled Gyan full build is intentionally GPL-3.0-or-later and dominates storage. Public distribution still requires corresponding FFmpeg/external-library source access beside the binary download; the build records and prints this obligation but cannot verify a future hosting page. The release gate is Windows-tested; macOS/Linux packaging still needs an equivalent entry point. Revert the build gate/script/notices/pins together to roll back; no user data or runtime schema is involved |
+
+Checkpoint cartridge score: functional completeness 5, output quality 5,
+runtime 5, startup 5, memory 5, storage 4, batch efficiency 5, cache
+effectiveness 5, incremental execution 4, AI efficiency 5, reliability 5,
+maintainability 4, portability 4, and security 5. Storage remains 4 because the
+full static FFmpeg sidecar dominates the artifact; incremental execution is
+intentionally traded for reproducible clean builds; maintainability and
+portability remain 4 until another OS packaging path proves the policy registry
+and platform-specific notice discovery.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

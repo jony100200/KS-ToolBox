@@ -1,8 +1,8 @@
 """Base batch panel — shared file picker, run/stop orchestration, results log.
 
 Every batch tool panel extends this. The base owns file management, controls,
-queue polling, results, output selection, and the compatibility worker path for
-unmigrated tools. New durable panels submit to the shell-owned queue.
+queue polling, results, output selection, and a legacy compatibility worker kept
+only as a rollback seam. Current production batch tools submit to the shell queue.
 """
 from __future__ import annotations
 

@@ -2,9 +2,9 @@
 # Small (~35 MB); powers the shell and every deterministic image/video tool.
 # Optional per-tool extras live in requirements-optional.txt.
 customtkinter==5.2.2
-send2trash>=1.8          # recoverable "delete original" (Recycle Bin / Trash)
-pillow>=10.0             # image tools + Format Converter (images)
-numpy>=1.26              # Clean Cutout edge math + image ops
+send2trash==2.1.0        # recoverable "delete original" (Recycle Bin / Trash)
+pillow==12.3.0           # image tools + Format Converter (images)
+numpy==2.5.1             # Alpha Doctor edge math + image ops
 
 # External binaries (not pip): required by the video tools + Format Converter A/V.
 #   ffmpeg + ffprobe (required), HandBrakeCLI (optional, Video Compressor only).
