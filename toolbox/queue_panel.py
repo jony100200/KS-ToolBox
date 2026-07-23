@@ -72,7 +72,7 @@ class QueuePanel(ctk.CTkFrame):
         failed = sum(item.state is JobState.FAILED for item in history)
         self._summary.configure(text=f"active {active} · completed {completed} · failed {failed}")
         if not history:
-            ctk.CTkLabel(self._list, text="No jobs yet. Add work from Image Rescale or Video Compressor.",
+            ctk.CTkLabel(self._list, text="No jobs yet. Open any tool, configure the work, and add it to the queue.",
                          text_color=t.TEXT_MUTED, font=t.font(12)).pack(anchor="w", padx=8, pady=12)
             return
         for snapshot in history[:100]:

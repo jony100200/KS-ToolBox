@@ -88,7 +88,7 @@ def search_tools(tools: Iterable[Tool], query: str) -> list[Tool]:
         category = category_by_id(tool.meta.category)
         title = tool.meta.title.casefold()
         identifier = tool.meta.id.replace("_", " ").casefold()
-        category_text = f"{category.title} {category.description}".casefold()
+        category_text = category.title.casefold()
         subtitle = tool.meta.subtitle.casefold()
         haystack = f"{title} {identifier} {category_text} {subtitle}"
         if not all(term in haystack for term in terms):

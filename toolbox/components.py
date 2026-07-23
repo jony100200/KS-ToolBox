@@ -13,6 +13,64 @@ from . import icons
 from . import theme as t
 
 
+class PageHeader(ctk.CTkFrame):
+    """Consistent page identity without putting processing logic in views."""
+
+    def __init__(
+        self,
+        parent,
+        title: str,
+        subtitle: str = "",
+        icon: str = "",
+        eyebrow: str = "",
+        **kwargs,
+    ):
+        super().__init__(parent, fg_color="transparent", **kwargs)
+        self.grid_columnconfigure(1 if icon else 0, weight=1)
+        column = 0
+        if icon:
+            icon_box = ctk.CTkFrame(
+                self,
+                width=48,
+                height=48,
+                fg_color=t.ACCENT_TINT,
+                corner_radius=t.RADIUS_CARD,
+            )
+            icon_box.grid(row=0, column=0, rowspan=3, sticky="nw", padx=(0, 14))
+            icon_box.grid_propagate(False)
+            ctk.CTkLabel(
+                icon_box,
+                text=icon,
+                font=icons.get_icon_font(19),
+                text_color=t.ACCENT_SOFT,
+            ).place(relx=0.5, rely=0.5, anchor="center")
+            column = 1
+        if eyebrow:
+            ctk.CTkLabel(
+                self,
+                text=eyebrow.upper(),
+                font=t.font(10, bold=True),
+                text_color=t.ACCENT_SOFT,
+            ).grid(row=0, column=column, sticky="w", pady=(0, 2))
+        ctk.CTkLabel(
+            self,
+            text=title,
+            font=t.font(24, bold=True),
+            text_color=t.TEXT_MAIN,
+            anchor="w",
+        ).grid(row=1, column=column, sticky="ew")
+        if subtitle:
+            ctk.CTkLabel(
+                self,
+                text=subtitle,
+                font=t.font(12),
+                text_color=t.TEXT_MUTED,
+                anchor="w",
+                justify="left",
+                wraplength=720,
+            ).grid(row=2, column=column, sticky="ew", pady=(4, 0))
+
+
 class Card(ctk.CTkFrame):
     """Bordered rounded card with an icon + uppercase title header and a
     content frame subclasses/callers build into (`self.body`)."""

@@ -13,7 +13,7 @@ class DatasetManagerTool:
         title="Dataset Manager",
         icon=Icons.CHART,
         category="files_data",
-        subtitle="Pair, split, bucket & audit image/caption datasets (copy-only)",
+        subtitle="Pair, split, bucket & audit image/caption training datasets (copy-only)",
     )
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:

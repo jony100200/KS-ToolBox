@@ -108,10 +108,11 @@ class BaseBatchPanel(ctk.CTkFrame):
         self._run_btn = c.primary_button(runrow, self.RUN_LABEL, self._run, width=200)
         self._run_btn.pack(side="left")
         self._stop_btn = c.danger_button(runrow, "Stop", self._request_stop, width=90)
-        self._stop_btn.pack(side="left", padx=10); self._stop_btn.configure(state="disabled")
+        self._stop_btn.pack(side="left", padx=10)
         if self._queue_service is not None:
             self._pause_btn = c.secondary_button(runrow, "Pause", self._request_pause, width=80)
-            self._pause_btn.pack(side="left"); self._pause_btn.configure(state="disabled")
+            self._pause_btn.pack(side="left")
+        self._set_batch_active(False)
         self._status = c.Pill(runrow, "IDLE", "idle"); self._status.pack(side="right")
         self._progress = ctk.CTkProgressBar(parent, height=7, fg_color=t.CARD_BORDER,
                                             progress_color=t.ACCENT_BLUE)
@@ -156,7 +157,7 @@ class BaseBatchPanel(ctk.CTkFrame):
             return
         self._sweep_stale(opts)
         self._stop.clear()
-        self._run_btn.configure(state="disabled"); self._stop_btn.configure(state="normal")
+        self._set_batch_active(True)
         self._status.set_state("RUNNING", "running"); self._progress.set(0)
         self._log.configure(state="normal"); self._log.delete("1.0", "end"); self._log.configure(state="disabled")
         files = list(self._files)
@@ -166,12 +167,11 @@ class BaseBatchPanel(ctk.CTkFrame):
                 submission = self._build_submission(files, opts)
                 self._active_job_id = self._queue_service.submit(submission)
             except Exception as ex:  # noqa: BLE001 - visible queue submission failure
-                self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
+                self._set_batch_active(False)
                 self._status.set_state("FAILED", "error")
                 self._logline(f"queue submission failed: {type(ex).__name__}: {ex}", t.STATE["error"][1])
                 return
             self._status.set_state("QUEUED", "waiting")
-            self._pause_btn.configure(state="normal", text="Pause")
             self.after(50, self._poll_queue_job, self._active_job_id)
         else:
             self._worker = threading.Thread(target=self._work, args=(files, opts), daemon=True)
@@ -226,9 +226,7 @@ class BaseBatchPanel(ctk.CTkFrame):
             self._status.set_state("PAUSED", "paused")
 
     def _queue_cancelled(self) -> None:
-        self._run_btn.configure(state="normal")
-        self._stop_btn.configure(state="disabled")
-        self._pause_btn.configure(state="disabled", text="Pause")
+        self._set_batch_active(False)
         self._status.set_state("CANCELLED", "waiting")
         self._active_job_id = None
 
@@ -320,9 +318,7 @@ class BaseBatchPanel(ctk.CTkFrame):
     ) -> None:
         from toolbox.batch_core import JobState
 
-        self._run_btn.configure(state="normal")
-        self._stop_btn.configure(state="disabled")
-        self._pause_btn.configure(state="disabled", text="Pause")
+        self._set_batch_active(False)
         self._active_job_id = None
         if job_state is JobState.CANCELLED:
             self._status.set_state("CANCELLED", "waiting")
@@ -346,15 +342,28 @@ class BaseBatchPanel(ctk.CTkFrame):
             self._logline(f"  completion report: {report_path}", t.TEXT_MUTED)
 
     def _batch_failed(self, details: str) -> None:
-        self._run_btn.configure(state="normal")
-        self._stop_btn.configure(state="disabled")
-        self._pause_btn.configure(state="disabled", text="Pause")
+        self._set_batch_active(False)
         self._active_job_id = None
         self._status.set_state("FAILED", "error")
         self._logline(f"batch core failed: {details}", t.STATE["error"][1])
 
     def _queue_complete(self, completion) -> None:
         raise NotImplementedError
+
+    def _set_batch_active(self, active: bool) -> None:
+        """Keep destructive controls calm until an operation can use them."""
+        self._run_btn.configure(state="disabled" if active else "normal")
+        self._stop_btn.configure(
+            state="normal" if active else "disabled",
+            fg_color=t.DANGER if active else t.CARD_BORDER,
+            text_color=t.TEXT_MAIN if active else t.TEXT_MUTED,
+        )
+        pause = getattr(self, "_pause_btn", None)
+        if pause is not None:
+            pause.configure(
+                state="normal" if active else "disabled",
+                text="Pause",
+            )
 
     # --- shared helpers -------------------------------------------------------
 

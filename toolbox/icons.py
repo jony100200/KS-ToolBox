@@ -18,6 +18,8 @@ FA_FAMILY = "Font Awesome 6 Free Solid"
 
 class Icons:
     """FontAwesome 6 Solid codepoints."""
+    SEARCH   = ""
+    BOLT     = ""
     LAYERS   = ""
     GRID     = ""
     EXPAND   = ""

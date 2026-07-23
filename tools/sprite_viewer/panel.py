@@ -135,10 +135,18 @@ class SpriteViewerPanel(ctk.CTkFrame):
         body.grid_rowconfigure(0, weight=1)
 
         # the canvas is a CTkLabel that shows a CTkImage
-        self._canvas = ctk.CTkLabel(body, text="(no source loaded)", text_color=t.TEXT_MUTED,
-                                    fg_color=t.BG_COLOR, corner_radius=t.RADIUS_CARD,
-                                    width=_DISPLAY_MAX[0], height=_DISPLAY_MAX[1])
-        self._canvas.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+        # Do not shadow CTkFrame._canvas: CustomTkinter owns that internal name
+        # and needs it for redraws after resize/theme events.
+        self._preview_label = ctk.CTkLabel(
+            body,
+            text="(no source loaded)",
+            text_color=t.TEXT_MUTED,
+            fg_color=t.BG_COLOR,
+            corner_radius=t.RADIUS_CARD,
+            width=_DISPLAY_MAX[0],
+            height=_DISPLAY_MAX[1],
+        )
+        self._preview_label.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
 
         toggles = ctk.CTkFrame(body, fg_color="transparent")
         toggles.grid(row=1, column=0, sticky="w")
@@ -424,7 +432,7 @@ class SpriteViewerPanel(ctk.CTkFrame):
             disp = board
 
         self._ctk_img = ctk.CTkImage(light_image=disp, dark_image=disp, size=(disp_w, disp_h))
-        self._canvas.configure(image=self._ctk_img, text="")
+        self._preview_label.configure(image=self._ctk_img, text="")
         self._frame_lbl.configure(text=f"{self._index + 1} / {len(self._frames)}")
         if not self._syncing and len(self._frames) > 1:
             self._syncing = True

@@ -67,7 +67,7 @@ class ToolCatalogTests(unittest.TestCase):
             ["alpha_doctor"],
         )
         self.assertEqual(
-            [tool.meta.id for tool in search_tools(tools, "training")],
+            [tool.meta.id for tool in search_tools(tools, "files")],
             ["dataset_manager"],
         )
         self.assertEqual(search_tools(tools, "no such utility"), [])
