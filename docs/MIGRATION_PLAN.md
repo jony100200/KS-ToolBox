@@ -614,6 +614,46 @@ resources, structural rather than perceptual quality checks, per-job rather than
 content-addressed reuse, optional wheel availability, and the in-process native
 cancellation/crash boundary.
 
+### Slice 3q — bounded custom Sprite Viewer
+
+Sprite Viewer remains a purpose-built interactive CustomTkinter screen rather
+than being forced through `BaseBatchPanel`. The audit reproduced a million-row
+grid request that was accepted and iterated, and a synthetic GIF encoder failure
+that left `out.part.gif`. Decode, alpha detection, slicing, GIF encoding, and
+JSON export also ran on Tk's UI thread; source/frame counts were unbounded;
+exports were not read back; and timer teardown silently swallowed exceptions.
+
+The headless engine now prepares typed viewer state with strict frame/pixel/grid
+budgets and cooperative cancellation. The custom panel owns one worker and a
+UI-polled result queue, so worker threads never call Tk. A failed replacement
+load preserves the current viewer. Exports require replacement confirmation,
+write to a unique same-directory stage, flush and parse/decode the full result,
+then atomically publish. Cancellation or validation failure removes the stage
+and preserves an earlier destination.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Synchronous UI-thread decode/detection/export; accepted million-row grid; unbounded resident folders/animations; preallocated one-Python-pointer-per-pixel detector queue; no export read-back; failed GIF left a deterministic `.part` file; replacement loads cleared sheet state before success; unbounded checker cache; swallowed timer-cancellation errors |
+| Proposed behavior | Keep the custom viewer while moving heavy work to one cancellable worker with UI-owned polling; reject invalid/oversized sources and grids before work; use frontier-only component traversal; retain at most eight checkerboards; preserve current state on failed load; validate unique staged GIF/JSON before atomic replacement |
+| Architecture and language | Existing Python, Pillow, and bespoke CustomTkinter panel remain. `prepare_source` centralizes non-UI coordination in the headless engine; the panel only reads controls, starts/cancels one worker, polls results, and renders. The shared batch queue is deliberately not used because viewing one source is interactive, not an unattended batch |
+| Functionality and quality | File/folder/animated source loading, grid/cell/auto slicing, overlay, checkerboard, play/step/scrub/FPS, GIF preview, and slice JSON remain. GIF pixels are still Pillow encoded; output quality is unchanged and every published frame now decodes successfully |
+| Code and dependency impact | Sprite engine/panel/smoke/README grew from 735 to 1,291 nonblank lines (+556); 160 nonblank focused test lines were added for bounds, cancellation, preservation, staged validation, and real custom-panel worker delivery. No package, model, binary, service, or framework dependency was added |
+| Package-size impact | Source-only change; no release artifact was rebuilt, so no package-size change is claimed |
+| Startup and runtime impact | Five-run ready-to-mainloop median measured 114 → 113 ms and discovery 29 → 27 ms; no Pillow tool engine loads during discovery. A 1,024²/100-component detector measured 124.37 → 149.61 ms (+25.24 ms, +20.3%) for frontier-only memory and cancellation checks. A 48 × 64² GIF measured 17.48 → 25.91 ms (+8.43 ms, +48.2%) because all staged frames are decoded before commit |
+| RAM, VRAM, CPU, disk, and GPU transfer | Resident work caps at 10,000 frames and 128M decoded RGBA pixels (512 MiB frame data before Pillow overhead); sheet source plus crops share that pixel budget; checker cache caps at eight display images. Detector Python traced peak fell 10.16 → 2.13 MiB (−79.0%) on the measured 1,024² workload. Already-RGBA export frames are no longer copied wholesale. No GPU, VRAM, model, network, or transfer is used |
+| Batch, cache, and incremental impact | This tool intentionally has no batch job or persistent artifact cache. One source is the work unit; failed/cancelled replacement loads keep the prior prepared state, repeated renders reuse a bounded checker cache, and exports are explicit. All sixteen actual batch tools remain on the durable queue |
+| AI and model-loading impact | Zero AI calls and model loads. Exact grid math, alpha connected components, Pillow decoding, and schema/codec validation are sufficient and reproducible |
+| Reliability, security, tests, and benchmarks | Six focused tests cover grid/cell limits, animation/folder budgets, cancellation, typed source preparation, corrupt staged GIF rejection with destination preservation, strict JSON, and a real Tk worker-to-UI delivery. Existing real-image smoke and 17-panel construction pass. Worker errors are visible envelopes; exports reject nonstandard JSON numbers and require explicit overwrite confirmation |
+| Risks and rollback | Pillow GIF encoding itself is not interruptible mid-call, so cancel is observed before/after encoding and during validation; the 512 MiB decoded budget still permits a large interactive workload; source animation timing is still replaced by chosen FPS; detector trades measured 20.3% runtime for 79.0% lower traced Python peak; no persistent reload cache exists. Revert the Sprite Viewer engine/panel/tests/docs together; no shared core or data migration is involved |
+
+Checkpoint cartridge score: functional completeness 5, output quality 5,
+runtime 4, startup 5, memory 5, storage 5, batch efficiency 5, cache
+effectiveness 4, incremental execution 4, AI efficiency 5, reliability 5,
+maintainability 4, portability 5, and security 5. Batch efficiency is scored
+against the intentional one-source interactive contract; the remaining 4s
+record measured validation/runtime cost, no persistent reload cache, and the
+necessary custom worker/poller code.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

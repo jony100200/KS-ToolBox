@@ -41,6 +41,11 @@ def main() -> int:
     assert len(grid_frames) == 8, f"grid: expected 8 frames, got {len(grid_frames)}"
     assert all(f.size == (cell_w, cell_h) for f in grid_frames), \
         f"grid: frames not all {cell_w}x{cell_h}: {[f.size for f in grid_frames]}"
+    try:
+        e.grid_boxes(8, 8, 1_000_000, 1)
+        raise AssertionError("grid: unbounded million-row request was accepted")
+    except ValueError as ex:
+        assert "cannot exceed" in str(ex), f"grid: unexpected rejection: {ex}"
 
     # --- slice_by_cell: fixed 20x15 cells over the same sheet -----------------
     cell_frames = e.slice_by_cell(sheet, cell_w, cell_h)
@@ -86,6 +91,8 @@ def main() -> int:
         with Image.open(out_gif) as g:            # close handle for tempdir cleanup
             assert getattr(g, "n_frames", 1) == 8, \
                 f"export_gif: expected 8 frames in GIF, got {getattr(g, 'n_frames', 1)}"
+        assert not list(tmp.glob("*.part.gif")) and not list(tmp.glob(".*.part.gif")), \
+            "export_gif left a staging file"
 
         # --- export_meta_json: writes valid metadata JSON ---------------------
         meta = e.describe(grid_frames, str(sheet), "sheet-grid", fps=10,

@@ -2,18 +2,22 @@
 
 A *custom* panel (not BaseBatchPanel): this is an interactive VIEWER, not a batch
 job. Load one source (sheet / frame folder / animated GIF-WebP-APNG), slice it,
-then play / step / scrub the frames on a CTkImage canvas. Frames are small so
-rendering runs on the UI thread; the play loop is a cancellable `self.after`
-timer (torn down on destroy). Slicing/detection is the only potentially heavy
-work and it runs once, synchronously, on Load.
+then play / step / scrub the frames on a CTkImage canvas. Bounded rendering runs
+on the UI thread; decoding, slicing, detection, and export run on a cancellable
+worker so the Tk event loop stays responsive. The play loop is a cancellable
+`self.after` timer (torn down on destroy).
 
 No slicing math lives here — that's engine.py. Nothing is persisted unless you
 explicitly Export.
 """
 from __future__ import annotations
 
+import logging
+import queue
+import threading
+from collections import OrderedDict
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import TclError, filedialog, messagebox
 
 import customtkinter as ctk
 
@@ -23,8 +27,17 @@ from toolbox.icons import Icons
 from . import engine as e
 
 _DISPLAY_MAX = (420, 300)     # canvas fit box (w, h)
+_CHECKER_CACHE_LIMIT = 8
 _MODES = ("Animation / Folder", "Sheet grid (rows x cols)",
           "Cell size (w x h)", "Auto-detect (alpha)")
+_ENGINE_MODES = {
+    _MODES[0]: "animation",
+    _MODES[1]: "grid",
+    _MODES[2]: "cell",
+    _MODES[3]: "auto",
+}
+
+_LOG = logging.getLogger(__name__)
 
 
 class SpriteViewerPanel(ctk.CTkFrame):
@@ -41,7 +54,16 @@ class SpriteViewerPanel(ctk.CTkFrame):
         self._play_job = None            # self.after handle (cancellable)
         self._syncing: bool = False      # guards slider<->index feedback loop
         self._ctk_img = None             # keep a ref so it isn't GC'd
-        self._checker_cache: dict = {}
+        self._checker_cache: OrderedDict = OrderedDict()
+        self._worker: threading.Thread | None = None
+        self._worker_results: queue.SimpleQueue = queue.SimpleQueue()
+        self._result_lock = threading.Lock()
+        self._poll_job = None
+        self._cancel = threading.Event()
+        self._operation = ""
+        self._generation = 0
+        self._destroying = False
+        self._release_deferred = False
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)      # viewer row stretches
@@ -89,8 +111,8 @@ class SpriteViewerPanel(ctk.CTkFrame):
         self._p_ch = self._small_entry(opts, "Cell H", "32")
         self._p_alpha = self._small_entry(opts, "Alpha thr.", "32")
 
-        c.primary_button(body, "Load", self._load, width=110
-                         ).grid(row=1, column=2, sticky="e")
+        self._load_btn = c.primary_button(body, "Load", self._load, width=110)
+        self._load_btn.grid(row=1, column=2, sticky="e")
 
         self._on_mode_change(_MODES[0])     # show the right params for the default mode
 
@@ -161,9 +183,14 @@ class SpriteViewerPanel(ctk.CTkFrame):
         # export row
         exp = ctk.CTkFrame(body, fg_color="transparent")
         exp.grid(row=2, column=0, columnspan=5, sticky="w")
-        c.ghost_button(exp, "Export GIF", self._export_gif, width=110).pack(side="left")
-        c.ghost_button(exp, "Export slice JSON", self._export_json, width=150
-                       ).pack(side="left", padx=(8, 0))
+        self._gif_btn = c.ghost_button(
+            exp, "Export GIF", self._export_gif, width=110
+        )
+        self._gif_btn.pack(side="left")
+        self._json_btn = c.ghost_button(
+            exp, "Export slice JSON", self._export_json, width=150
+        )
+        self._json_btn.pack(side="left", padx=(8, 0))
         self._status = c.Pill(exp, "IDLE", "idle"); self._status.pack(side="left", padx=(16, 0))
 
     # -- mode / browse ---------------------------------------------------------
@@ -202,70 +229,147 @@ class SpriteViewerPanel(ctk.CTkFrame):
             return None
 
     def _load(self):
+        if self._worker is not None and self._worker.is_alive():
+            self._cancel.set()
+            self._load_btn.configure(state="disabled", text="Cancelling…")
+            self._set_status(f"Cancelling {self._operation}…", "waiting")
+            return
         self._pause()
         path = self._path.get().strip()
         if not path:
             self._set_status("Choose a file or folder first.", "error"); return
         p = Path(path)
         mode = self._mode.get()
-        self._source_img = None
-        self._boxes = []
+        if not p.exists():
+            self._set_status(f"Path not found: {p}", "error"); return
+        params: dict[str, int] = {}
+        if mode == _MODES[1]:
+            rows, cols = self._read_int(self._p_rows), self._read_int(self._p_cols)
+            if not rows or not cols:
+                self._set_status("Rows and Cols must be positive integers.", "error"); return
+            params.update(rows=rows, cols=cols)
+        elif mode == _MODES[2]:
+            cw, ch = self._read_int(self._p_cw), self._read_int(self._p_ch)
+            if not cw or not ch:
+                self._set_status("Cell W and Cell H must be positive integers.", "error"); return
+            params.update(cell_width=cw, cell_height=ch)
+        elif mode == _MODES[3]:
+            threshold = self._read_int(self._p_alpha, minimum=0)
+            if threshold is None or threshold > 255:
+                self._set_status("Alpha threshold must be 0–255.", "error"); return
+            params["alpha_threshold"] = threshold
 
+        self._start_worker(
+            "load",
+            self._load_worker,
+            p,
+            _ENGINE_MODES[mode],
+            params,
+        )
+
+    def _start_worker(self, operation: str, target, *args):
+        self._cancel.clear()
+        self._generation += 1
+        generation = self._generation
+        self._operation = operation
+        self._load_btn.configure(text=f"Cancel {operation}", state="normal")
+        self._gif_btn.configure(state="disabled")
+        self._json_btn.configure(state="disabled")
+        self._set_status(f"{operation.capitalize()} running…", "running")
+        self._worker = threading.Thread(
+            target=target,
+            args=(generation, *args),
+            daemon=True,
+            name=f"sprite-viewer-{operation}",
+        )
+        self._worker.start()
+        if self._poll_job is None:
+            self._poll_job = self.after(20, self._poll_worker)
+
+    def _load_worker(self, generation: int, path: Path, mode: str, params: dict):
         try:
-            if mode == _MODES[0]:                     # animation / folder / still
-                if p.is_dir():
-                    res = e.load_folder(p); self._kind = "folder"
-                elif p.is_file():
-                    res = e.load_frames(p)
-                    self._kind = "animation" if res.get("data") and len(res["data"]) > 1 else "image"
-                else:
-                    self._set_status(f"Path not found: {p}", "error"); return
-                if res["error"]:
-                    self._set_status(res["details"], "error"); return
-                frames = res["data"]
-            else:                                     # sheet modes need one image file
-                if not p.is_file():
-                    self._set_status("Sheet/auto modes need a single image file.", "error"); return
-                load = e.load_frames(p)
-                if load["error"]:
-                    self._set_status(load["details"], "error"); return
-                self._source_img = load["data"][0]
-                w, h = self._source_img.size
-                if mode == _MODES[1]:                 # grid rows x cols
-                    rows, cols = self._read_int(self._p_rows), self._read_int(self._p_cols)
-                    if not rows or not cols:
-                        self._set_status("Rows and Cols must be positive integers.", "error"); return
-                    self._boxes = e.grid_boxes(w, h, rows, cols); self._kind = "sheet-grid"
-                elif mode == _MODES[2]:               # cell w x h
-                    cw, ch = self._read_int(self._p_cw), self._read_int(self._p_ch)
-                    if not cw or not ch:
-                        self._set_status("Cell W and Cell H must be positive integers.", "error"); return
-                    self._boxes = e.cell_boxes(w, h, cw, ch); self._kind = "sheet-cell"
-                else:                                 # auto-detect
-                    thr = self._read_int(self._p_alpha, minimum=0)
-                    if thr is None:
-                        self._set_status("Alpha threshold must be 0-255.", "error"); return
-                    self._boxes = e.detect_sprites(self._source_img, alpha_thresh=thr)
-                    self._kind = "auto"
-                if not self._boxes:
-                    self._set_status("No frames produced — check the mode parameters.", "error"); return
-                frames = e.crop_boxes(self._source_img, self._boxes)
-        except Exception as ex:                       # PIL can raise many types
-            self._set_status(f"Load failed: {ex}", "error"); return
+            result = e.prepare_source(
+                path,
+                mode,
+                cancelled=self._cancel.is_set,
+                **params,
+            )
+        except Exception as ex:  # noqa: BLE001 - visible worker boundary
+            result = self._worker_failure("load", ex)
+        self._post_worker_result(generation, self._finish_load, result)
 
-        if not frames:
-            self._set_status("No frames were loaded.", "error"); return
+    @staticmethod
+    def _worker_failure(operation: str, ex: Exception) -> dict:
+        return {
+            "error": True,
+            "error_type": "worker.failed",
+            "retryable": False,
+            "degraded": False,
+            "details": f"{operation} worker failed: {type(ex).__name__}: {ex}",
+            "data": None,
+        }
 
-        self._frames = frames
+    def _post_worker_result(self, generation: int, callback, result: dict):
+        # Worker threads never call Tk. The UI-owned poller delivers results.
+        with self._result_lock:
+            if self._destroying:
+                self._release_result(result)
+                if self._release_deferred:
+                    self._release_viewer_state()
+                    self._release_deferred = False
+                return
+            self._worker_results.put((generation, callback, result))
+
+    def _poll_worker(self):
+        self._poll_job = None
+        while True:
+            try:
+                generation, callback, result = self._worker_results.get_nowait()
+            except queue.Empty:
+                break
+            callback(generation, result)
+        if (
+            not self._destroying
+            and self._worker is not None
+            and self._worker.is_alive()
+        ):
+            self._poll_job = self.after(20, self._poll_worker)
+
+    @staticmethod
+    def _release_result(result: dict) -> None:
+        loaded = result.get("data")
+        if not isinstance(loaded, e.LoadedSpriteSource):
+            return
+        for frame in loaded.frames:
+            frame.close()
+        if loaded.source_image is not None:
+            loaded.source_image.close()
+
+    def _finish_load(self, generation: int, result: dict):
+        if generation != self._generation:
+            self._release_result(result)
+            return
+        self._finish_worker_controls()
+        if result["error"]:
+            state = "waiting" if result["error_type"] == "operation.cancelled" else "error"
+            self._set_status(result["details"], state)
+            return
+
+        loaded = result["data"]
+        self._release_viewer_state()
+        self._frames = loaded.frames
+        self._source_img = loaded.source_image
+        self._boxes = loaded.boxes
+        self._kind = loaded.kind
         self._index = 0
-        n = len(frames)
+        n = len(self._frames)
         self._syncing = True
         self._slider.configure(state=("normal" if n > 1 else "disabled"),
                                number_of_steps=max(1, n - 1), from_=0, to=max(1, n - 1))
         self._slider.set(0)
         self._syncing = False
         self._render()
-        fw, fh = frames[0].size
+        fw, fh = self._frames[0].size
         self._set_status(f"Loaded {n} frame(s) · {fw}x{fh} · {self._kind}", "done")
 
     # -- rendering (UI thread) -------------------------------------------------
@@ -274,6 +378,7 @@ class SpriteViewerPanel(ctk.CTkFrame):
         from PIL import Image
         key = (size, cell)
         if key in self._checker_cache:
+            self._checker_cache.move_to_end(key)
             return self._checker_cache[key]
         w, h = size
         light, dark = (90, 96, 110, 255), (58, 64, 78, 255)
@@ -284,6 +389,9 @@ class SpriteViewerPanel(ctk.CTkFrame):
                 if ((x // cell) + (y // cell)) % 2:
                     px[x, y] = dark
         self._checker_cache[key] = board
+        if len(self._checker_cache) > _CHECKER_CACHE_LIMIT:
+            _, expired = self._checker_cache.popitem(last=False)
+            expired.close()
         return board
 
     def _render(self):
@@ -374,8 +482,8 @@ class SpriteViewerPanel(ctk.CTkFrame):
         if self._play_job is not None:
             try:
                 self.after_cancel(self._play_job)
-            except Exception:
-                pass
+            except TclError as ex:
+                _LOG.warning("sprite play timer was already unavailable: %s", ex)
             self._play_job = None
         if self._playing:
             self._playing = False
@@ -385,6 +493,9 @@ class SpriteViewerPanel(ctk.CTkFrame):
     # -- export ----------------------------------------------------------------
 
     def _export_gif(self):
+        if self._worker is not None and self._worker.is_alive():
+            self._set_status(f"{self._operation.capitalize()} already running.", "waiting")
+            return
         if not self._frames:
             self._set_status("Nothing to export — load a source first.", "error"); return
         self._pause()
@@ -393,14 +504,21 @@ class SpriteViewerPanel(ctk.CTkFrame):
             filetypes=[("Animated GIF", "*.gif")])
         if not dst:
             return
-        res = e.export_gif(self._frames, dst, fps=self._get_fps())
-        if res["error"]:
-            self._set_status(res["details"], "error")
-            messagebox.showerror("Export failed", res["details"], parent=self)
-        else:
-            self._set_status(res["details"], "done")
+        if not self._confirm_replace(dst):
+            return
+        self._start_worker(
+            "GIF export",
+            self._export_worker,
+            e.export_gif,
+            list(self._frames),
+            dst,
+            self._get_fps(),
+        )
 
     def _export_json(self):
+        if self._worker is not None and self._worker.is_alive():
+            self._set_status(f"{self._operation.capitalize()} already running.", "waiting")
+            return
         if not self._frames:
             self._set_status("Nothing to export — load a source first.", "error"); return
         self._pause()
@@ -409,14 +527,68 @@ class SpriteViewerPanel(ctk.CTkFrame):
             filetypes=[("JSON", "*.json")])
         if not dst:
             return
+        if not self._confirm_replace(dst):
+            return
         meta = e.describe(self._frames, self._path.get().strip(), self._kind,
                           fps=self._get_fps(), boxes=self._boxes)
-        res = e.export_meta_json(meta, dst)
-        if res["error"]:
-            self._set_status(res["details"], "error")
-            messagebox.showerror("Export failed", res["details"], parent=self)
+        self._start_worker(
+            "JSON export",
+            self._export_worker,
+            e.export_meta_json,
+            meta,
+            dst,
+        )
+
+    def _export_worker(self, generation: int, exporter, value, dst, fps=None):
+        kwargs = {"cancelled": self._cancel.is_set}
+        if fps is not None:
+            kwargs["fps"] = fps
+        try:
+            result = exporter(value, dst, **kwargs)
+        except Exception as ex:  # noqa: BLE001 - visible worker boundary
+            result = self._worker_failure("export", ex)
+        self._post_worker_result(generation, self._finish_export, result)
+
+    def _confirm_replace(self, destination: str) -> bool:
+        path = Path(destination)
+        if not path.exists():
+            return True
+        return messagebox.askyesno(
+            "Replace existing export?",
+            f"{path.name} already exists.\n\nReplace it after validation?",
+            parent=self,
+        )
+
+    def _finish_export(self, generation: int, result: dict):
+        if generation != self._generation:
+            return
+        self._finish_worker_controls()
+        if result["error"]:
+            state = "waiting" if result["error_type"] == "operation.cancelled" else "error"
+            self._set_status(result["details"], state)
+            if result["error_type"] != "operation.cancelled":
+                messagebox.showerror("Export failed", result["details"], parent=self)
         else:
-            self._set_status(res["details"], "done")
+            self._set_status(result["details"], "done")
+
+    def _finish_worker_controls(self):
+        self._worker = None
+        self._operation = ""
+        self._load_btn.configure(text="Load", state="normal")
+        self._gif_btn.configure(state="normal")
+        self._json_btn.configure(state="normal")
+
+    def _release_viewer_state(self):
+        for frame in self._frames:
+            frame.close()
+        self._frames = []
+        if self._source_img is not None:
+            self._source_img.close()
+            self._source_img = None
+        self._boxes = []
+        for board in self._checker_cache.values():
+            board.close()
+        self._checker_cache.clear()
 
     # -- status / lifecycle ----------------------------------------------------
 
@@ -426,11 +598,39 @@ class SpriteViewerPanel(ctk.CTkFrame):
 
     def destroy(self):
         # Tear the play timer down so no stray `after` fires post-teardown.
+        completed_result_waiting = False
+        with self._result_lock:
+            self._destroying = True
+            while True:
+                try:
+                    _, _, result = self._worker_results.get_nowait()
+                except queue.Empty:
+                    break
+                completed_result_waiting = True
+                self._release_result(result)
+            self._release_deferred = bool(
+                self._worker is not None
+                and self._worker.is_alive()
+                and not completed_result_waiting
+            )
+        self._cancel.set()
         self._playing = False
+        if self._poll_job is not None:
+            try:
+                self.after_cancel(self._poll_job)
+            except TclError as ex:
+                _LOG.warning("sprite worker poll teardown was already complete: %s", ex)
+            self._poll_job = None
         if self._play_job is not None:
             try:
                 self.after_cancel(self._play_job)
-            except Exception:
-                pass
+            except TclError as ex:
+                _LOG.warning("sprite play timer teardown was already complete: %s", ex)
             self._play_job = None
+        if self._release_deferred:
+            # GIF encoding may still be inside Pillow. Its worker will release
+            # viewer-owned frames after it reaches the next cancellation boundary.
+            _LOG.debug("deferring sprite frame release until worker cancellation")
+        else:
+            self._release_viewer_state()
         super().destroy()

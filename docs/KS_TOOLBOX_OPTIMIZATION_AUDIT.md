@@ -87,7 +87,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Showcase | Pillow compositing, mode-aware durable queue, grouped identity, exact output validation | Deterministic | attention/entropy smart crop and reusable layout presets |
 | Alpha Doctor | durable per-image chroma/solid/edge flood; exact RGBA/hash/coverage validation and repair; explicit-consent, checksum-verified optional U2Net ONNX | Hybrid | uncertainty routing, matte cache, process-isolated inference benchmark, better optional high-resolution specialist |
 | Material Converter | map discovery, channel operations, grouped durable queue, set-wide identity and validated provenance | Deterministic | canonical MaterialX/OpenPBR mapping, color-space validation, packed-map presets |
-| Sprite Viewer | Pillow frames/grid/connected-component slices | Deterministic | Aseprite metadata, trim/extrude/deduplicate, atlas export and timing preservation |
+| Sprite Viewer | custom worker-backed Pillow viewer; bounded frames/grid/connected components; staged decode-validated GIF/JSON export | Deterministic | Aseprite metadata, trim/extrude/deduplicate, atlas export and source timing preservation |
 | Tileset Checker | opposite-edge score, deterministic previews, durable queue, exact artifact validation, collision protection | Deterministic | multi-scale/gradient/perceptual seam score calibrated on labeled examples |
 | Texture Renderer | custom tabbed durable queue over bounded/cancellable user-provided Substance/Material Maker CLIs; owned staging, artifact hashes, exact reuse/repair, atomic provenance, source/destination protection, and bounded log tails | Deterministic orchestration | executable/version capability checks, format-aware Substance validation, shared-stage cache, preset/schema normalization |
 | Package Extractor | cancellable safe stdlib extraction, preview bomb budgets, atomic reports, durable queue, recursive hash validation, collision protection | Deterministic | optional Unity bundle adapter, entry-count profiling, stronger fuzz corpus |
@@ -108,9 +108,10 @@ The old audit's startup and package-size numbers were measured against five tool
 ### Batch processing
 
 Files are independent and most batch tools run them serially. This is a safe
-baseline. Sixteen contrasting workflows now run serially through the durable
-shared runner; remaining batch paths retain existing panel loops until migrated.
-Concurrency is not automatically an optimization:
+baseline. All sixteen batch-capable workflows now run serially through the
+durable shared runner. Sprite Viewer remains intentionally interactive and uses
+one cancellable worker with UI-owned result polling rather than pretending to
+be a queue job. Concurrency is not automatically an optimization:
 
 - Pillow/NumPy work may benefit from a small bounded pool.
 - ffmpeg and native encoders are already threaded; multiple jobs may reduce throughput.
@@ -185,10 +186,11 @@ Every implementation slice in the roadmap must record:
 
 ## Audit conclusion
 
-The architecture is being evolved, not rewritten. Sixteen durable batch slices and
-the shell-owned queue are implemented and verified without changing
-CustomTkinter or proven processing algorithms. They now cover in-process image,
-external-media/rendering, grouped-material, analytical, and secure archive contracts.
+The architecture is being evolved, not rewritten. Sixteen durable batch slices,
+the shell-owned queue, and one bounded custom interactive viewer are implemented
+and verified without changing CustomTkinter or proven output algorithms. They
+cover in-process image, external-media/rendering, grouped-material, analytical,
+secure archive, and interactive sprite-inspection contracts.
 Future batch modules should enter through this proven core; measure resource
 profiles before adding scheduling lanes or dependency graphs.
 Content-addressed caching remains later work. Improve deterministic
