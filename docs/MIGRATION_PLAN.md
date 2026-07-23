@@ -269,6 +269,36 @@ list, provenance consumes bounded metadata/storage, reuse is whole-item rather
 than a shared content cache, and the multi-family adapter necessarily carries
 more failure-path code.
 
+### Slice 3l — in progress: indexed Asset Auditor
+
+The first Asset Auditor improvement replaces exhaustive dHash pair comparison
+with an exact BK-tree Hamming-metric index feeding the existing union-find.
+This is a focused deterministic optimization before the grouped durable-queue
+adapter; no audit policy, threshold meaning, report format, UI, or dependency
+changes in this checkpoint.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Every valid image hash was compared with every later hash, doing 1,999,000 Python string comparisons for 2,000 unrelated images |
+| Proposed behavior | Query prior hashes through an exact metric tree, union every match within the same threshold, retain a defensive all-pairs path for externally constructed unequal/non-binary records, and special-case whole-width thresholds |
+| Architecture/language | Existing Python dHash and union-find remain; a compact in-module index is justified by the measured hot path and avoids a dependency or cross-module abstraction |
+| Functionality and quality | Exact grouping semantics are preserved, including exact duplicates and transitive A~B~C groups; no approximate search, false-negative tolerance, or output-quality change is introduced |
+| Code and dependency impact | Asset Auditor production source 682 → 730 nonblank lines (+48); zero dependencies, models, assets, binaries, processes, or services added |
+| Package-size impact | Source-only change; no dependency/binary payload added. The packaged artifact was not rebuilt, so no total package-size reduction is claimed |
+| Startup and runtime impact | Ready-to-mainloop measured 125 ms with 30 ms discovery and no optional-heavy imports; seeded 2,000-random-64-bit-hash threshold-8 workload measured 4,451.3 → 509.5 ms (8.7× faster, −88.6%) |
+| RAM, VRAM, CPU, disk, and GPU transfer | The index stores one small node per distinct hash and trades bounded O(n) RAM for far fewer CPU comparisons; it performs no disk I/O, GPU work, VRAM allocation, or transfer; peak RAM is not yet measured |
+| AI and model-loading impact | Zero AI calls and model loads; Hamming radius search is an exact deterministic metric problem |
+| Batch, cache, and incremental impact | Audit aggregation is faster but still panel-owned in this checkpoint; cancellation, durable grouped identity, report validation, and reuse remain the next part of Slice 3l and are not claimed implemented |
+| Reliability, security, tests, and benchmarks | Seeded parity checks compare indexed output with the former all-pairs algorithm at thresholds 0, 1, 2, 8, and 64; the real full-audit smoke remains green; no source mutation or new trust boundary exists |
+| Risks and rollback | BK-tree lookup can approach quadratic work for dense/adversarial hashes and adds O(n) nodes; revert only `_group_near_dups` and its parity test to restore the former algorithm without data or schema migration |
+
+Interim cartridge score: functional completeness 5, output quality 5, runtime
+performance 5 on the representative grouping workload, startup 5, memory 4
+(the new index has not had peak RAM measured), storage 5, batch 4, cache 4,
+incremental execution 4, AI efficiency 5, reliability 5, maintainability 4,
+portability 5, and security 5. Batch/cache/incremental remain 4 because the
+durable grouped-job portion of this slice is explicitly still pending.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

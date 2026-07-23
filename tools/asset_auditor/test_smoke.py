@@ -10,6 +10,7 @@ Run standalone:  python -m tools.asset_auditor.test_smoke
 from __future__ import annotations
 
 import importlib.util
+import random
 import sys
 import tempfile
 from pathlib import Path
@@ -57,6 +58,44 @@ def test_dhash_hamming() -> None:
     assert near <= 8, f"near-identical hamming too large: {near}"
     assert far > near, f"different image not farther: far={far} near={near}"
     print(f"PASS: dhash/hamming — near={near} bits, far={far} bits.")
+
+
+def test_near_duplicate_index() -> None:
+    """Indexed grouping must remain exactly equivalent to all-pairs union."""
+    rng = random.Random(20260722)
+    records = [
+        e.FileRecord(
+            path=f"image_{index:03d}.png",
+            size_bytes=1,
+            dhash=f"{rng.getrandbits(64):064b}",
+        )
+        for index in range(120)
+    ]
+    # Force an exact duplicate and a transitive A~B~C chain.
+    records[1].dhash = records[0].dhash
+    records[2].dhash = "0" * 64
+    records[3].dhash = "1" + "0" * 63
+    records[4].dhash = "11" + "0" * 62
+
+    def brute_force(threshold: int) -> list[list[str]]:
+        parent = list(range(len(records)))
+        def find(index: int) -> int:
+            while parent[index] != index:
+                parent[index] = parent[parent[index]]
+                index = parent[index]
+            return index
+        for left in range(len(records)):
+            for right in range(left + 1, len(records)):
+                if e.hamming(records[left].dhash, records[right].dhash) <= threshold:
+                    parent[find(left)] = find(right)
+        groups: dict[int, list[str]] = {}
+        for index, record in enumerate(records):
+            groups.setdefault(find(index), []).append(record.path)
+        return sorted(sorted(group) for group in groups.values() if len(group) > 1)
+
+    for threshold in (0, 1, 2, 8, 64):
+        assert e._group_near_dups(records, threshold) == brute_force(threshold)
+    print("PASS: near-duplicate index — exact parity at five Hamming thresholds.")
 
 
 def test_check_image() -> None:
@@ -157,6 +196,7 @@ def main() -> int:
         print("SKIP: numpy/Pillow not installed — image-dependent legs skipped.")
         return 0
     test_dhash_hamming()
+    test_near_duplicate_index()
     test_check_image()
     test_full_audit()
     return 0

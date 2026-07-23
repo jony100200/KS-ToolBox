@@ -23,6 +23,12 @@ report files written to your chosen folder.
 | Resolution histogram | counts per `W×H` |
 | Image health | very-dark / very-bright / low-contrast flags (mean & std of luminance) |
 
+Near-duplicate grouping uses an exact BK-tree Hamming-distance index followed
+by union-find. It produces the same transitive groups as comparing every pair,
+while avoiding most unrelated comparisons on normal sparse dHash collections.
+Its worst case remains quadratic for adversarial dense hashes; a threshold that
+covers the whole hash width is handled directly in linear time.
+
 ## Output
 
 Written atomically (`.part` → replace) to the report folder:
@@ -53,9 +59,10 @@ python -m tools.asset_auditor.test_smoke
 ```
 
 Checks the filename-safety rules (no deps), then — with numpy + Pillow — the
-dHash/Hamming behaviour, the corrupt/dimension check, and a full audit over a
-temp folder built to contain one of every issue class, ending in a written
-`audit.html` + `audit.json`. Skips cleanly if numpy/Pillow are absent.
+dHash/Hamming behaviour, exact indexed/all-pairs grouping parity across five
+thresholds, the corrupt/dimension check, and a full audit over a temp folder
+built to contain one of every issue class, ending in a written `audit.html` +
+`audit.json`. Skips cleanly if numpy/Pillow are absent.
 
 ## Credits
 

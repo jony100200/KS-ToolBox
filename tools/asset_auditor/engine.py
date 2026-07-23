@@ -325,12 +325,17 @@ def _group_by_sha(records: list[FileRecord]) -> list[list[str]]:
 
 
 def _group_near_dups(records: list[FileRecord], threshold: int) -> list[list[str]]:
-    """Union-find over valid dHashes: any two within `threshold` bits join a
-    group. O(n^2) pairwise — fine for the hundreds-to-thousands a folder holds;
-    a folder in the tens of thousands would want an LSH index. (dHash + union-find
-    approach from RupayanFlow's ks_image_similarity_audit.)"""
+    """Exact union-find grouping over a BK-tree Hamming-metric index.
+
+    This returns the same transitive groups as an all-pairs comparison, but a
+    normal sparse dHash collection does not pay for every unrelated pair. The
+    metric index can still approach quadratic work on adversarial dense data;
+    the threshold-wide case is handled directly in linear time.
+    """
     cand = [r for r in records if r.dhash and not r.corrupt]
     n = len(cand)
+    if n < 2 or threshold < 0:
+        return []
     parent = list(range(n))
 
     def find(i: int) -> int:
@@ -339,10 +344,57 @@ def _group_near_dups(records: list[FileRecord], threshold: int) -> list[list[str
             i = parent[i]
         return i
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            if hamming(cand[i].dhash, cand[j].dhash) <= threshold:
-                parent[find(i)] = find(j)
+    def union(left: int, right: int) -> None:
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parent[left_root] = right_root
+
+    lengths = {len(record.dhash) for record in cand}
+    valid_bits = all(set(record.dhash) <= {"0", "1"} for record in cand)
+    if len(lengths) != 1 or not valid_bits:
+        # Defensive compatibility for externally constructed FileRecords. Real
+        # audit records always carry equal-length binary dHashes.
+        for i in range(n):
+            for j in range(i + 1, n):
+                if hamming(cand[i].dhash, cand[j].dhash) <= threshold:
+                    union(i, j)
+    else:
+        bit_length = next(iter(lengths))
+        if threshold >= bit_length:
+            for i in range(1, n):
+                union(0, i)
+        else:
+            # Node = [hash integer, representative record index, children by
+            # exact distance]. Equal hashes share the existing representative.
+            root: list | None = None
+            for index, record in enumerate(cand):
+                value = int(record.dhash, 2)
+                if root is None:
+                    root = [value, index, {}]
+                    continue
+
+                stack = [root]
+                while stack:
+                    node = stack.pop()
+                    distance = (value ^ node[0]).bit_count()
+                    if distance <= threshold:
+                        union(index, node[1])
+                    low, high = max(0, distance - threshold), distance + threshold
+                    stack.extend(
+                        child for edge, child in node[2].items()
+                        if low <= edge <= high
+                    )
+
+                node = root
+                while True:
+                    distance = (value ^ node[0]).bit_count()
+                    if distance == 0:
+                        break
+                    child = node[2].get(distance)
+                    if child is None:
+                        node[2][distance] = [value, index, {}]
+                        break
+                    node = child
 
     groups: dict[int, list[str]] = {}
     for i in range(n):

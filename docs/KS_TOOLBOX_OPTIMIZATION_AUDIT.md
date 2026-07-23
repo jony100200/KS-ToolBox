@@ -91,7 +91,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Tileset Checker | opposite-edge score, deterministic previews, durable queue, exact artifact validation, collision protection | Deterministic | multi-scale/gradient/perceptual seam score calibrated on labeled examples |
 | Texture Renderer | user-provided Substance/Material Maker CLIs | Deterministic orchestration | executable/version capability checks, render cache, preset/schema normalization |
 | Package Extractor | cancellable safe stdlib extraction, preview bomb budgets, atomic reports, durable queue, recursive hash validation, collision protection | Deterministic | optional Unity bundle adapter, entry-count profiling, stronger fuzz corpus |
-| Asset Auditor | corruption/duplicate/asset checks and reports | Deterministic | exact→perceptual→embedding duplicate cascade and incremental index |
+| Asset Auditor | corruption/exact duplicate checks, exact indexed dHash grouping, health analysis, and reports | Deterministic | durable grouped execution, report validation/reuse, then optional embedding escalation for ambiguous semantics |
 | Dataset Manager | pair/split/bucket with copy-only safety | Deterministic | stable hash splits, leakage/duplicate checks, class balance and optional label QA |
 
 ## Cross-cutting performance findings
