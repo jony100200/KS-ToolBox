@@ -125,6 +125,19 @@ def test_full_pipeline() -> None:
         assert rep.changed == 1, f"expected 1 replacement counted, got {rep.changed}"
         assert not (Path(td) / "repl").exists(), "dry-run wrote files"
 
+        # A mistaken same-folder destination must fail before touching any source.
+        guarded_before = {path: path.read_bytes() for path in src.iterdir() if path.is_file()}
+        rep = e.run(
+            images,
+            e.DatasetOptions(
+                operation="replace", find="cat", replace="dog",
+                out_root=src, dry_run=False,
+            ),
+        )
+        assert rep.failed == 1 and "must not be a source folder" in rep.messages[0]
+        guarded_after = {path: path.read_bytes() for path in src.iterdir() if path.is_file()}
+        assert guarded_before == guarded_after, "same-folder output modified a source"
+
     print("PASS: full pipeline — pair_report + split + bucket copied; SOURCES UNCHANGED; manifest non-empty.")
 
 

@@ -35,6 +35,8 @@ Point it at a folder of images. Sidecar captions are matched by **stem** —
 
 - **Non-destructive.** Nothing is moved or deleted; sources are never modified.
   All output goes under one output root via `shutil.copy2` / freshly written text.
+  A real run refuses an output folder that is itself one of the selected source
+  folders, preventing Replace or Copy from targeting an original file.
 - **Preview-first.** *Preview only* (the default) lists exactly what *would* be
   copied or changed, writing nothing.
 - **Deterministic.** Pairing, bucketing, and the split are pure functions of the

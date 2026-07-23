@@ -244,6 +244,8 @@ class Report:
 # ---------------------------------------------------------------------------
 
 def _atomic_copy(src: Path, dst: Path) -> None:
+    if _same_path(src, dst):
+        raise OSError(f"refusing to overwrite source file: {src}")
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(f"{dst.stem}.part{dst.suffix}")
     shutil.copy2(src, tmp)
@@ -255,6 +257,13 @@ def _atomic_write_text(path: Path, text: str) -> None:
     tmp = path.with_name(f"{path.stem}.part{path.suffix}")
     tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
+
+
+def _same_path(left: str | Path, right: str | Path) -> bool:
+    try:
+        return Path(left).resolve(strict=False) == Path(right).resolve(strict=False)
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _write_csv(path: Path, header: list, rows: list) -> None:
@@ -419,6 +428,15 @@ def run(paths, opts: DatasetOptions, log=None, progress=None, should_stop=None) 
         report.messages.append("No images to process.")
         return report
 
+    out_root = Path(opts.out_root) if opts.out_root else None
+    writable = (not opts.dry_run) and out_root is not None
+    if writable and any(_same_path(out_root, image.parent) for image in images):
+        report.failed = 1
+        report.messages.append(
+            "Output folder must not be a source folder; refusing to modify source files."
+        )
+        return report
+
     # validate a regex up front so a bad pattern fails loudly, not per-file
     if opts.operation == "replace" and opts.regex and opts.find:
         try:
@@ -444,8 +462,6 @@ def run(paths, opts: DatasetOptions, log=None, progress=None, should_stop=None) 
     ordered = sorted(images, key=lambda p: _natural_key(p.name.lower()))
     split_map = split_assign([p.name for p in ordered], opts.ratios) if opts.operation == "split" else {}
 
-    out_root = Path(opts.out_root) if opts.out_root else None
-    writable = (not opts.dry_run) and out_root is not None
     if not opts.dry_run and out_root is None and opts.operation != "pair_report":
         report.messages.append("No output folder set — nothing copied (preview only).")
 

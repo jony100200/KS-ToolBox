@@ -307,6 +307,20 @@ The 4s are explicit boundaries: peak RAM is not yet measured, reports retain
 professional detail, reuse is whole-collection rather than content-addressed
 per stage, and the necessary report/recovery failure paths increase local code.
 
+### Slice 3m — in progress: safe, durable Dataset Manager
+
+The opening audit reproduced a source-integrity defect: selecting the source
+folder as the real output changed an original caption during Replace while the
+report claimed zero failures. It also reproduced cross-folder same-name loss:
+two selected `same.png` inputs reported two copies but produced one output.
+
+The first checkpoint adds a resolved-path guard that rejects any real output
+root equal to a selected source folder before discovery, hashing, copying, or
+manifest writes. The smoke suite snapshots every source byte and proves the
+mistaken configuration writes nothing. Cross-input destination collisions,
+grouped queue execution, cancellation, staged whole-run provenance, and exact
+reuse remain part of this active slice and are not yet claimed complete.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.
