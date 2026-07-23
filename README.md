@@ -10,12 +10,14 @@ free, offline, no credits, no cloud.</p>
 ---
 
 KS ToolBox is a **plugin toolbox**: one CustomTkinter shell that auto-discovers
-self-contained tools. Its 16 batch workflows share preview, safe output,
+self-contained tools and presents them through four focused work areas instead
+of a wall of tool names. Home, live search, recent tools, and category pages
+keep the interface calm as the catalog grows. Its 16 batch workflows share preview, safe output,
 durable queue/recovery, validation, manifests, and morning reports. Sprite
 Viewer keeps a purpose-built interactive screen. It is **deterministic-first**:
 16 of 17 tools use no AI at all, and the one that can (Alpha Doctor) is
 deterministic by default with an *optional* utility model. Nothing heavy loads
-at startup (113 ms median on the reference machine; the regression budget is
+at startup (106 ms warm median on the reference machine; the regression budget is
 250 ms).
 
 ## Tools

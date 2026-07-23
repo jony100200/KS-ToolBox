@@ -7,7 +7,7 @@ the allowed direction of incremental migration; it is not a rewrite brief.
 ## System shape
 
 ```text
-CustomTkinter shell, tool panels, and Queue/History view
+CustomTkinter grouped shell, catalog pages, tool panels, and Queue/History
         │ requests / immutable snapshot polling
         ▼
 AppServices + shell-owned JobQueue
@@ -40,8 +40,15 @@ infrastructure adapter ──► batch contracts
 tool engine ──► toolbox.engine_common
 ```
 
-- `toolbox/shell.py` owns `AppServices`, the queue view, the tool registry, and
-  shared UI elements; it does not implement tool processing.
+- `toolbox/shell.py` owns `AppServices`, top-level navigation, lazy page
+  composition, the queue view, and the tool registry; it does not implement
+  tool processing.
+- `toolbox/catalog.py` owns deterministic categories, validation, and search
+  ranking without importing widgets or engines.
+- `toolbox/catalog_panel.py` renders metadata-driven Home, category, search,
+  and tool cards. It receives navigation callbacks and cannot process files.
+- Tool pages keep the actual verified panel in a scroll-safe lazy host. Category
+  selection remains highlighted while its tool is open.
 - A tool may import public names from `toolbox`; it must not import another tool.
 - Engine modules are headless and must not import CustomTkinter.
 - `batch_core.py` has no UI, database, codec, model, or tool dependency.
@@ -54,6 +61,7 @@ tool engine ──► toolbox.engine_common
 | Contract | Owner | Purpose |
 |---|---|---|
 | `Tool` / `ToolMeta` | `toolbox/tool.py` | Lazy first-party tool registration and UI construction |
+| `ToolCategory` / catalog search | `toolbox/catalog.py` | Four stable work areas, fail-closed category validation, and deterministic search |
 | `AppServices` | `toolbox/application.py` | Explicit shell-owned service context passed to panels |
 | `JobQueue` | `toolbox/job_queue.py` | Lazy priority queue, pause/resume/cancel, snapshots, and history |
 | `QueueSubmission` | `toolbox/job_queue.py` | Tool execution, classification, validation, and finalization contract |

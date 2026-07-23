@@ -697,6 +697,46 @@ intentionally traded for reproducible clean builds; maintainability and
 portability remain 4 until another OS packaging path proves the policy registry
 and platform-specific notice discovery.
 
+### Slice 3s — grouped professional CustomTkinter shell
+
+The former shell placed all 17 tools in a fixed 230-pixel sidebar. At the
+1200×780 default the final tool was outside the available rail; at the 980×640
+minimum five tools were unreachable and batch Results collapsed below a
+non-scrollable page. It had no catalog search, work-area hierarchy, product
+Home, recent tools, category context, or app-level keyboard routes. Navigation
+also applied the icon font to mixed icon-and-text button strings, reducing text
+quality.
+
+The shell now starts on a focused Home dashboard and exposes six stable
+destinations: Home, Queue, Images, Video & Audio, Game Assets, and Files & Data.
+Metadata-driven category and search pages show all 17 tools in two-column cards.
+Tools remain lazily built, retain their real panel objects and queue contracts,
+and render inside a vertical scroll host. Category context stays highlighted;
+Back, recent tools, live debounced search, and keyboard routes make navigation
+predictable without creating an agent or workflow-builder UI.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Flat 17-tool rail; one clipped tool at 1200×780 and five at 980×640; no Home, grouping, search, recents, tool heading/back route, or overflow host; stale Queue empty-state named only two tools |
+| Proposed behavior | Six-item workspace rail, purpose-led Home, four category pages, deterministic live catalog search, recent tools, category-preserving tool header/back route, scroll-safe panels, accurate Queue empty-state, and keyboard shortcuts |
+| Architecture and language | Existing Python/CustomTkinter modular monolith remains. Pure `catalog.py` owns category/search rules; presentation-only `catalog_panel.py` owns cards/pages; `shell.py` composes them and continues passing `AppServices` to untouched lazy tool contracts |
+| Functionality and quality | All 17 tools remain discoverable through category and search; all 17 real panels construct; all sixteen batch workflows submit through the shared queue; Sprite Viewer stays purpose-built. At 980×640 its lower controls remain reachable through the new host |
+| Code and dependency impact | One focused catalog primitive, catalog views, shell navigation tests, and visual/runtime benchmarks were added. No runtime package, model, worker, service, engine, or processing algorithm was added or replaced |
+| Package-size impact | Source-only UI change at this checkpoint; no package-size reduction is claimed. The final release build is measured separately |
+| Startup and runtime impact | Pre-change five-run startup was 209 ms cold then 100–103 ms (102 ms warm median). Post-change was 165 ms cold then four 106 ms runs (106 ms warm median, +4 ms/+3.9%, within normal measured variance and the 250 ms budget). Real construction plus first paint measured 214.4–238.6 ms (219.5 ms median) |
+| RAM, VRAM, CPU, disk, and GPU transfer | Post-change idle working set measured 41.6–41.9 MiB, one Python thread, zero tool/queue panels loaded, and 0–31.2 ms process CPU during a one-second Windows sample. No equivalent source-shell pre-measurement exists, so no memory/CPU improvement is claimed. No GPU, VRAM, disk scan, model, or transfer occurs on Home |
+| Batch, cache, and incremental impact | Job definitions, execution, checkpoints, cache keys, and output validation are unchanged. Panels still build once on first use; catalog pages contain metadata only. Recent tools are intentionally session-local and add no state store |
+| AI and model-loading impact | Zero AI calls/model loads added. Catalog grouping and search are exact metadata operations; optional tool models remain lazy |
+| Reliability, security, tests, and benchmarks | 41 unit tests pass; isolated real-shell verification covers six nav destinations, every category, search, lazy build, context, and scroll host; 17/17 panels construct; sixteen production queue paths and history render; real screenshots cover Home/category/search/tool/minimum/Queue |
+| Risks and rollback | Two-column cards assume the supported 980-pixel minimum; CustomTkinter remains limited compared with a native accessibility tree; recent tools do not persist across sessions; search is metadata rather than semantic. Revert the shell/catalog presentation commit while retaining tool engines, queue, registry, and category metadata |
+
+Checkpoint cartridge score: functional completeness 5, output quality 5,
+runtime 5, startup 5, memory 4, storage 5, batch efficiency 5, cache
+effectiveness 5, incremental execution 5, AI efficiency 5, reliability 5,
+maintainability 4, portability 5, and security 5. Memory is 4 because there is
+no equivalent pre-change source-shell working-set baseline. Maintainability is
+4 until a fifth work area proves the fixed catalog vocabulary remains sufficient.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

@@ -16,9 +16,12 @@ root on `sys.path` for every verifier.
 |---|---|---|
 | `measure_repo.ps1` | file count, LOC, source/asset/bin sizes | pure filesystem |
 | `measure_startup.py` | import + discovery time, models-at-startup | headless (no window) |
+| `measure_shell_runtime.py` | real first paint, one-second idle CPU, working set, Python threads, lazy panel count | opens then hides the real shell |
 | `measure_batch_core.py` | durable item transitions, checkpoint size, completed-job reuse | 1,000 no-op local items |
 | `check_queue_flow.py` | real CustomTkinter submission across sixteen durable image/vector/audio/video/document/material/archive/audit/dataset/external-render/hybrid workflows, exact reuse/repair, provenance repair, and history rendering | uses temporary state and generated media |
 | `check_ui.py` | construction of every discovered tool panel | no processing |
+| `check_shell_navigation.py` | grouped navigation, category reachability, search, lazy tool creation, and minimum-size scroll host | real isolated CustomTkinter process |
+| `capture_ui.py` | review images for Home, category, search, tool, minimum-size custom tool, and Queue | saves to the requested directory or OS temp |
 | `run_all_smoke.py` | every tool's real standalone smoke contract | optional dependencies skip cleanly |
 | `measure_deps.ps1` | installed footprint of base vs Clean Cutout stacks | uv `--target` into temp, then du |
 | `measure_ai_calls.ps1` | every AI / network call site in the source | static sweep |

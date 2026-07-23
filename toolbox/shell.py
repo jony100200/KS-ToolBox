@@ -417,7 +417,6 @@ class ToolBoxShell(ctk.CTk):
             button.configure(
                 fg_color=t.ACCENT_BLUE if active else "transparent",
                 text_color=t.TEXT_MAIN if active else t.TEXT_MUTED,
-                font=t.font(11, bold=active),
             )
 
     def _poll_queue_button(self) -> None:

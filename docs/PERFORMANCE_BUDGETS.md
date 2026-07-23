@@ -7,13 +7,16 @@ They are evidence for this revision, not universal hardware guarantees.
 
 | Metric | Measured | Command |
 |---|---:|---|
-| Ready-to-mainloop, measured range; latest 112 ms (five-run median 113 ms) | 99–197 ms | `python benchmarks/measure_startup.py` |
-| Discovery + shell import; latest 27 ms (five-run median 27 ms) | 21–36 ms | same |
+| Ready-to-mainloop, measured range; latest five-run warm median 106 ms | 99–197 ms | `python -m benchmarks.measure_startup` |
+| Discovery + shell import; latest five-run median 25 ms | 21–36 ms | same |
+| Real grouped shell construction + first paint | 214.4–238.6 ms; median 219.5 ms | `python -m benchmarks.measure_shell_runtime` |
+| Grouped shell working set after one-second idle | 41.6–41.9 MiB; median 41.6 MiB | same |
+| Grouped shell idle execution | one Python thread, zero tool/queue panels; Windows CPU sample 0–31.2 ms/second | same |
 | Optional AI/numeric modules at startup | none | same |
-| Python source after this slice | 113 files / 19,459 lines | bounded repository scan |
-| Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s; latest 93.56 ms / 10,689 items/s | `measure_batch_core.py` |
-| Job identity, 1,000 path/stat inputs | 88.22–122.26 ms; latest 96.49 ms | same |
-| Completed-job reuse, 1,000 items | 5.18–6.22 ms; latest 5.47 ms / zero executor calls | same |
+| Python source after this slice | 122 files / 21,256 lines | bounded repository scan |
+| Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s; latest 97.52 ms / 10,254 items/s | `measure_batch_core.py` |
+| Job identity, 1,000 path/stat inputs | 88.22–122.26 ms; latest 92.95 ms | same |
+| Completed-job reuse, 1,000 items | 5.18–6.22 ms; latest 6.15 ms / zero executor calls | same |
 | SQLite checkpoint, 1,000 items | 270,336 bytes | same |
 | Dataset split, 200 image-caption pairs | 722.3 → 910.4 ms (+188.0 ms, +26.0%); exact output reuse validation 508.5 ms | paired five-run in-process benchmark |
 | Alpha Doctor deterministic 512² cutout | 10.6 → 11.2 ms (+0.6 ms, +5.6%) after settings/source/collision guards | paired seven-run in-process benchmark |
