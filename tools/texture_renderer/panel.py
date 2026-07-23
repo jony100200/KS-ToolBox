@@ -1,16 +1,16 @@
 """Texture Renderer — the tool's UI. Thin over engine.py.
 
-A *custom* panel (not BaseBatchPanel): this tool is directory + engine-exe based
-with two sub-modes, so it uses a CTkTabview ("Substance" / "Material Maker"),
-each tab carrying its own engine/input/output pickers and options, over a shared
-console + progress bar + Start/Stop. All rendering runs on a worker thread — the
-UI loop is never blocked. No render logic lives here (that's engine.py).
-
-Nothing is persisted to disk (no settings.json).
+A custom `BaseBatchPanel` layout: this tool is directory + engine-exe based with
+two sub-modes, so it keeps a CTkTabview ("Substance" / "Material Maker") rather
+than the standard file-picker layout. Each tab carries its own engine/input/
+output controls over a shared console and Start/Stop/Pause footer. Rendering
+runs through the shell-owned durable queue, so the UI loop never blocks and
+interrupted jobs can recover. No render logic lives here (that's engine.py).
 """
 from __future__ import annotations
 
-import threading
+import os
+from dataclasses import asdict
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -18,15 +18,22 @@ import customtkinter as ctk
 
 from toolbox import components as c
 from toolbox import theme as t
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_reporting import completion_report_path, prepare_batch_completion
 from toolbox.icons import Icons
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 
-class TextureRendererPanel(ctk.CTkFrame):
-    def __init__(self, parent):
-        super().__init__(parent, fg_color=t.BG_COLOR)
-        self._worker: threading.Thread | None = None
-        self._stop = threading.Event()
+class TextureRendererPanel(BaseBatchPanel):
+    """Custom two-mode screen reusing BaseBatchPanel's durable queue lifecycle."""
+
+    def __init__(self, parent, queue_service):
+        ctk.CTkFrame.__init__(self, parent, fg_color=t.BG_COLOR)
+        self._queue_service = queue_service
+        self._active_job_id: str | None = None
+        self._queue_shown: set[int] = set()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)   # console stretches
@@ -67,7 +74,10 @@ class TextureRendererPanel(ctk.CTkFrame):
         self._run_btn.grid(row=0, column=1)
         self._stop_btn = c.danger_button(footer, "Stop", self._request_stop, width=90)
         self._stop_btn.grid(row=0, column=2, padx=(10, 0)); self._stop_btn.configure(state="disabled")
-        self._status = c.Pill(footer, "IDLE", "idle"); self._status.grid(row=0, column=3, padx=(10, 0))
+        self._pause_btn = c.secondary_button(footer, "Pause", self._request_pause, width=80)
+        self._pause_btn.grid(row=0, column=3, padx=(10, 0))
+        self._pause_btn.configure(state="disabled")
+        self._status = c.Pill(footer, "IDLE", "idle"); self._status.grid(row=0, column=4, padx=(10, 0))
 
         self._logline("System ready.", t.TEXT_MUTED)
 
@@ -208,10 +218,14 @@ class TextureRendererPanel(ctk.CTkFrame):
             timeout_seconds=timeout)
         return "mm", opts
 
+    def _collect_options(self):
+        """BaseBatchPanel compatibility hook; this custom screen returns mode + options."""
+        return self._collect()
+
     # -- run orchestration -----------------------------------------------------
 
     def _start(self):
-        if self._worker and self._worker.is_alive():
+        if self._active_job_id:
             return
         collected = self._collect()
         if collected is None:
@@ -240,7 +254,6 @@ class TextureRendererPanel(ctk.CTkFrame):
             return
         if not projects:
             self._logline(f"No {ext} files found in {opts.input_dir}", t.TEXT_MUTED); return
-        opts.protected_paths = tuple(str(project) for project in projects)
 
         # Preview + Confirm + Logging: generated files may replace same-name maps.
         # Engine sidecars are discarded only inside the KS-owned staging folder.
@@ -263,52 +276,127 @@ class TextureRendererPanel(ctk.CTkFrame):
             if not proceed:
                 self._logline("Cancelled — nothing was written.", t.TEXT_MUTED); return
 
-        self._stop.clear()
         self._run_btn.configure(state="disabled"); self._stop_btn.configure(state="normal")
-        self._status.set_state("RUNNING", "running"); self._progress.set(0); self._summary.configure(text="")
+        self._pause_btn.configure(state="normal", text="Pause")
+        self._status.set_state("QUEUED", "waiting"); self._progress.set(0)
+        self._summary.configure(text="")
         self._log.configure(state="normal"); self._log.delete("1.0", "end"); self._log.configure(state="disabled")
         self._logline(f"Found {len(projects)} {ext} project(s)."
                       + (" [DRY RUN]" if opts.dry_run else ""), t.TEXT_MUTED)
-        self._worker = threading.Thread(target=self._work, args=(kind, opts, projects), daemon=True)
-        self._worker.start()
+        try:
+            self._queue_shown.clear()
+            submission = self._build_submission(kind, opts, projects)
+            self._active_job_id = self._queue_service.submit(submission)
+        except Exception as ex:  # noqa: BLE001 — submission failure remains visible
+            self._run_btn.configure(state="normal")
+            self._stop_btn.configure(state="disabled")
+            self._pause_btn.configure(state="disabled")
+            self._status.set_state("FAILED", "error")
+            self._logline(
+                f"queue submission failed: {type(ex).__name__}: {ex}",
+                t.STATE["error"][1],
+            )
+            return
+        self.after(50, self._poll_queue_job, self._active_job_id)
 
-    def _request_stop(self):
-        # The engine polls this flag and terminates its exact owned process tree.
-        self._stop.set(); self._status.set_state("STOPPING", "waiting")
-
-    def _work(self, kind: str, opts, projects):
+    def _build_submission(
+        self, kind: str, opts: e.RenderOptions, projects: list[Path]
+    ) -> QueueSubmission:
         render = e.render_substance if kind == "sbs" else e.render_material_maker
-        total = len(projects)
-        rendered = skipped = failed = 0
-        stopped = False
-        for i, proj in enumerate(projects, 1):
-            if self._stop.is_set():
-                self.after(0, self._logline, "--- stopped by user ---", t.TEXT_MUTED)
-                stopped = True
-                break
-            self.after(0, self._logline, f"[{i}/{total}] {proj.name} ...", t.TEXT_MUTED)
-            try:
-                res = render(
-                    proj, opts, cancelled=lambda: self._stop.is_set()
-                )
-            except e.CommandCancelled:
-                self.after(0, self._logline, "--- stopped by user ---", t.TEXT_MUTED)
-                stopped = True
-                break
-            except Exception as ex:  # noqa: BLE001 — isolate one project, report visibly
-                res = e.Result(
-                    str(proj), "failed",
-                    f"unexpected renderer failure: {type(ex).__name__}: {ex}",
-                    detail="render.unexpected",
-                )
-            if res.action == "rendered":
-                rendered += 1
-            elif res.action in ("dry-run", "skipped"):
-                skipped += 1
-            else:
-                failed += 1
-            self.after(0, self._show, res, i, total)
-        self.after(0, self._done, rendered, skipped, failed, total, stopped)
+        settings = asdict(opts)
+        settings.pop("protected_paths", None)
+        definition = JobDefinition.create(
+            tool_id="texture_renderer",
+            tool_version="1",
+            workflow_version="external-render.v1",
+            inputs=projects,
+            identity_dependencies=[opts.engine_path],
+            settings={"renderer": kind, **settings},
+            max_retries=1,
+        )
+        destinations = [
+            os.path.normcase(str(
+                (Path(opts.output_dir) / project.stem if opts.group
+                 else Path(opts.output_dir)).resolve(strict=False)
+            ))
+            for project in projects
+        ]
+        exact_reuse = len(projects) == 1 or (
+            opts.group and len(destinations) == len(set(destinations))
+        )
+        if not exact_reuse:
+            self._logline(
+                "Exact completed-job reuse is disabled because projects share "
+                "a flat or duplicate destination; sequential export behavior is preserved.",
+                t.TEXT_MUTED,
+            )
+
+        def classify(result: e.Result) -> ItemOutcome:
+            data = result.to_dict()
+            if result.action == "rendered":
+                return ItemOutcome.completed(data, result.reason)
+            if result.action in {"skipped", "dry-run"}:
+                return ItemOutcome.skipped(data, result.reason)
+            return ItemOutcome.failed(
+                result.reason, retryable=result.retryable, data=data
+            )
+
+        return QueueSubmission(
+            definition=definition,
+            label=(
+                f"Texture Renderer {'Substance' if kind == 'sbs' else 'Material Maker'}"
+                f" · {len(projects)} project(s)"
+            ),
+            execute=lambda path, token: render(
+                path, opts, cancelled=lambda: token.is_cancelled
+            ),
+            classify=classify,
+            validate_stored=lambda item: exact_reuse and e.validate_result(
+                self._result_from_record(item), opts, kind,
+                expected_project=item.input_path,
+            ),
+            finalize=lambda report: prepare_batch_completion(
+                report,
+                result_from_record=self._result_from_record,
+                write_manifest=lambda results: e.write_manifest(
+                    list(results), opts, kind, report.job_id
+                ),
+                report_path=completion_report_path(
+                    "texture_renderer",
+                    report.job_id,
+                    out_root=Path(opts.output_dir),
+                    dry_run=opts.dry_run,
+                ),
+                write_manifest_on_reuse=True,
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        rendered = sum(result.action == "rendered" for result in results)
+        skipped = sum(result.action in {"dry-run", "skipped"} for result in results)
+        failed = len(results) - rendered - skipped
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            rendered, skipped, failed, remaining,
+            payload.manifest, payload.report_path,
+            self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"project", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path, "failed",
+            item.details or "render project quarantined",
+            detail="batch.quarantined",
+        )
 
     def _show(self, res, i: int, total: int):
         self._progress.set(i / total)
@@ -318,21 +406,15 @@ class TextureRendererPanel(ctk.CTkFrame):
         self._logline(f"  {icon} {name} — {res.reason}", color)
 
     def _done(
-        self, rendered: int, skipped: int, failed: int, total: int,
-        stopped: bool = False,
+        self, rendered: int, skipped: int, failed: int, remaining: int = 0,
+        manifest: str | None = None, report_path: str | None = None,
+        job_state=JobState.COMPLETED, recovered: bool = False,
+        reused: bool = False,
     ):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        completed = rendered + skipped + failed
-        if stopped:
-            self._status.set_state("CANCELLED", "waiting")
-            self._progress.set(completed / total if total else 0)
-        else:
-            self._status.set_state(
-                "DONE" if not failed else "ERROR",
-                "done" if not failed else "error",
-            )
-            self._progress.set(1)
-        suffix = f" · cancelled after {completed}/{total}" if stopped else f" · {total} total"
-        self._summary.configure(
-            text=f"rendered {rendered} · skipped/preview {skipped} · failed {failed}{suffix}"
+        summary = f"rendered {rendered} · skipped/preview {skipped} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
         )

@@ -64,7 +64,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Preview, confirm, logging | Batch tools use preview/manifests; destructive compressor confirms | Good, verify per new feature |
 | Atomic output | Common pattern is temporary output then replace | Good, standardize and test crash recovery |
 | Error envelope | Shared `ok`/`err` helpers exist | Good, add conformance tests |
-| Durable batch execution | Runner/store plus shell queue implemented for fourteen contrasting image, media, document, material, analysis, archive, grouped-audit, dataset, and hybrid workflows | Good proven core; migrate remaining tools individually |
+| Durable batch execution | Runner/store plus shell queue implemented for fifteen contrasting image, media, document, material, external-render, analysis, archive, grouped-audit, dataset, and hybrid workflows | Good proven core; migrate remaining tools individually |
 | Failure isolation/recovery | Per-item quarantine/retry, pause/resume/cancel, history, and finalization warnings | Good contract; manual item retry remains |
 | Content identity/cache | No shared persistent content-addressed cache | Missing |
 | Incremental recomputation | Mostly output-exists checks | Partial and settings-blind |
@@ -89,7 +89,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Material Converter | map discovery, channel operations, grouped durable queue, set-wide identity and validated provenance | Deterministic | canonical MaterialX/OpenPBR mapping, color-space validation, packed-map presets |
 | Sprite Viewer | Pillow frames/grid/connected-component slices | Deterministic | Aseprite metadata, trim/extrude/deduplicate, atlas export and timing preservation |
 | Tileset Checker | opposite-edge score, deterministic previews, durable queue, exact artifact validation, collision protection | Deterministic | multi-scale/gradient/perceptual seam score calibrated on labeled examples |
-| Texture Renderer | bounded/cancellable user-provided Substance/Material Maker CLIs with owned staging, source protection, successful-exit publication, destination preservation, and bounded log tails | Deterministic orchestration | durable execution, executable/version capability checks, render provenance/cache, preset/schema normalization |
+| Texture Renderer | custom tabbed durable queue over bounded/cancellable user-provided Substance/Material Maker CLIs; owned staging, artifact hashes, exact reuse/repair, atomic provenance, source/destination protection, and bounded log tails | Deterministic orchestration | executable/version capability checks, format-aware Substance validation, shared-stage cache, preset/schema normalization |
 | Package Extractor | cancellable safe stdlib extraction, preview bomb budgets, atomic reports, durable queue, recursive hash validation, collision protection | Deterministic | optional Unity bundle adapter, entry-count profiling, stronger fuzz corpus |
 | Asset Auditor | durable grouped corruption/exact-duplicate checks, indexed dHash grouping, health analysis, cancellable exact report-set validation/reuse | Deterministic | optional embedding escalation only for ambiguous semantic similarity after deterministic candidates |
 | Dataset Manager | durable grouped pair/replace/split/bucket; copy-only planner; JSON-last provenance; exact output reuse and repair | Deterministic | stable hash splits, leakage/duplicate checks, class balance and optional label QA |
@@ -108,8 +108,8 @@ The old audit's startup and package-size numbers were measured against five tool
 ### Batch processing
 
 Files are independent and most batch tools run them serially. This is a safe
-baseline. Fourteen contrasting tools now run serially through the durable shared
-runner; the remaining tools retain existing panel loops until migrated.
+baseline. Fifteen contrasting workflows now run serially through the durable
+shared runner; remaining batch paths retain existing panel loops until migrated.
 Concurrency is not automatically an optimization:
 
 - Pillow/NumPy work may benefit from a small bounded pool.
@@ -185,10 +185,10 @@ Every implementation slice in the roadmap must record:
 
 ## Audit conclusion
 
-The architecture is being evolved, not rewritten. Fourteen durable batch slices and
+The architecture is being evolved, not rewritten. Fifteen durable batch slices and
 the shell-owned queue are implemented and verified without changing
 CustomTkinter or proven processing algorithms. They now cover in-process image,
-external-media, grouped-material, analytical, and secure archive contracts.
+external-media/rendering, grouped-material, analytical, and secure archive contracts.
 Next, migrate additional deterministic tools and measure
 resource profiles before adding scheduling lanes or dependency graphs.
 Content-addressed caching remains later work. Improve deterministic

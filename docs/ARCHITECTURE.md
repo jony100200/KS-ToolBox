@@ -25,7 +25,8 @@ The first durable vertical slices are `image_rescale`, `video_compressor`,
 `video_chopper`, `audio_tool`, `icon_normalizer`, `pixel_art`,
 `format_converter`, `material_converter`, `showcase`, `tileset_checker`, and
 `package_extractor`, validated hybrid `alpha_doctor`, plus grouped
-`asset_auditor` and `dataset_manager`.
+`asset_auditor` and `dataset_manager`, and custom-tabbed external
+`texture_renderer`.
 Other tools still use the existing `BaseBatchPanel` loop until migrated and
 verified individually.
 

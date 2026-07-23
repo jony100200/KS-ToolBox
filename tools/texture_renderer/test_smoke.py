@@ -13,17 +13,18 @@ tool actually owns:
                            stub (with or without .exe — cross-platform)
   * cleanup_and_resize   — remove non-PNG junk, resize a real PNG, honest counts
 
-The external-engine invocation itself is a thin `run_cmd` wrapper (render_*),
-not exercised here — there is no Substance/Material Maker binary on CI. The
-dry-run path of render_* IS exercised (it builds the command without shelling
-out).
+External engines are represented by deterministic stubs, so the owned staging,
+publication, validation, timeout, cancellation, and manifest paths run without
+requiring a Substance or Material Maker install.
 
 Run standalone:  python -m tools.texture_renderer.test_smoke
 Skips cleanly (prints SKIP, returns 0) if Pillow is not installed.
 """
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -153,6 +154,16 @@ def _test_cleanup_and_resize(tmp: Path) -> None:
 
     # missing directory → clean error envelope, not a crash
     assert e.cleanup_and_resize(tmp / "nope", resize_to=None)["error"]
+    limited = tmp / "limited"; limited.mkdir()
+    (limited / "one.txt").write_text("1")
+    (limited / "two.txt").write_text("2")
+    original_entry_limit = e.MAX_RENDER_STAGE_ENTRIES
+    e.MAX_RENDER_STAGE_ENTRIES = 1
+    try:
+        bounded = e.cleanup_and_resize(limited, resize_to=None)
+    finally:
+        e.MAX_RENDER_STAGE_ENTRIES = original_entry_limit
+    assert bounded["error"] and bounded["error_type"] == "cleanup.limit"
 
 
 def _test_dry_run(tmp: Path) -> None:
@@ -198,15 +209,13 @@ def _test_isolated_publish(tmp: Path) -> None:
         (stage / "generated.tres").write_text("owned sidecar")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
+    mm_opts = e.RenderOptions(
+        engine_path=str(mm_engine), input_dir=str(tmp),
+        output_dir=str(output_root), group=True, resize=64,
+    )
     e._run = successful_mm
     try:
-        result = e.render_material_maker(
-            mm_project,
-            e.RenderOptions(
-                engine_path=str(mm_engine), input_dir=str(tmp),
-                output_dir=str(output_root), group=True, resize=64,
-            ),
-        )
+        result = e.render_material_maker(mm_project, mm_opts)
     finally:
         e._run = original_run
     assert result.action == "rendered", result.reason
@@ -217,6 +226,18 @@ def _test_isolated_publish(tmp: Path) -> None:
     with Image.open(mm_destination / "generated.png") as generated:
         assert generated.size == (64, 64)
     assert not (output_root / ".ks-render-stage").exists()
+    assert result.artifacts and e.validate_result(
+        result, mm_opts, "mm", expected_project=mm_project
+    )
+    manifest = e.write_manifest([result], mm_opts, "mm", "abc123")
+    payload = json.loads(Path(manifest).read_text(encoding="utf-8"))
+    assert payload["schema"] == "ks_texture_renderer.v1"
+    assert payload["renderer"] == "mm" and len(payload["results"]) == 1
+    generated_path = mm_destination / "generated.png"
+    generated_path.write_bytes(b"X" * generated_path.stat().st_size)
+    assert not e.validate_result(
+        result, mm_opts, "mm", expected_project=mm_project
+    ), "same-size corruption must invalidate exact reuse"
 
     failed_project = tmp / "failed.ptex"
     failed_project.write_text("project")
@@ -246,18 +267,19 @@ def _test_isolated_publish(tmp: Path) -> None:
         (stage / "archive_basecolor.tga").write_bytes(b"rendered")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
+    sbs_opts = e.RenderOptions(
+        engine_path=str(sbs_engine), input_dir=str(tmp),
+        output_dir=str(output_root), group=True,
+    )
     e._run = successful_sbs
     try:
-        substance = e.render_substance(
-            sbs_project,
-            e.RenderOptions(
-                engine_path=str(sbs_engine), input_dir=str(tmp),
-                output_dir=str(output_root), group=True,
-            ),
-        )
+        substance = e.render_substance(sbs_project, sbs_opts)
     finally:
         e._run = original_run
     assert substance.action == "rendered"
+    assert substance.artifacts and e.validate_result(
+        substance, sbs_opts, "sbs", expected_project=sbs_project
+    )
     assert (output_root / sbs_project.stem / "archive_basecolor.tga").is_file()
     assert not (output_root / ".ks-render-stage").exists()
 
@@ -342,6 +364,29 @@ def _test_isolated_publish(tmp: Path) -> None:
     assert not (cancelled_root / cancelled_project.stem).exists()
     assert not (cancelled_root / ".ks-render-stage").exists()
 
+    timeout_project = tmp / "timeout.sbsar"
+    timeout_project.write_text("archive")
+    timeout_root = tmp / "timeout_output"
+
+    def timeout_run(command, **_kwargs):
+        stage = Path(command[command.index("--output-path") + 1])
+        (stage / "partial.tga").write_bytes(b"partial")
+        raise subprocess.TimeoutExpired(command, 1)
+
+    e._run = timeout_run
+    try:
+        timed_out = e.render_substance(
+            timeout_project,
+            e.RenderOptions(
+                engine_path=str(sbs_engine), input_dir=str(tmp),
+                output_dir=str(timeout_root), group=True,
+            ),
+        )
+    finally:
+        e._run = original_run
+    assert timed_out.action == "failed" and timed_out.retryable
+    assert not (timeout_root / ".ks-render-stage").exists()
+
     rollback_stage = tmp / "rollback_stage"
     (rollback_stage / "sub").mkdir(parents=True)
     (rollback_stage / "a.png").write_bytes(b"new first output")
@@ -364,6 +409,22 @@ def _test_isolated_publish(tmp: Path) -> None:
     assert existing.read_bytes() == b"original first output"
     assert not (rollback_dest / "sub" / "b.png").exists()
 
+    bounded_stage = tmp / "bounded_stage"
+    bounded_stage.mkdir()
+    (bounded_stage / "one.png").write_bytes(b"1")
+    (bounded_stage / "two.png").write_bytes(b"2")
+    original_output_limit = e.MAX_RENDER_OUTPUTS
+    e.MAX_RENDER_OUTPUTS = 1
+    try:
+        try:
+            e._stage_files(bounded_stage)
+        except OSError:
+            pass
+        else:
+            raise AssertionError("renderer output limit was not enforced")
+    finally:
+        e.MAX_RENDER_OUTPUTS = original_output_limit
+
 
 def main() -> int:
     try:
@@ -384,8 +445,8 @@ def main() -> int:
         _test_log2_res()
         _test_cmds()
 
-    print("PASS: texture_renderer — discovery, commands, isolated publish, "
-          "source/stage guards, cleanup/resize, and dry-run verified.")
+    print("PASS: texture_renderer — bounded discovery/process paths, isolated "
+          "publish, artifact validation, provenance, and recovery guards verified.")
     return 0
 
 

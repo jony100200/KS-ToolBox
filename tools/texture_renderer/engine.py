@@ -25,11 +25,12 @@ anti-patterns fixed on the way in (see README).
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass, asdict, replace
+from dataclasses import dataclass, asdict, field, replace
 from pathlib import Path
 
 from toolbox.engine_common import (
@@ -37,6 +38,7 @@ from toolbox.engine_common import (
     ok as _ok,
     err as _err,
     run_cancellable_cmd as _run,
+    sha256_file,
 )
 
 # Substance resolutions are set via a log2 pair ("$outputsize@10,10" == 1024²).
@@ -48,6 +50,8 @@ _TARGET_ENGINES = {"Unreal", "Godot", "Unity", "Blender"}
 _MIN_RESIZE = 16
 _MAX_RESIZE = 16_384
 MAX_RENDER_PROJECTS = 10_000
+MAX_RENDER_OUTPUTS = 4_096
+MAX_RENDER_STAGE_ENTRIES = 100_000
 MAX_RENDER_TIMEOUT = 24 * 60 * 60
 MAX_RENDER_LOG_BYTES = 1024 * 1024
 Cancelled = Callable[[], bool] | None
@@ -197,7 +201,14 @@ def cleanup_and_resize(
             return _err("dep.missing", "Pillow (PIL) required to resize but not installed")
 
     cleaned = resized = errors = 0
-    for root_dir, _dirs, files in os.walk(out):
+    entries = 0
+    for root_dir, directories, files in os.walk(out):
+        entries += len(directories) + len(files)
+        if entries > MAX_RENDER_STAGE_ENTRIES:
+            return _err(
+                "cleanup.limit",
+                f"renderer stage exceeds the {MAX_RENDER_STAGE_ENTRIES} entry limit",
+            )
         for name in files:
             fp = Path(root_dir) / name
             _cancelled(cancelled, "texture-stage-postprocess", fp)
@@ -317,6 +328,8 @@ class Result:
     reason: str = ""
     out_dir: str = ""
     detail: str = ""
+    artifacts: list[dict] = field(default_factory=list)
+    retryable: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -391,19 +404,41 @@ def _stage_files(
     cancelled: Cancelled = None,
 ) -> list[Path]:
     files: list[Path] = []
-    for path in sorted(stage.rglob("*"), key=lambda item: str(item).casefold()):
-        _cancelled(cancelled, "texture-output-enumeration", path)
-        if path.is_symlink():
-            raise OSError(f"renderer produced a symlink: {path}")
-        if not path.is_file():
-            continue
-        if path.name == _STAGE_MARKER:
-            continue
-        if suffix is None or path.suffix.lower() == suffix:
-            if path.stat().st_size <= 0:
-                raise OSError(f"renderer produced an empty file: {path.name}")
-            files.append(path)
-    return files
+    entries = 0
+
+    def raise_walk_error(error: OSError) -> None:
+        raise error
+
+    for current, directories, names in os.walk(
+        stage, topdown=True, onerror=raise_walk_error, followlinks=False
+    ):
+        current_path = Path(current)
+        _cancelled(cancelled, "texture-output-enumeration", current_path)
+        entries += len(directories) + len(names)
+        if entries > MAX_RENDER_STAGE_ENTRIES:
+            raise OSError(
+                f"renderer stage exceeds the {MAX_RENDER_STAGE_ENTRIES} entry limit"
+            )
+        for name in directories:
+            path = current_path / name
+            if path.is_symlink():
+                raise OSError(f"renderer produced a symlink: {path}")
+        for name in names:
+            path = current_path / name
+            _cancelled(cancelled, "texture-output-enumeration", path)
+            if path.is_symlink():
+                raise OSError(f"renderer produced a symlink: {path}")
+            if path.name == _STAGE_MARKER:
+                continue
+            if suffix is None or path.suffix.lower() == suffix:
+                if path.stat().st_size <= 0:
+                    raise OSError(f"renderer produced an empty file: {path.name}")
+                files.append(path)
+                if len(files) > MAX_RENDER_OUTPUTS:
+                    raise OSError(
+                        f"renderer produced more than {MAX_RENDER_OUTPUTS} outputs"
+                    )
+    return sorted(files, key=lambda item: str(item).casefold())
 
 
 def _publish_stage(
@@ -412,7 +447,7 @@ def _publish_stage(
     files: list[Path],
     protected_paths=(),
     cancelled: Cancelled = None,
-) -> int:
+) -> list[dict]:
     if not files:
         raise OSError("renderer produced no output files")
     protected = {
@@ -428,6 +463,10 @@ def _publish_stage(
         resolved_target = target.resolve(strict=False)
         if not resolved_target.is_relative_to(destination_root):
             raise OSError(f"render output escapes its destination: {target}")
+        if target.suffix.lower() in {".sbsar", ".ptex"}:
+            raise OSError(
+                f"renderer output uses a protected project extension: {target}"
+            )
         if resolved_target in protected:
             raise OSError(f"render output would replace a protected file: {target}")
         if resolved_target in targets:
@@ -440,6 +479,7 @@ def _publish_stage(
     backup_root = stage / ".ks-publish-backup"
     backups: dict[Path, Path] = {}
     published: list[Path] = []
+    artifacts: list[dict] = []
     try:
         for index, (_source, target, _size) in enumerate(planned):
             _cancelled(cancelled, "texture-output-backup", target)
@@ -458,6 +498,11 @@ def _publish_stage(
             published.append(target)
             if target.stat().st_size != source_size:
                 raise OSError(f"published file size changed: {target}")
+            artifacts.append({
+                "path": str(target.resolve(strict=False)),
+                "bytes": source_size,
+                "sha256": sha256_file(target, cancelled=cancelled),
+            })
     except BaseException as ex:
         rollback_errors: list[str] = []
         for target in reversed(published):
@@ -477,7 +522,7 @@ def _publish_stage(
         if isinstance(ex, CommandCancelled) and not rollback_errors:
             raise
         raise OSError(f"atomic publication failed: {ex}{detail}") from ex
-    return len(published)
+    return artifacts
 
 
 def _discard_stage(stage: Path, output_root: Path) -> str:
@@ -578,7 +623,7 @@ def render_substance(
     except subprocess.TimeoutExpired:
         cleanup = _discard_stage(stage, output_root)
         return Result(str(project), "failed", f"sbsrender timed out{cleanup}",
-                      out_dir=str(dest), detail="render.timeout")
+                      out_dir=str(dest), detail="render.timeout", retryable=True)
     except OSError as ex:
         cleanup = _discard_stage(stage, output_root)
         return Result(
@@ -592,7 +637,7 @@ def render_substance(
                       f"{(r.stderr or '').strip()[-200:]}{cleanup}",
                       out_dir=str(dest), detail="render.failed")
     try:
-        published = _publish_stage(
+        artifacts = _publish_stage(
             stage, dest, _stage_files(stage, cancelled=cancelled),
             [project, opts.engine_path, *opts.protected_paths],
             cancelled,
@@ -608,7 +653,8 @@ def render_substance(
         )
     return Result(
         str(project), "rendered",
-        f"rendered {published} file(s) at {opts.resolution}", out_dir=str(dest),
+        f"rendered {len(artifacts)} file(s) at {opts.resolution}",
+        out_dir=str(dest), artifacts=artifacts,
     )
 
 
@@ -659,7 +705,7 @@ def render_material_maker(
     except subprocess.TimeoutExpired:
         cleanup = _discard_stage(stage, output_root)
         return Result(str(project), "failed", f"material_maker timed out{cleanup}",
-                      out_dir=str(dest), detail="render.timeout")
+                      out_dir=str(dest), detail="render.timeout", retryable=True)
     except OSError as ex:
         cleanup = _discard_stage(stage, output_root)
         return Result(
@@ -694,7 +740,7 @@ def render_material_maker(
             out_dir=str(dest), detail="cleanup-errors",
         )
     try:
-        published = _publish_stage(
+        artifacts = _publish_stage(
             stage, dest, _stage_files(stage, ".png", cancelled),
             [project, opts.engine_path, *opts.protected_paths],
             cancelled,
@@ -711,5 +757,148 @@ def render_material_maker(
     reason = f"exported for {opts.target_engine}; removed {counts['cleaned']} junk file(s)"
     if opts.resize is not None:
         reason += f"; resized {counts['resized']} PNG(s) to {opts.resize}px"
-    reason += f"; published {published} PNG(s)"
-    return Result(str(project), "rendered", reason, out_dir=str(dest))
+    reason += f"; published {len(artifacts)} PNG(s)"
+    return Result(
+        str(project), "rendered", reason, out_dir=str(dest),
+        artifacts=artifacts,
+    )
+
+
+def validate_result(
+    result: Result,
+    opts: RenderOptions,
+    kind: str,
+    *,
+    expected_project: str | Path | None = None,
+    cancelled: Cancelled = None,
+) -> bool:
+    """Validate stored renderer artifacts before an exact completed-job reuse."""
+    normalized, _ = normalized_options(opts, kind)
+    if normalized is None or result.retryable or result.action == "failed":
+        return False
+    if expected_project is not None and (
+        Path(result.project).resolve(strict=False)
+        != Path(expected_project).resolve(strict=False)
+    ):
+        return False
+    if result.action == "dry-run":
+        return normalized.dry_run and not result.artifacts
+    if normalized.dry_run or result.action != "rendered" or not result.artifacts:
+        return False
+    if len(result.artifacts) > MAX_RENDER_OUTPUTS:
+        return False
+
+    expected_root = _dest_for(Path(result.project), normalized).resolve(strict=False)
+    if Path(result.out_dir).resolve(strict=False) != expected_root:
+        return False
+    seen: set[Path] = set()
+    try:
+        for record in result.artifacts:
+            if not isinstance(record, dict):
+                return False
+            path = Path(record["path"])
+            resolved = path.resolve(strict=False)
+            if (
+                resolved in seen
+                or not resolved.is_relative_to(expected_root)
+                or path.is_symlink()
+                or not path.is_file()
+            ):
+                return False
+            seen.add(resolved)
+            size = record["bytes"]
+            digest = record["sha256"]
+            if (
+                isinstance(size, bool)
+                or not isinstance(size, int)
+                or size <= 0
+                or not isinstance(digest, str)
+                or len(digest) != 64
+                or path.stat().st_size != size
+                or sha256_file(path, cancelled=cancelled) != digest
+            ):
+                return False
+            if kind == "mm":
+                if path.suffix.lower() != ".png":
+                    return False
+                from PIL import Image
+                with Image.open(path) as image:
+                    image.load()
+                    if image.width <= 0 or image.height <= 0:
+                        return False
+                    if normalized.resize is not None and (
+                        image.width != normalized.resize
+                        or image.height != normalized.resize
+                    ):
+                        return False
+    except CommandCancelled:
+        raise
+    except (ImportError, KeyError, OSError, TypeError, ValueError):
+        return False
+    return True
+
+
+def write_manifest(
+    results: list[Result],
+    opts: RenderOptions,
+    kind: str,
+    job_id: str,
+) -> str | None:
+    """Atomically write one bounded, reproducible manifest for a real batch."""
+    normalized, options_error = normalized_options(opts, kind)
+    if normalized is None:
+        raise OSError(f"cannot write renderer manifest: {options_error}")
+    if normalized.dry_run:
+        return None
+    if len(results) > MAX_RENDER_PROJECTS:
+        raise OSError(
+            f"cannot write renderer manifest: more than {MAX_RENDER_PROJECTS} results"
+        )
+    if (
+        not job_id
+        or len(job_id) > 64
+        or any(character not in "0123456789abcdef-" for character in job_id.lower())
+    ):
+        raise OSError("cannot write renderer manifest: invalid job id")
+
+    engine = Path(normalized.engine_path)
+    try:
+        engine_stat = engine.stat()
+    except OSError as ex:
+        raise OSError(f"cannot inspect renderer executable: {ex}") from ex
+    settings = asdict(normalized)
+    settings.pop("protected_paths", None)
+    payload = {
+        "schema": "ks_texture_renderer.v1",
+        "job_id": job_id,
+        "renderer": kind,
+        "engine": {
+            "path": str(engine.resolve(strict=False)),
+            "bytes": engine_stat.st_size,
+            "mtime_ns": engine_stat.st_mtime_ns,
+        },
+        "settings": settings,
+        "results": [result.to_dict() for result in results],
+    }
+    root = Path(normalized.output_dir)
+    target = root / f"texture_render_manifest_{job_id}.json"
+    candidate = root / f".{target.name}.{os.getpid()}.part"
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        with candidate.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(candidate, target)
+    except BaseException as ex:
+        try:
+            candidate.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup:
+            raise OSError(
+                f"renderer manifest failed and staged cleanup failed: {cleanup}"
+            ) from ex
+        raise
+    return str(target)

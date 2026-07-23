@@ -45,6 +45,7 @@ def prepare_batch_completion(
     result_from_record: ResultDecoder,
     write_manifest: ManifestWriter,
     report_path: Path,
+    write_manifest_on_reuse: bool = False,
 ) -> QueueFinalization:
     """Decode terminal items and write auditable outputs without hiding I/O failures."""
     finished_items = tuple(
@@ -59,7 +60,7 @@ def prepare_batch_completion(
     results = tuple(result_from_record(item) for item in finished_items)
     warnings: list[str] = []
     manifest = None
-    if not report.reused:
+    if not report.reused or write_manifest_on_reuse:
         try:
             manifest = write_manifest(list(results))
         except OSError as ex:

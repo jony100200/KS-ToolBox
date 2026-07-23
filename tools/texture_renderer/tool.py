@@ -22,4 +22,4 @@ class TextureRendererTool:
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         from .panel import TextureRendererPanel   # lazy: keeps discovery light
-        return TextureRendererPanel(parent)
+        return TextureRendererPanel(parent, services.queue)

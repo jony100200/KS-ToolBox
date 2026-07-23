@@ -19,9 +19,10 @@ Two sub-modes, one per engine, in a tabbed panel over a shared console:
   cleans the non-PNG sidecars the exporter drops and, optionally, resizes the
   exported PNGs to a target size.
 
-Each mode runs on a worker thread (the UI never blocks), streams per-project
-progress to the console, and can actively stop the exact renderer process tree.
-Every project has a user-set timeout (60 minutes by default).
+Each mode keeps its purpose-built tabbed CustomTkinter controls while using the
+shell-owned durable queue. The UI never blocks; jobs support pause, active
+process-tree cancellation, per-project retry/quarantine, restart recovery, and
+history. Every project has a user-set timeout (60 minutes by default).
 
 External engines never render directly into the final destination. Each
 project receives a confined, KS-owned staging folder. Only nonempty generated
@@ -34,6 +35,13 @@ Publication preflights the complete generated set before its first write.
 Existing same-name outputs are backed up inside the owned stage and restored if
 a later artifact fails, so a caught multi-file publication failure does not
 leave a half-updated destination.
+
+Every published artifact records its path, size, and SHA-256. An identical
+completed job reuses only outputs that still match those records; missing or
+same-size-corrupted outputs rerender only their project. The queue writes an
+atomic JSON morning report plus a versioned batch manifest containing renderer
+settings, executable identity, results, and artifacts. Missing provenance is
+rebuilt even when all rendered outputs are reusable.
 
 ## The two engines are USER-PROVIDED
 
@@ -75,10 +83,16 @@ without touching disk.
 
 Discovery is case-correct on all platforms, prunes the selected output folder,
 rejects symlinked project files, observes cancellation, and caps a batch at
-10,000 projects. Renderer stdout and stderr are continuously drained so the
-native process cannot block, while only the final 1 MiB of each stream stays in
-RAM for diagnostics. Stop normally completes within the process poll/termination
-window and cleans staged work before returning control.
+10,000 projects. One project may publish at most 4,096 files and its stage may
+contain at most 100,000 entries. Renderer stdout and stderr are continuously
+drained so the native process cannot block, while only the final 1 MiB of each
+stream stays in RAM for diagnostics. Stop normally completes within the process
+poll/termination window and cleans staged work before returning control.
+
+Exact completed-job reuse requires one project or distinct grouped destination
+folders. Multi-project flat export remains available, but its intentionally
+shared namespace is rerun sequentially instead of being treated as a safe
+cache.
 
 ## Verify
 
@@ -89,7 +103,10 @@ $env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; H:\Apps\scoop\shims\uv.exe run --no-pr
 The smoke test covers discovery, resolution mapping, argv building, engine
 validation, cleanup+resize, dry-run, isolated staged publication, nonzero-exit
 rollback, cancellation cleanup, bounded discovery/settings, stage ownership,
-source protection, and preservation of pre-existing destination files.
+source protection, artifact hashes, same-size corruption detection, atomic
+provenance, retryable timeout classification, and preservation of pre-existing
+destination files. The shell queue check additionally proves first execution,
+exact reuse, provenance repair, corrupted-output repair, and history.
 External CLIs are represented by deterministic stubs; no Substance or Material
 Maker install is required. The test skips cleanly if Pillow is absent.
 
@@ -105,7 +122,7 @@ Maker install is required. The test skips cleanly if Pillow is absent.
 - `*.exe`-only file-picker filter → no forced filter (Linux/macOS engines have
   no extension).
 - Render logic tangled into the `CTk` window → pure, headless `engine.py`;
-  thin, worker-threaded `panel.py`.
+  thin, queue-backed custom `panel.py`.
 
 ## Credit
 

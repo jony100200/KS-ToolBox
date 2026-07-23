@@ -7,14 +7,17 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 _TERMINAL_STATES = {"completed", "completed_with_warnings", "failed", "cancelled"}
 
 
-def _run_and_wait(app, panel, label: str, expected_items: int) -> str:
-    panel._run()
+def _run_and_wait(
+    app, panel, label: str, expected_items: int, start=None
+) -> str:
+    (start or panel._run)()
     job_id = panel._active_job_id
     assert job_id, f"{label} did not submit a queue job"
     deadline = time.monotonic() + 10
@@ -171,6 +174,76 @@ def main() -> int:
             material_panel._add([material_base, material_rough])
             material_job_id = _run_and_wait(app, material_panel, "Material Converter", 1)
 
+            renderer_input = root / "renderer_input"
+            renderer_input.mkdir()
+            renderer_project = renderer_input / "stone.sbsar"
+            renderer_project.write_bytes(b"stub substance archive")
+            renderer_engine = root / (
+                "sbsrender.exe" if os.name == "nt" else "sbsrender"
+            )
+            renderer_engine.write_bytes(b"stub renderer executable")
+            renderer_out = root / "renderer_out"
+            app._select("texture_renderer")
+            renderer_panel = app._panels["texture_renderer"]
+            for entry, value in (
+                (renderer_panel._sbs_engine, renderer_engine),
+                (renderer_panel._sbs_input, renderer_input),
+                (renderer_panel._sbs_output, renderer_out),
+            ):
+                entry.delete(0, "end")
+                entry.insert(0, str(value))
+            renderer_panel._sbs_dry.deselect()
+
+            from tools.texture_renderer import engine as renderer_module
+            from tools.texture_renderer import panel as renderer_panel_module
+
+            renderer_calls = 0
+            original_renderer_run = renderer_module._run
+            original_confirm = renderer_panel_module.messagebox.askyesno
+
+            def fake_renderer(command, **_kwargs):
+                nonlocal renderer_calls
+                renderer_calls += 1
+                stage = Path(command[command.index("--output-path") + 1])
+                (stage / "stone_basecolor.tga").write_bytes(b"rendered texture")
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+            renderer_module._run = fake_renderer
+            renderer_panel_module.messagebox.askyesno = lambda *_args, **_kwargs: True
+            try:
+                renderer_job_id = _run_and_wait(
+                    app, renderer_panel, "Texture Renderer", 1,
+                    start=renderer_panel._start,
+                )
+                renderer_output = (
+                    renderer_out / renderer_project.stem / "stone_basecolor.tga"
+                )
+                assert renderer_output.read_bytes() == b"rendered texture"
+                renderer_manifest = next(
+                    iter(renderer_out.glob("texture_render_manifest_*.json"))
+                )
+                renderer_manifest.unlink()
+                renderer_reuse_id = _run_and_wait(
+                    app, renderer_panel, "Texture Renderer reuse", 1,
+                    start=renderer_panel._start,
+                )
+                assert renderer_reuse_id == renderer_job_id
+                assert app._services.queue.completion(renderer_job_id).report.reused
+                assert renderer_calls == 1
+                assert renderer_manifest.is_file(), "reuse must repair provenance"
+                renderer_output.write_bytes(b"X" * renderer_output.stat().st_size)
+                renderer_repair_id = _run_and_wait(
+                    app, renderer_panel, "Texture Renderer repair", 1,
+                    start=renderer_panel._start,
+                )
+                assert renderer_repair_id == renderer_job_id
+                assert not app._services.queue.completion(renderer_job_id).report.reused
+                assert renderer_calls == 2
+                assert renderer_output.read_bytes() == b"rendered texture"
+            finally:
+                renderer_module._run = original_renderer_run
+                renderer_panel_module.messagebox.askyesno = original_confirm
+
             app._select("showcase")
             showcase_panel = app._panels["showcase"]
             showcase_panel._add([first, second])
@@ -272,6 +345,7 @@ def main() -> int:
             assert any(item.job_id == audit_job_id for item in app._services.queue.history())
             assert any(item.job_id == dataset_job_id for item in app._services.queue.history())
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
+            assert any(item.job_id == renderer_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
             assert any(item.job_id == package_job_id for item in app._services.queue.history())
@@ -285,7 +359,8 @@ def main() -> int:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, Alpha Doctor, "
-          "Format Converter, Asset Auditor, Dataset Manager, Material Converter, Showcase, Tileset Checker, Package "
+          "Format Converter, Asset Auditor, Dataset Manager, Material Converter, Texture Renderer, "
+          "Showcase, Tileset Checker, Package "
           "Extractor, Audio Tool, Video Compressor, and Video Chopper through the shell "
           "queue; history UI rendered.")
     return 0

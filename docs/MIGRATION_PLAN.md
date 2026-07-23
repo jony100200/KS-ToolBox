@@ -7,12 +7,15 @@ restore until the full release gate passes.
 ## Repository audit result
 
 - 17 discovered and UI-constructible tools.
-- 15 panels inherit `BaseBatchPanel`; the custom Texture Renderer also runs a
-  batch worker.
-- 16 panels define their own `_work` loop.
-- 15 panels define their own manifest path/writer.
-- `BaseBatchPanel` centralizes file selection, run/stop controls, and one worker
-  thread, but not durable job state.
+- 16 panels inherit `BaseBatchPanel`; Texture Renderer keeps a custom two-tab
+  layout while reusing its durable queue lifecycle. Sprite Viewer remains a
+  custom interactive viewer.
+- Four panels retain a compatibility `_work` loop; fifteen production workflows
+  use the shell-owned durable queue.
+- Fifteen panels define a manifest writer; Texture Renderer keeps its
+  format-specific manifest in the headless engine.
+- `BaseBatchPanel` centralizes ordinary file selection plus durable queue
+  controls, polling, completion, reporting, and recovery UI.
 - Tool engines are already headless and mostly use atomic outputs.
 - Optional model and heavy tool imports are lazy.
 
@@ -512,7 +515,7 @@ runner behavior because bounded capture is opt-in.
 | Proposed behavior | Active owned-process-tree cancellation, a strict per-project timeout, continuously drained 1 MiB stdout/stderr tails, strict normalized settings, case-correct/cancellable discovery, output-tree pruning, project-symlink rejection, and a 10,000-project ceiling |
 | Architecture and language | The existing Python headless engine, custom tabbed CustomTkinter panel, and user-provided native CLIs remain; reusable process ownership and bounded capture live in `engine_common`, while renderer-specific validation/staging stays in the tool |
 | Functionality and quality | Substance/Material Maker modes, recursive/flat scanning, grouping, dry run, all four Substance sizes, all four Material Maker targets, and headless resize values from 16–16,384 remain; rendered pixels and native CLI arguments are unchanged |
-| Code and dependency impact | Shared runner 251 → 350 nonblank lines (+99); Texture Renderer engine/panel/tool 665 → 947 (+282) since checkpoint 1 for validation, bounded discovery, cancellation, timeout, cleanup propagation, UI state, and tests; zero dependencies, models, binaries, services, or resident workers added |
+| Code and dependency impact | Shared runner 251 → 350 nonblank lines (+99); Texture Renderer engine/panel/tool 679 → 961 (+282) since checkpoint 1 for validation, bounded discovery, cancellation, timeout, cleanup propagation, UI state, and tests; zero dependencies, models, binaries, services, or resident workers added |
 | Package-size impact | Source-only change; no packaged artifact was rebuilt, so no release-size change is claimed |
 | Startup and runtime impact | Ready-to-mainloop is 120 ms with 29 ms discovery and no optional-heavy imports; nine-run trivial child medians measured 35.5 → 36.0 ms (+0.4 ms), and an owned sleeping process cancelled in 297.0 ms |
 | RAM, VRAM, CPU, disk, and GPU transfer | At most two 1 MiB diagnostic tails plus two reader threads exist for one active renderer process; tails replace unbounded captured logs and create no disk log; no AI/model/VRAM/GPU-transfer change; external-engine peak resources are not claimed measured |
@@ -528,6 +531,47 @@ and security 5. Batch/cache/incremental remain below 4 until durable execution,
 validated provenance, exact reuse, and restart repair are implemented. Storage
 and reliability remain 4 because rollback staging is necessary and a hard kill
 cannot make a multi-file destination transaction atomic.
+
+### Slice 3o — checkpoint 3: Texture Renderer durable queue and provenance
+
+Texture Renderer keeps its purpose-built Substance/Material Maker tabs but now
+inherits the proven `BaseBatchPanel` queue lifecycle. Each discovered project is
+one durable item. The renderer executable is an identity dependency, normalized
+settings are part of the job key, timeouts receive one controlled retry, failed
+projects quarantine independently, and pause/cancel/restart recovery come from
+the shell-owned queue rather than another private worker implementation.
+
+Published files now carry path, size, and SHA-256 records. Completed grouped
+jobs with distinct project destinations validate every stored artifact before
+reuse; missing or same-size-corrupted outputs reset only their project.
+Multi-project flat exports preserve their legacy sequential shared-namespace
+behavior but deliberately disable completed-job reuse because independent
+validation cannot prove overlapping external filenames safe. A versioned atomic
+JSON manifest records executable identity, settings, results, and artifacts;
+reuse repairs missing provenance without rerendering valid outputs.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | A private panel worker held only in-memory progress; no pause, persisted item state, retry/quarantine, restart recovery, artifact identity, completion report, render reuse, or batch provenance existed |
+| Proposed behavior | Shared durable per-project queue, pause/resume/cancel, one retry for timeout, quarantine, restart recovery, engine/stat-aware job identity, bounded artifact records, exact hash validation/reuse/repair, atomic provenance, and morning report |
+| Architecture and language | The custom two-tab CustomTkinter layout remains; it subclasses `BaseBatchPanel` only for its proven queue lifecycle while tool-specific discovery/options/UI stay local and all render/validation/manifest logic remains headless Python around user-provided native CLIs |
+| Functionality and quality | Substance and Material Maker settings, flat/grouped output, dry run, resize, confirmation, and native render output remain; no pixel algorithm or CLI setting changed. Material Maker reuse additionally decodes PNGs and verifies requested dimensions; arbitrary Substance formats receive nonempty size plus SHA-256 validation |
+| Code and dependency impact | `batch_reporting` 69 → 70 nonblank lines (+1 opt-in provenance-on-reuse flag); Texture Renderer engine/panel/tool 961 → 1,220 (+259 for artifact bounds/hashes, validation, manifest, queue adapter, reuse policy, and recovery UI); zero dependencies, models, binaries, services, or extra resident workers added |
+| Package-size impact | Source-only change; no packaged artifact was rebuilt, so no release-size change is claimed |
+| Startup and runtime impact | Ready-to-mainloop measured 120 ms before and a five-run 115 ms median after, with 29 ms median discovery, within the established 99–197 ms range and with no optional-heavy imports. For 100 × 16 KiB staged outputs, publication measured 71.5 → 581.3 ms (+509.8 ms, +713%, 5.10 ms/output) because professional SHA-256 provenance reads every output; exact reuse validation measured 53.0 ms and atomic manifest writing 1.6 ms |
+| RAM, VRAM, CPU, disk, and GPU transfer | Hashes stream through the shared 1 MiB buffer; one project is the queue work unit; artifact records cap at 4,096 outputs and stage enumeration at 100,000 entries; SQLite/report storage grows with bounded artifact metadata; no model, GPU, VRAM, or GPU transfer is introduced; external-engine peak resources are not claimed measured |
+| Batch, cache, and incremental impact | Fifteen real shell workflows now use the durable queue. Recovery/retry/quarantine and repair granularity is one project; valid grouped/single-project results skip native inference/rendering; flat or duplicate grouped destinations rerun sequentially instead of claiming unsafe cache reuse; no shared content-addressed render-stage cache exists yet |
+| AI and model-loading impact | Zero AI calls and model loads; exact deterministic orchestration and validation remain appropriate |
+| Reliability, security, tests, and benchmarks | Smoke covers output/stage ceilings, hashes, MM decode/dimensions, same-size corruption, atomic manifest, retryable timeout, cancellation cleanup, rollback, source protection, and strict options. The real CustomTkinter queue test proves first native-stub execution, identical-job reuse with zero renderer calls, deleted-provenance repair, corrupted-output rerender, controls, and history. Generic queue tests cover persistence, retry, pause, cancellation, recovery, and subscriber isolation |
+| Risks and rollback | SHA-256 publication adds a measured 5.10 ms per tiny output on this Windows filesystem; Substance formats cannot all receive codec-specific decoding; executable identity is path/size/mtime rather than a queried engine version; detached grandchildren and hard-kill multi-file publication remain platform limits; no cross-job stage cache exists. Revert the panel queue adapter, result artifact fields/validator/manifest, and opt-in reporting flag together; checkpoint-2 staging and process controls remain independently usable |
+
+Checkpoint cartridge score: functional completeness 5, output quality 5,
+runtime 4, startup 5, memory 4, storage 4, batch 5, cache 4, incremental
+execution 4, AI efficiency 5, reliability 5, maintainability 4, portability 5,
+and security 5. The 4s are explicit boundaries: cryptographic validation has a
+measured cost, artifact/provenance records consume bounded storage, cache reuse
+is per project rather than a shared stage graph, peak resources remain
+uninstrumented, and the custom adapter necessarily owns mode-specific wiring.
 
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
