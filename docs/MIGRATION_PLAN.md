@@ -397,6 +397,52 @@ still on the compatibility loop, has no output-provenance cache, and cannot
 incrementally reuse individual cutouts. The 4s retain measured or known
 boundaries rather than claiming the active slice is finished.
 
+#### Checkpoint 2 — durable, validated per-image execution
+
+Alpha Doctor now submits one durable item per source image through the shared
+shell queue while retaining its custom CustomTkinter options screen. Pause and
+restart recovery occur at image boundaries; copy-independent failures retry
+once and then quarantine without stopping later images. Chroma, edge-flood,
+post-processing boundaries, model verification/download, output validation,
+and streamed hashes observe cancellation. A native Pillow operation or ONNX
+inference call remains non-interruptible only for that individual call.
+
+Successful PNGs render to a staged candidate, decode as RGBA at the original
+dimensions, recompute alpha coverage, stream SHA-256, and commit atomically.
+The compact persisted result records that artifact. Completed work is reused
+only while the exact PNG reopens and its dimensions, mode, coverage, size, and
+hash still match; a same-size corruption deterministically misses and repairs.
+The CSV manifest now rewrites atomically per completed batch rather than
+appending duplicate rows or silently dropping write errors.
+
+Model downloads now stream instead of using an uncancellable convenience call,
+enforce a 512 MiB ceiling, clean candidates on cancellation/failure, and hash
+the received bytes without a second model read. Compatible AI items retain the
+verified ONNX session, preserving the useful residency behavior.
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-owned sequential loop, boundary-only stop, append-only best-effort CSV, and assumed PNG success → per-image durable queue, retry/quarantine/checkpoints/history, active cancellation boundaries, staged validated PNGs, atomic CSV, exact reuse and repair |
+| Architecture/language | Existing custom CustomTkinter screen and NumPy/Pillow/optional ONNX engine remain; `services.queue`, typed item/result contracts, shared completion reporting, and engine-local validators are composed at the real UI/worker boundary |
+| Functionality and quality | All deterministic and optional AI methods, post-ops, mirror paths, preview, coverage gate, and model reuse remain; every claimed cutout now proves RGBA mode, source dimensions, alpha coverage, nonempty bytes, and SHA-256 before commit |
+| Code and dependency impact | Checkpoint-1 Alpha Doctor production source 602 → 870 nonblank lines (+268 for cancellable model/output paths, typed artifacts, exact validation, queue adapter, atomic manifest, and explicit failure handling); zero dependencies, models, assets, binaries, processes, or services added |
+| Package-size impact | Source-only change with no runtime payload; a packaged artifact was not rebuilt, so no total package-size change is claimed |
+| Startup and runtime impact | Ready-to-mainloop measured 132 ms with 28 ms discovery and no NumPy/ONNX startup import; paired seven-run 512² cutout medians measured 12.3 → 15.4 ms (+3.1 ms, +25.5%) for independent decode/coverage/hash validation; exact unchanged-output validation measured 2.8 ms |
+| RAM, VRAM, CPU, disk, and GPU transfer | One image remains the bounded work unit; validation reuses Pillow decode memory plus a NumPy view and streams hashes in 1 MiB chunks; model download caps at 512 MiB and streams at 1 MiB; ONNX sessions remain resident for compatible batches; peak RAM/VRAM/CPU/disk/GPU transfer are not claimed measured |
+| AI and model-loading impact | Deterministic jobs make zero AI calls; AI loads only when explicitly selected and installed/approved, verifies once per changed model version, then retains one compatible session; inference runs CPU-only in the existing process |
+| Batch, cache, and incremental impact | Recovery/retry/quarantine granularity is one source image; identical job identity validates each stored item and invokes no matte for valid outputs; measured validation is 81.8% faster than execution on the sample; cache identity remains path/size/mtime plus normalized output-affecting settings rather than a shared content-addressed stage cache |
+| Reliability and security | Output/source collision preflight and headless self-target guard remain; candidates validate before atomic replace; cancellation cleans partial PNG/model files; same-size corruption repairs; ephemeral download consent is excluded from output identity; network access remains opt-in and bounded |
+| Tests and benchmarks | Focused smoke covers three deterministic methods, source snapshots, collisions, malformed settings, model consent/checksum/download cancellation, PNG artifact validation, same-size corruption, and immediate cancellation; real fourteen-workflow CustomTkinter queue check proves first execution, exact reuse, repair, manifest, history, and control recovery; full 22-unit/17-panel/17-smoke gate passes |
+| Risks and rollback | Pillow/NumPy/ONNX still run in the shared app process; one native decode/filter/inference call cannot be cancelled mid-call; skipped low-coverage work can leave a prior destination untouched but reports that it was not saved; manifest is completion metadata rather than part of per-item cache validation; input job identity is metadata-based. Revert tool/panel queue adapter and artifact/cancellation layer together; checkpoint-1 safety guards remain independently useful |
+
+Completed-slice cartridge score: functional completeness 5, output quality 5,
+runtime 4, startup 5, memory 4, storage 5, batch 5, cache 4, incremental
+execution 4, AI efficiency 5, reliability 5, maintainability 4, portability 5,
+and security 5. The 4s are deliberate measured boundaries: professional
+validation has a 3.1 ms sample cost, peak resources remain uninstrumented,
+reuse is per-output rather than stage-content-addressed, and native/AI process
+isolation remains a separate evidence-driven decision.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

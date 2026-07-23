@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+from dataclasses import asdict
 from pathlib import Path
 from tkinter import messagebox
 
@@ -14,6 +15,8 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 _METHOD_LABELS = {
@@ -30,8 +33,8 @@ class AlphaDoctorPanel(BaseBatchPanel):
     RESULTS_ICON = Icons.BROOM
     RUN_LABEL = "Preview & Cut"
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
         self._on_method(self._method.get())
 
     # -- options ---------------------------------------------------------------
@@ -146,7 +149,9 @@ class AlphaDoctorPanel(BaseBatchPanel):
             if self._stop.is_set():
                 self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
             self.after(0, self._logline, f"[{i}/{len(files)}] {f.name} …", t.TEXT_MUTED)
-            res = e.process(f, opts); results.append(res)
+            res = e.process(
+                f, opts, cancelled=lambda: self._stop.is_set()
+            ); results.append(res)
             if res.action == "cut":
                 cut += 1
             elif res.action in ("skipped", "dry-run"):
@@ -157,23 +162,102 @@ class AlphaDoctorPanel(BaseBatchPanel):
         manifest = self._write_manifest(opts, results)
         self.after(0, self._done, cut, skipped, failed, manifest)
 
+    def _build_submission(
+        self, files: list[Path], opts: e.AlphaOptions
+    ) -> QueueSubmission:
+        settings = asdict(opts)
+        settings.pop("allow_model_download")
+        definition = JobDefinition.create(
+            tool_id="alpha_doctor",
+            tool_version="1",
+            workflow_version="alpha-cutout.v2",
+            inputs=files,
+            settings=settings,
+            max_retries=1,
+        )
+
+        def classify(result: e.Result) -> ItemOutcome:
+            data = result.to_dict()
+            if result.action == "cut":
+                if result.degraded:
+                    return ItemOutcome.warning(data, result.reason)
+                return ItemOutcome.completed(data, result.reason)
+            if result.action in {"skipped", "dry-run"}:
+                return ItemOutcome.skipped(data, result.reason)
+            return ItemOutcome.failed(
+                result.reason, retryable=result.retryable, data=data
+            )
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Alpha Doctor {opts.method.replace('_', ' ').title()} · {len(files)} image(s)",
+            execute=lambda path, token: e.process(
+                path, opts, cancelled=lambda: token.is_cancelled
+            ),
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts, expected_src=item.input_path
+            ),
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="alpha_doctor"
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        cut = sum(result.action == "cut" for result in results)
+        skipped = sum(result.action in {"skipped", "dry-run"} for result in results)
+        failed = len(results) - cut - skipped
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            cut, skipped, failed, payload.manifest, remaining,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"src", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path, "failed", item.details or "item quarantined",
+            detail="batch.quarantined",
+        )
+
     def _write_manifest(self, opts: e.AlphaOptions, results: list) -> str | None:
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "cutout_manifest.csv"
+        candidate = root / "cutout_manifest.part.csv"
         try:
-            root.mkdir(parents=True, exist_ok=True)
-            path = root / "cutout_manifest.csv"
-            new = not path.exists()
-            with open(path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["src", "action", "coverage", "out_path", "detail", "reason"])
-                for r in results:
-                    w.writerow([r.src, r.action, f"{r.coverage:.3f}", r.out_path, r.detail, r.reason])
-            return str(path)
-        except OSError:
-            return None
+            with open(candidate, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    "src", "action", "coverage", "out_path", "detail", "reason"
+                ])
+                for result in results:
+                    writer.writerow([
+                        result.src, result.action, f"{result.coverage:.3f}",
+                        result.out_path, result.detail, result.reason,
+                    ])
+            candidate.replace(path)
+        except BaseException as ex:
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup:
+                raise OSError(
+                    f"manifest failed and staged cleanup failed: {cleanup}"
+                ) from ex
+            raise
+        return str(path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
@@ -184,10 +268,13 @@ class AlphaDoctorPanel(BaseBatchPanel):
                  if res.action == "cut" else f"  — {res.reason}")
         self._logline(f"  {icon} {name}{extra}", color)
 
-    def _done(self, cut, skipped, failed, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"cut {cut} · skipped {skipped} · failed {failed}")
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+    def _done(self, cut, skipped, failed, manifest=None, remaining=0,
+              report_path=None, job_state=JobState.COMPLETED,
+              recovered=False, reused=False):
+        summary = f"cut {cut} · skipped {skipped} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

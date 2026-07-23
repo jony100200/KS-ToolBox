@@ -80,6 +80,31 @@ def main() -> int:
             pixel_panel._add([first, second])
             pixel_job_id = _run_and_wait(app, pixel_panel, "Pixel Art Converter", 2)
 
+            alpha_source = root / "alpha_subject.png"
+            alpha_image = Image.new("RGB", (64, 64), (0, 255, 0))
+            alpha_image.paste((220, 30, 30), (16, 16, 48, 48))
+            alpha_image.save(alpha_source)
+            app._select("alpha_doctor")
+            alpha_panel = app._panels["alpha_doctor"]
+            alpha_panel._add([alpha_source])
+            alpha_panel._dry.deselect()
+            alpha_out = root / "alpha_out"
+            alpha_panel._out_entry.insert(0, str(alpha_out))
+            alpha_job_id = _run_and_wait(app, alpha_panel, "Alpha Doctor", 1)
+            alpha_output = alpha_out / "alpha_subject.png"
+            assert alpha_output.is_file()
+            assert (alpha_out / "cutout_manifest.csv").is_file()
+            alpha_reuse_id = _run_and_wait(app, alpha_panel, "Alpha Doctor reuse", 1)
+            assert alpha_reuse_id == alpha_job_id
+            assert app._services.queue.completion(alpha_job_id).report.reused
+            alpha_output.write_bytes(b"X" * alpha_output.stat().st_size)
+            alpha_repair_id = _run_and_wait(app, alpha_panel, "Alpha Doctor repair", 1)
+            assert alpha_repair_id == alpha_job_id
+            assert not app._services.queue.completion(alpha_job_id).report.reused
+            with Image.open(alpha_output) as repaired:
+                repaired.load()
+                assert repaired.mode == "RGBA"
+
             app._select("format_converter")
             format_panel = app._panels["format_converter"]
             format_panel._add([first])
@@ -242,6 +267,7 @@ def main() -> int:
             assert any(item.job_id == job_id for item in app._services.queue.history())
             assert any(item.job_id == icon_job_id for item in app._services.queue.history())
             assert any(item.job_id == pixel_job_id for item in app._services.queue.history())
+            assert any(item.job_id == alpha_job_id for item in app._services.queue.history())
             assert any(item.job_id == format_job_id for item in app._services.queue.history())
             assert any(item.job_id == audit_job_id for item in app._services.queue.history())
             assert any(item.job_id == dataset_job_id for item in app._services.queue.history())
@@ -258,7 +284,7 @@ def main() -> int:
         finally:
             app._on_close()
 
-    print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
+    print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, Alpha Doctor, "
           "Format Converter, Asset Auditor, Dataset Manager, Material Converter, Showcase, Tileset Checker, Package "
           "Extractor, Audio Tool, Video Compressor, and Video Chopper through the shell "
           "queue; history UI rendered.")

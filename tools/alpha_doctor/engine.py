@@ -31,6 +31,7 @@ import math
 import re
 import sys
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, asdict, replace
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,9 @@ import numpy as np
 
 from toolbox.engine_common import (
     IMAGE_EXTS,
+    CommandCancelled,
     find_output_collisions as _find_output_collisions,
+    sha256_file,
     ok as _ok,
     err as _err,
 )
@@ -62,6 +65,16 @@ _SESSIONS: dict[str, Any] = {}
 _VERIFIED_MODELS: dict[str, tuple[int, int, str]] = {}
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _MAX_COLOR_DISTANCE = math.sqrt(3 * 255 * 255)
+_MAX_MODEL_BYTES = 512 * 1024 * 1024
+Cancelled = Callable[[], bool] | None
+
+
+def _cancelled(cancelled: Cancelled, stage: str, path: str | Path = "") -> None:
+    if cancelled is not None and cancelled():
+        command = [stage]
+        if path:
+            command.append(str(path))
+        raise CommandCancelled(command)
 
 
 def _hex_to_rgb(s: str) -> np.ndarray:
@@ -89,7 +102,9 @@ def detect_bg_color(rgb: np.ndarray) -> np.ndarray:
     return np.median(b, axis=0)
 
 
-def edge_flood_alpha(rgb: np.ndarray, tol: float = 30.0) -> np.ndarray:
+def edge_flood_alpha(
+    rgb: np.ndarray, tol: float = 30.0, cancelled: Cancelled = None
+) -> np.ndarray:
     """Remove background regions connected to the image border. Marks pixels
     within `tol` of the border colour, then keeps only those reachable from the
     border via morphological reconstruction (border-seeded dilation ∩ that mask).
@@ -102,6 +117,7 @@ def edge_flood_alpha(rgb: np.ndarray, tol: float = 30.0) -> np.ndarray:
     marker[0, :] |= like[0, :]; marker[-1, :] |= like[-1, :]
     marker[:, 0] |= like[:, 0]; marker[:, -1] |= like[:, -1]
     for _ in range(h + w):                                # geodesic reach ≤ h+w; converges early
+        _cancelled(cancelled, "alpha-edge-flood")
         dil = marker.copy()
         dil[1:, :] |= marker[:-1, :]; dil[:-1, :] |= marker[1:, :]
         dil[:, 1:] |= marker[:, :-1]; dil[:, :-1] |= marker[:, 1:]
@@ -112,14 +128,16 @@ def edge_flood_alpha(rgb: np.ndarray, tol: float = 30.0) -> np.ndarray:
     return np.where(marker, 0, 255).astype(np.uint8)
 
 
-def matte(rgb: np.ndarray, opts: "AlphaOptions") -> np.ndarray:
+def matte(
+    rgb: np.ndarray, opts: "AlphaOptions", cancelled: Cancelled = None
+) -> np.ndarray:
     """Deterministic alpha for one RGB image by the chosen method. Pure."""
     if opts.method == "chroma":
         return chroma_alpha(rgb, _hex_to_rgb(opts.key_color), opts.tolerance, opts.feather_band)
     if opts.method == "solid":
         return chroma_alpha(rgb, detect_bg_color(rgb), max(20.0, opts.tolerance * 0.4), opts.feather_band)
     if opts.method == "edge_flood":
-        return edge_flood_alpha(rgb, opts.tolerance)
+        return edge_flood_alpha(rgb, opts.tolerance, cancelled)
     raise ValueError(f"not a deterministic method: {opts.method}")
 
 
@@ -145,22 +163,29 @@ def cached_model_path(model: str) -> Path | None:
     )
 
 
-def _md5(path: Path) -> str:
+def _download_model_path(model: str) -> Path:
+    return Path.home() / ".u2net" / f"{model}.onnx"
+
+
+def _md5(path: Path, cancelled: Cancelled = None) -> str:
     h = hashlib.md5()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
+            _cancelled(cancelled, "alpha-model-checksum", path)
             h.update(chunk)
     return h.hexdigest()
 
 
-def _verified_model(path: Path, expected_md5: str) -> dict:
+def _verified_model(
+    path: Path, expected_md5: str, cancelled: Cancelled = None
+) -> dict:
     try:
         stat = path.stat()
         cache_key = str(path.resolve(strict=False))
         signature = (stat.st_size, stat.st_mtime_ns, expected_md5)
         if _VERIFIED_MODELS.get(cache_key) == signature:
             return _ok(path)
-        if expected_md5 and _md5(path) != expected_md5:
+        if expected_md5 and _md5(path, cancelled) != expected_md5:
             _VERIFIED_MODELS.pop(cache_key, None)
             return _err(
                 "model.corrupt",
@@ -168,35 +193,61 @@ def _verified_model(path: Path, expected_md5: str) -> dict:
             )
         _VERIFIED_MODELS[cache_key] = signature
         return _ok(path)
+    except CommandCancelled:
+        raise
     except OSError as ex:
         return _err(
             "model.unreadable", f"could not verify {path.name}: {ex}", retryable=True
         )
 
 
-def _ensure_model(model: str, allow_download: bool = False) -> dict:
+def _ensure_model(
+    model: str,
+    allow_download: bool = False,
+    cancelled: Cancelled = None,
+) -> dict:
     if model not in _ONNX_MODELS:
         return _err("model.unknown", f"no verified model is known for '{model}'")
-    fname = f"{model}.onnx"
     _url, expected_md5 = _ONNX_MODELS[model]
     candidate = cached_model_path(model)
     if candidate is not None:
-        return _verified_model(candidate, expected_md5)
+        return _verified_model(candidate, expected_md5, cancelled)
     if not allow_download:
         return _err(
             "model.permission",
             f"{model} is not installed; explicit permission is required before download",
         )
     url, md5 = _ONNX_MODELS[model]
-    dst = Path.home() / ".u2net" / fname
+    dst = _download_model_path(model)
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(".onnx.part")
     try:
-        urllib.request.urlretrieve(url, tmp)
+        _cancelled(cancelled, "alpha-model-download", dst)
+        digest = hashlib.md5()
+        total = 0
+        with urllib.request.urlopen(url, timeout=30) as response, tmp.open("wb") as output:
+            length = response.headers.get("Content-Length")
+            if length is not None and int(length) > _MAX_MODEL_BYTES:
+                raise OSError(
+                    f"model download is larger than {_MAX_MODEL_BYTES} bytes"
+                )
+            while chunk := response.read(1 << 20):
+                _cancelled(cancelled, "alpha-model-download", dst)
+                total += len(chunk)
+                if total > _MAX_MODEL_BYTES:
+                    raise OSError(
+                        f"model download exceeded {_MAX_MODEL_BYTES} bytes"
+                    )
+                output.write(chunk)
+                digest.update(chunk)
+        _cancelled(cancelled, "alpha-model-download-commit", dst)
+    except CommandCancelled:
+        tmp.unlink(missing_ok=True)
+        raise
     except Exception as ex:
         tmp.unlink(missing_ok=True)
         return _err("model.download", f"could not download the {model} model: {ex}", retryable=True)
-    if md5 and _md5(tmp) != md5:
+    if md5 and digest.hexdigest() != md5:
         tmp.unlink(missing_ok=True)
         return _err("model.corrupt", f"{model} model failed its checksum")
     tmp.replace(dst)
@@ -207,23 +258,34 @@ def _ensure_model(model: str, allow_download: bool = False) -> dict:
     return _ok(dst, degraded=True, details=f"downloaded {model} model")
 
 
-def _ai_matte(img_rgb, model: str, allow_download: bool = False) -> dict:
+def _ai_matte(
+    img_rgb,
+    model: str,
+    allow_download: bool = False,
+    cancelled: Cancelled = None,
+) -> dict:
     try:
         import onnxruntime as ort
         from PIL import Image
     except ImportError as ex:
         return _err("dep.missing", f"the AI method needs onnxruntime ({ex.name}) — pip install onnxruntime")
-    mp = _ensure_model(model, allow_download=allow_download)
+    mp = _ensure_model(
+        model, allow_download=allow_download, cancelled=cancelled
+    )
     if mp["error"]:
         return mp
     key = str(mp["data"])
     if key not in _SESSIONS:
+        _cancelled(cancelled, "alpha-model-load", key)
         _SESSIONS[key] = ort.InferenceSession(key, providers=["CPUExecutionProvider"])
+        _cancelled(cancelled, "alpha-model-load", key)
     sess = _SESSIONS[key]
     w, h = img_rgb.size
     small = img_rgb.resize((320, 320), Image.BILINEAR)
     arr = ((np.asarray(small, dtype=np.float32) / 255.0 - _MEAN) / _STD).transpose(2, 0, 1)[None]
+    _cancelled(cancelled, "alpha-inference", key)
     mask = sess.run(None, {sess.get_inputs()[0].name: arr.astype(np.float32)})[0][0, 0]
+    _cancelled(cancelled, "alpha-inference", key)
     mi, ma = float(mask.min()), float(mask.max())
     mask = (mask - mi) / (ma - mi + 1e-8)
     up = Image.fromarray((mask * 255).astype(np.uint8)).resize((w, h), Image.BILINEAR)
@@ -374,13 +436,18 @@ def find_output_collisions(paths, opts: AlphaOptions) -> dict[str, tuple[str, ..
     )
 
 
-def remove_background(path: str | Path, opts: AlphaOptions) -> dict:
+def remove_background(
+    path: str | Path,
+    opts: AlphaOptions,
+    cancelled: Cancelled = None,
+) -> dict:
     """RGBA cut for one image by the chosen method. Envelope out."""
     normalized, options_error = normalized_options(opts)
     if normalized is None:
         return _err("options.invalid", options_error)
     opts = normalized
     p = Path(path)
+    _cancelled(cancelled, "alpha-open", p)
     if not p.is_file():
         return _err("file.missing", f"not a file: {p}")
     try:
@@ -389,6 +456,9 @@ def remove_background(path: str | Path, opts: AlphaOptions) -> dict:
         return _err("dep.missing", "Alpha Doctor needs Pillow + numpy — pip install pillow numpy")
     try:
         src = Image.open(p).convert("RGB")
+        _cancelled(cancelled, "alpha-open", p)
+    except CommandCancelled:
+        raise
     except Exception as ex:
         return _err("image.unreadable", f"cannot read {p.name}: {ex}")
     rgb = np.asarray(src, dtype=np.uint8)
@@ -396,14 +466,17 @@ def remove_background(path: str | Path, opts: AlphaOptions) -> dict:
     degraded, details = False, ""
     if opts.method == "ai":
         am = _ai_matte(
-            src, opts.model, allow_download=opts.allow_model_download
+            src, opts.model, allow_download=opts.allow_model_download,
+            cancelled=cancelled,
         )
         if am["error"]:
             return am
         alpha = am["data"]; degraded, details = am["degraded"], am["details"]
     else:
         try:
-            alpha = matte(rgb, opts)
+            alpha = matte(rgb, opts, cancelled)
+        except CommandCancelled:
+            raise
         except Exception as ex:
             return _err("matte.failed", f"{p.name}: {ex}")
     return _ok(np.dstack([rgb, alpha]), degraded=degraded, details=details)
@@ -417,14 +490,56 @@ class Result:
     coverage: float = 0.0
     out_path: str | None = None
     detail: str = ""
+    artifact: dict | None = None
+    degraded: bool = False
+    retryable: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
-def process(path: str | Path, opts: AlphaOptions) -> Result:
+def _png_artifact(
+    path: Path,
+    expected_size: tuple[int, int] | None = None,
+    cancelled: Cancelled = None,
+) -> dict:
+    from PIL import Image
+
+    _cancelled(cancelled, "alpha-output-validation", path)
+    with Image.open(path) as image:
+        image.load()
+        if image.mode != "RGBA":
+            raise OSError(f"output is {image.mode}, expected RGBA")
+        if expected_size is not None and image.size != expected_size:
+            raise OSError(
+                f"output is {image.width}x{image.height}, expected "
+                f"{expected_size[0]}x{expected_size[1]}"
+            )
+        coverage = alpha_coverage(np.asarray(image, dtype=np.uint8))
+        width, height = image.size
+    _cancelled(cancelled, "alpha-output-validation", path)
+    size = path.stat().st_size
+    if size <= 0:
+        raise OSError("output is empty")
+    return {
+        "path": str(path),
+        "bytes": size,
+        "sha256": sha256_file(path, cancelled=cancelled),
+        "width": width,
+        "height": height,
+        "mode": "RGBA",
+        "coverage": coverage,
+    }
+
+
+def process(
+    path: str | Path,
+    opts: AlphaOptions,
+    cancelled: Cancelled = None,
+) -> Result:
     """key -> [despill] -> [defringe] -> [premultiply] -> save RGBA PNG."""
     src = Path(path)
+    _cancelled(cancelled, "alpha-start", src)
     normalized, options_error = normalized_options(opts)
     if normalized is None:
         return Result(str(src), "failed", options_error, detail="options.invalid")
@@ -439,35 +554,115 @@ def process(path: str | Path, opts: AlphaOptions) -> Result:
     if opts.dry_run:
         return Result(str(src), "dry-run", f"would cut ({opts.method})", out_path=str(dst))
 
-    rb = remove_background(src, opts)
+    rb = remove_background(src, opts, cancelled)
     if rb["error"]:
-        return Result(str(src), "failed", rb["details"], detail=rb["error_type"])
+        return Result(
+            str(src), "failed", rb["details"], detail=rb["error_type"],
+            degraded=rb["degraded"], retryable=rb["retryable"],
+        )
     rgba: np.ndarray = rb["data"]
 
+    _cancelled(cancelled, "alpha-postprocess", src)
     if opts.green_despill:
         rgba = np.dstack([despill(rgba[:, :, :3]).clip(0, 255).astype(np.uint8), rgba[:, :, 3]])
+        _cancelled(cancelled, "alpha-despill", src)
     if opts.do_defringe:
         rgba = defringe(rgba, opts.erode_px, opts.feather)
+        _cancelled(cancelled, "alpha-defringe", src)
     if opts.do_premultiply:
         rgba = premultiply(rgba)
+        _cancelled(cancelled, "alpha-premultiply", src)
 
     coverage = alpha_coverage(rgba)
     if coverage < opts.min_coverage:
         return Result(str(src), "skipped", f"kept only {coverage*100:.1f}% — likely a bad key, not saved",
-                      coverage=coverage, detail="empty-matte")
+                      coverage=coverage, out_path=str(dst), detail="empty-matte",
+                      degraded=rb["degraded"])
 
+    tmp = dst.with_name(f"{dst.stem}.part{dst.suffix}")
     try:
         from PIL import Image
         dst.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dst.with_name(f"{dst.stem}.part{dst.suffix}")
+        _cancelled(cancelled, "alpha-save", dst)
         Image.fromarray(rgba, "RGBA").save(tmp)
+        artifact = _png_artifact(
+            tmp, expected_size=(rgba.shape[1], rgba.shape[0]), cancelled=cancelled
+        )
+        _cancelled(cancelled, "alpha-output-commit", dst)
         tmp.replace(dst)
+        if dst.stat().st_size != artifact["bytes"]:
+            raise OSError("committed output size changed")
+        artifact["path"] = str(dst)
+    except CommandCancelled:
+        tmp.unlink(missing_ok=True)
+        raise
     except Exception as ex:
-        return Result(str(src), "failed", f"could not save {dst.name}: {ex}", detail="save.failed")
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as cleanup:
+            return Result(
+                str(src), "failed",
+                f"could not save {dst.name}; staged-file cleanup also failed: {cleanup}",
+                detail="save.cleanup", retryable=True,
+            )
+        return Result(
+            str(src), "failed", f"could not save {dst.name}: {ex}",
+            detail="save.failed", retryable=isinstance(ex, OSError),
+        )
 
     tags = [opts.method]
     if opts.green_despill: tags.append("despill")
     if opts.do_defringe: tags.append("defringe")
     if opts.do_premultiply: tags.append("premult")
-    return Result(str(src), "cut", "background removed", coverage=coverage,
-                  out_path=str(dst), detail="+".join(tags))
+    reason = "background removed"
+    if rb["details"]:
+        reason += f"; {rb['details']}"
+    return Result(
+        str(src), "cut", reason, coverage=artifact["coverage"],
+        out_path=str(dst), detail="+".join(tags), artifact=artifact,
+        degraded=rb["degraded"],
+    )
+
+
+def validate_result(
+    result: Result,
+    opts: AlphaOptions,
+    cancelled: Cancelled = None,
+    expected_src: str | Path | None = None,
+) -> bool:
+    normalized, _ = normalized_options(opts)
+    if normalized is None or result.retryable or result.action == "failed":
+        return False
+    if (
+        expected_src is not None
+        and Path(result.src).resolve(strict=False)
+        != Path(expected_src).resolve(strict=False)
+    ):
+        return False
+    expected = plan_output(Path(result.src), normalized)
+    if result.out_path is None or Path(result.out_path).resolve(strict=False) != expected.resolve(strict=False):
+        return False
+    if result.action == "dry-run":
+        return normalized.dry_run and result.artifact is None
+    if normalized.dry_run:
+        return False
+    if result.action == "skipped":
+        return result.detail == "empty-matte" and result.artifact is None
+    if result.action != "cut" or not isinstance(result.artifact, dict):
+        return False
+    try:
+        record = result.artifact
+        if Path(record["path"]).resolve(strict=False) != expected.resolve(strict=False):
+            return False
+        actual = _png_artifact(
+            expected,
+            expected_size=(int(record["width"]), int(record["height"])),
+            cancelled=cancelled,
+        )
+    except CommandCancelled:
+        raise
+    except (KeyError, TypeError, ValueError, OSError):
+        return False
+    return actual == record and actual["coverage"] == result.coverage

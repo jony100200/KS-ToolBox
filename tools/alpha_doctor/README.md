@@ -6,6 +6,10 @@ output from identical inputs. Optional AI is one extra method, never required.
 
 Batch-capable, mirrors the input folder structure, saves transparent RGBA PNGs.
 
+Every image runs as its own durable queue item. Jobs support pause, cancellation,
+retry, quarantine, restart recovery, history, and a completion report while the
+existing custom Alpha Doctor screen remains the control surface.
+
 ## Methods
 
 | Method | How | Deterministic? |
@@ -35,6 +39,12 @@ Cached and downloaded models are checksum-verified; a corrupt cached model is
 rejected rather than handed to ONNX Runtime. A verified unchanged model is
 remembered for the app session so batch items do not repeat the hash.
 
+Successful cutouts are staged, decoded as RGBA, checked for original dimensions
+and alpha coverage, hashed, and only then atomically committed. Stored results
+are reused only while that exact PNG still validates; missing or same-size
+corrupt outputs are regenerated. Model downloads are streamed under a 512 MiB
+ceiling and can be cancelled without leaving a partial model.
+
 ## Dependencies
 
 - Default (deterministic): **Pillow** + **numpy** — `pip install pillow numpy`.
@@ -52,8 +62,9 @@ python -m tools.alpha_doctor.test_smoke
 
 The deterministic core is verified with just numpy + Pillow (no model); the
 suite also proves source/collision protection, strict settings, download
-consent, and cached-model checksum rejection. The AI method is exercised only
-if onnxruntime and a cached model are present.
+consent/cancellation, cached-model checksum rejection, staged cleanup, exact
+reuse validation, and same-size corruption detection. The AI method is
+exercised only if onnxruntime and a cached model are present.
 
 ## Credits
 

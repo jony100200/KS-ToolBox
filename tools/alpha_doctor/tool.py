@@ -19,4 +19,4 @@ class AlphaDoctorTool:
         # Lazy import: panel/engine pull numpy/Pillow (and onnxruntime only for the
         # opt-in AI method). Discovery/the sidebar work without them.
         from .panel import AlphaDoctorPanel
-        return AlphaDoctorPanel(parent)
+        return AlphaDoctorPanel(parent, services.queue)

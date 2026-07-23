@@ -57,10 +57,44 @@ def test_deterministic_pipeline() -> None:
             res = e.process(src, e.AlphaOptions(out_root=out, method=method, key_color="#00FF00",
                                                 dry_run=False))
             assert res.action == "cut", f"{method}: {res.reason}"
+            assert res.artifact and e.validate_result(
+                res,
+                e.AlphaOptions(
+                    out_root=out, method=method, key_color="#00FF00",
+                    dry_run=False,
+                ),
+            )
             with Image.open(res.out_path) as got:
                 assert got.mode == "RGBA", f"{method}: not RGBA"
             # the disc (~30% of the frame) should survive; the green bg should not.
             assert 0.10 < res.coverage < 0.60, f"{method}: coverage {res.coverage:.2f} off"
+
+        output = Path(res.out_path)
+        output_bytes = output.read_bytes()
+        output.write_bytes(b"X" * len(output_bytes))
+        assert not e.validate_result(
+            res,
+            e.AlphaOptions(out_root=out, method="edge_flood", dry_run=False),
+        ), "same-size cutout corruption was reused"
+        output.write_bytes(output_bytes)
+        assert e.validate_result(
+            res,
+            e.AlphaOptions(out_root=out, method="edge_flood", dry_run=False),
+        )
+
+        cancel_out = tmp / "cancelled"
+        try:
+            e.process(
+                src,
+                e.AlphaOptions(out_root=cancel_out, dry_run=False),
+                cancelled=lambda: True,
+            )
+        except e.CommandCancelled:
+            pass
+        else:
+            raise AssertionError("Alpha Doctor cancellation did not propagate")
+        assert not cancel_out.exists()
+        assert not list(tmp.rglob("*.part.png"))
 
         source_bytes = src.read_bytes()
         self_target = e.process(
@@ -118,6 +152,54 @@ def test_safety_contracts() -> None:
         finally:
             e._VERIFIED_MODELS.clear()
             e._model_dirs = original_dirs
+
+    class FakeDownload:
+        headers = {}
+
+        def __init__(self):
+            self._read = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _size):
+            if self._read:
+                return b""
+            self._read = True
+            return b"M" * 1024
+
+    with tempfile.TemporaryDirectory() as td:
+        model_dir = Path(td)
+        original_dirs = e._model_dirs
+        original_destination = e._download_model_path
+        original_open = e.urllib.request.urlopen
+        checks = 0
+
+        def cancel_download() -> bool:
+            nonlocal checks
+            checks += 1
+            return checks >= 2
+
+        e._model_dirs = lambda: [model_dir]
+        e._download_model_path = lambda model: model_dir / f"{model}.onnx"
+        e.urllib.request.urlopen = lambda *_args, **_kwargs: FakeDownload()
+        try:
+            try:
+                e._ensure_model(
+                    "u2net", allow_download=True, cancelled=cancel_download
+                )
+            except e.CommandCancelled:
+                pass
+            else:
+                raise AssertionError("model download cancellation did not propagate")
+            assert not list(model_dir.iterdir()), "cancelled model left staged data"
+        finally:
+            e._model_dirs = original_dirs
+            e._download_model_path = original_destination
+            e.urllib.request.urlopen = original_open
     print("PASS: alpha_doctor safety — settings, source/collision, model consent/checksum.")
 
 

@@ -64,7 +64,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Preview, confirm, logging | Batch tools use preview/manifests; destructive compressor confirms | Good, verify per new feature |
 | Atomic output | Common pattern is temporary output then replace | Good, standardize and test crash recovery |
 | Error envelope | Shared `ok`/`err` helpers exist | Good, add conformance tests |
-| Durable batch execution | Runner/store plus shell queue implemented for thirteen contrasting image, media, document, material, analysis, archive, grouped-audit, and dataset workflows | Good proven core; migrate remaining tools individually |
+| Durable batch execution | Runner/store plus shell queue implemented for fourteen contrasting image, media, document, material, analysis, archive, grouped-audit, dataset, and hybrid workflows | Good proven core; migrate remaining tools individually |
 | Failure isolation/recovery | Per-item quarantine/retry, pause/resume/cancel, history, and finalization warnings | Good contract; manual item retry remains |
 | Content identity/cache | No shared persistent content-addressed cache | Missing |
 | Incremental recomputation | Mostly output-exists checks | Partial and settings-blind |
@@ -85,7 +85,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | To SVG | VTracer | Deterministic | expose presets/path controls, score path complexity and reconstruction error |
 | Icon Normalizer | alpha geometry, fixed canvas placement, durable queue, validated RGBA reuse | Deterministic | perceptual visual-mass normalization and platform keyline presets |
 | Showcase | Pillow compositing, mode-aware durable queue, grouped identity, exact output validation | Deterministic | attention/entropy smart crop and reusable layout presets |
-| Alpha Doctor | chroma/solid/edge flood plus explicit-consent, checksum-verified optional U2Net ONNX; source/collision/settings guards | Hybrid | durable validated queue, uncertainty routing, matte cache, better optional high-resolution specialist |
+| Alpha Doctor | durable per-image chroma/solid/edge flood; exact RGBA/hash/coverage validation and repair; explicit-consent, checksum-verified optional U2Net ONNX | Hybrid | uncertainty routing, matte cache, process-isolated inference benchmark, better optional high-resolution specialist |
 | Material Converter | map discovery, channel operations, grouped durable queue, set-wide identity and validated provenance | Deterministic | canonical MaterialX/OpenPBR mapping, color-space validation, packed-map presets |
 | Sprite Viewer | Pillow frames/grid/connected-component slices | Deterministic | Aseprite metadata, trim/extrude/deduplicate, atlas export and timing preservation |
 | Tileset Checker | opposite-edge score, deterministic previews, durable queue, exact artifact validation, collision protection | Deterministic | multi-scale/gradient/perceptual seam score calibrated on labeled examples |
@@ -108,7 +108,7 @@ The old audit's startup and package-size numbers were measured against five tool
 ### Batch processing
 
 Files are independent and most batch tools run them serially. This is a safe
-baseline. Thirteen contrasting tools now run serially through the durable shared
+baseline. Fourteen contrasting tools now run serially through the durable shared
 runner; the remaining tools retain existing panel loops until migrated.
 Concurrency is not automatically an optimization:
 
@@ -185,7 +185,7 @@ Every implementation slice in the roadmap must record:
 
 ## Audit conclusion
 
-The architecture is being evolved, not rewritten. Thirteen durable batch slices and
+The architecture is being evolved, not rewritten. Fourteen durable batch slices and
 the shell-owned queue are implemented and verified without changing
 CustomTkinter or proven processing algorithms. They now cover in-process image,
 external-media, grouped-material, analytical, and secure archive contracts.
