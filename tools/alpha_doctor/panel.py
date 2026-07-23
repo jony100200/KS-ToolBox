@@ -4,7 +4,9 @@ default; the AI method is just one more choice in the dropdown.
 from __future__ import annotations
 
 import csv
+import importlib.util
 from pathlib import Path
+from tkinter import messagebox
 
 import customtkinter as ctk
 
@@ -18,7 +20,7 @@ _METHOD_LABELS = {
     "solid": "Auto solid background",
     "chroma": "Chroma key (pick colour)",
     "edge_flood": "Edge flood-fill",
-    "ai": "AI matte (u2net — downloads model)",
+    "ai": "AI matte (u2net — model optional)",
 }
 
 
@@ -80,7 +82,7 @@ class AlphaDoctorPanel(BaseBatchPanel):
         hints = {"solid": "Deterministic — keys out the auto-detected flat background. No model.",
                  "chroma": "Deterministic — keys the chosen colour. Great for green/blue screen, flat logos.",
                  "edge_flood": "Deterministic — removes background regions touching the image border.",
-                 "ai": "Optional AI (u2net). Downloads a ~176 MB model on first use; CPU-only."}
+                 "ai": "Optional AI (u2net). A ~176 MB download needs approval; CPU-only."}
         self._hint.configure(text=hints.get(method, ""))
 
     def _current_method(self) -> str:
@@ -100,6 +102,42 @@ class AlphaDoctorPanel(BaseBatchPanel):
                               mirror=mirror, method=self._current_method(), key_color=key_hex, tolerance=tol,
                               do_defringe=bool(self._defringe.get()), green_despill=bool(self._green.get()),
                               do_premultiply=bool(self._premul.get()), dry_run=bool(self._dry.get()))
+
+    def _pre_run_check(self, opts: e.AlphaOptions) -> bool:
+        normalized, options_error = e.normalized_options(opts)
+        if normalized is None:
+            self._logline(options_error, t.STATE["error"][1])
+            return False
+        if not self._check_output_collisions(
+            e.find_output_collisions(self._files, normalized)
+        ):
+            return False
+        if normalized.method != "ai":
+            return True
+        if importlib.util.find_spec("onnxruntime") is None:
+            self._logline(
+                "AI matte needs the optional onnxruntime dependency.",
+                t.STATE["error"][1],
+            )
+            return False
+        if e.cached_model_path(normalized.model) is not None:
+            return True
+        approved = messagebox.askyesno(
+            "Download AI matte model?",
+            "AI matte needs the u2net model (about 176 MB). It will be "
+            "downloaded from the rembg GitHub release and stored in your "
+            "user model cache.\n\nAllow this network download?",
+            icon="question",
+            parent=self,
+        )
+        if not approved:
+            self._logline(
+                "AI model download not approved; no network request was made.",
+                t.TEXT_MUTED,
+            )
+            return False
+        opts.allow_model_download = True
+        return True
 
     # -- batch loop ------------------------------------------------------------
     def _work(self, files: list[Path], opts: e.AlphaOptions):

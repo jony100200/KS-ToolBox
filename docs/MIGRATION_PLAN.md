@@ -357,6 +357,46 @@ peak resources are not yet instrumented, professional manifests/provenance are
 O(n), reuse is whole-dataset rather than stage-level, and explicit recovery
 paths necessarily add local code.
 
+### Slice 3n — checkpoint 1: Alpha Doctor integrity and explicit AI consent
+
+The opening Alpha Doctor audit reproduced three defects on committed code. A
+real Chroma run with the output root set to the source folder returned `cut`
+while replacing the selected PNG. A PNG and JPEG with the same stem converged
+on one PNG, so two apparent item outcomes produced one file. Finally, a
+17-byte corrupt `u2net.onnx` in a normal cache directory was accepted without
+any integrity check.
+
+The focused checkpoint adds normalized bounds for method, model, color,
+tolerance, feathering, erosion, and minimum coverage; shared all-output
+collision planning; a headless single-source overwrite guard; explicit UI
+approval before the first model network request; and checksum validation for
+both cached and downloaded models. Verification is cached only for the same
+resolved path, size, modification time, and expected checksum, so compatible
+batch items avoid repeatedly hashing an unchanged 176 MB model.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Self-targeting could replace a source; same-stem inputs silently shared one output; malformed/NaN settings reached NumPy/Pillow; AI selection implicitly authorized a large download; cached models bypassed the configured checksum |
+| Proposed behavior | Validate options and every destination before work; preserve every source; ask before network access; reject corrupt/unknown models; cache only a verified unchanged model fingerprint |
+| Architecture/language | Existing NumPy/Pillow deterministic engine, CustomTkinter screen, optional ONNX Runtime, and shared collision primitive remain; the custom interface is preserved and no durable abstraction is introduced prematurely |
+| Functionality and quality | Solid/chroma/edge-flood, despill, defringe, premultiply, mirror output, preview, and optional AI remain; invalid inputs now fail visibly and valid deterministic pixels are unchanged |
+| Code and dependency impact | Alpha Doctor production source 430 → 602 nonblank lines (+172 for strict options, output planning, consent, checksum/session cache, UI preflight, and failure paths); zero dependencies, models, binaries, services, or processes added |
+| Package-size impact | Source-only change with no shipped payload; no package-size change is claimed because a package was not rebuilt |
+| Startup and runtime impact | Ready-to-mainloop measured 123 ms with 29 ms discovery and no heavy optional startup import; paired seven-run 512² deterministic cutout median 10.6 → 11.2 ms (+0.6 ms, +5.6%); a synthetic 64 MiB model verified in 84.7 ms cold and 0.253 ms from the unchanged-session cache |
+| RAM, VRAM, CPU, disk, and GPU transfer | Deterministic NumPy/Pillow behavior is unchanged; planning is O(n) path metadata; model verification streams 1 MiB chunks once per changed file version; cache entries are O(models); no model was loaded and RAM/VRAM/GPU transfer were not measured |
+| AI and model-loading impact | AI remains optional and CPU-only; zero calls/model loads in the measured deterministic path; absent models require user-approved network access and cached weights must pass their configured digest before ONNX Runtime sees them |
+| Batch, cache, and incremental impact | This checkpoint blocks unsafe batches before the legacy worker starts and reuses verified model integrity within a session; durable job recovery, output validation, and per-item reuse are intentionally deferred to the next Alpha Doctor checkpoint |
+| Reliability, security, tests, and benchmarks | Smoke snapshots the source, reproduces same-stem planning, rejects eight malformed setting classes, rejects corrupt cached weights, proves no-download permission failure, and retains all three deterministic pipeline checks; all 17 panels construct |
+| Risks and rollback | Configured upstream digests are MD5 corruption checks rather than modern authenticity signatures; model hashing can delay the first AI item; path identity uses filesystem semantics; the legacy panel still owns execution/manifests. Revert normalized/preflight/model-verification changes together; deterministic matte primitives are untouched |
+
+Checkpoint cartridge score: functional completeness 5, output quality 5,
+runtime 4, startup 5, memory 4, storage 5, batch 3, cache 3, incremental
+execution 2, AI efficiency 5, reliability 4, maintainability 4, portability 5,
+and security 4. The sub-4 scores are the explicit next work: Alpha Doctor is
+still on the compatibility loop, has no output-provenance cache, and cannot
+incrementally reuse individual cutouts. The 4s retain measured or known
+boundaries rather than claiming the active slice is finished.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

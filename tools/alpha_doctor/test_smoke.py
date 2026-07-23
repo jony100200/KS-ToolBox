@@ -61,7 +61,64 @@ def test_deterministic_pipeline() -> None:
                 assert got.mode == "RGBA", f"{method}: not RGBA"
             # the disc (~30% of the frame) should survive; the green bg should not.
             assert 0.10 < res.coverage < 0.60, f"{method}: coverage {res.coverage:.2f} off"
+
+        source_bytes = src.read_bytes()
+        self_target = e.process(
+            src,
+            e.AlphaOptions(
+                out_root=tmp, method="chroma", key_color="#00FF00",
+                do_defringe=False, dry_run=False,
+            ),
+        )
+        assert self_target.action == "failed"
+        assert self_target.detail == "output.collision"
+        assert src.read_bytes() == source_bytes, "Alpha Doctor replaced its source"
+
+        other_dir = tmp / "other"
+        other_dir.mkdir()
+        same_stem = other_dir / "subject.jpg"
+        Image.new("RGB", (32, 32), (240, 240, 240)).save(same_stem)
+        collisions = e.find_output_collisions(
+            [src, same_stem],
+            e.AlphaOptions(out_root=out, dry_run=False),
+        )
+        assert len(collisions) == 1, "same-stem outputs were not rejected"
     print("PASS: alpha_doctor deterministic pipeline — chroma / solid / edge_flood keyed a subject.")
+
+
+def test_safety_contracts() -> None:
+    invalid = [
+        e.AlphaOptions(method="missing"),
+        e.AlphaOptions(method="chroma", key_color="green"),
+        e.AlphaOptions(tolerance=float("nan")),
+        e.AlphaOptions(tolerance=-1),
+        e.AlphaOptions(feather_band=500),
+        e.AlphaOptions(erode_px=33),
+        e.AlphaOptions(min_coverage=1.1),
+        e.AlphaOptions(method="ai", model="unknown"),
+    ]
+    for options in invalid:
+        normalized, reason = e.normalized_options(options)
+        assert normalized is None and reason
+
+    with tempfile.TemporaryDirectory() as td:
+        model_dir = Path(td)
+        corrupt = model_dir / "u2net.onnx"
+        corrupt.write_bytes(b"not an ONNX model")
+        original_dirs = e._model_dirs
+        e._model_dirs = lambda: [model_dir]
+        e._VERIFIED_MODELS.clear()
+        try:
+            checked = e._ensure_model("u2net")
+            assert checked["error_type"] == "model.corrupt"
+            corrupt.unlink()
+            denied = e._ensure_model("u2net")
+            assert denied["error_type"] == "model.permission"
+            assert not list(model_dir.glob("*.part"))
+        finally:
+            e._VERIFIED_MODELS.clear()
+            e._model_dirs = original_dirs
+    print("PASS: alpha_doctor safety — settings, source/collision, model consent/checksum.")
 
 
 def test_ai_optional() -> None:
@@ -93,6 +150,7 @@ def main() -> int:
     e = _engine
     test_pure()
     test_deterministic_pipeline()
+    test_safety_contracts()
     test_ai_optional()
     return 0
 

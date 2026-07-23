@@ -13,7 +13,7 @@ Batch-capable, mirrors the input folder structure, saves transparent RGBA PNGs.
 | **Auto solid background** (default) | detects the flat border colour and keys it out | ✅ |
 | **Chroma key** | keys a chosen colour (green/blue/white/custom) — green/blue screen, flat logos | ✅ |
 | **Edge flood-fill** | removes background regions connected to the image border | ✅ |
-| **AI matte (u2net)** | ONNX Runtime salient-object matte for hard photographic subjects | optional — downloads a ~176 MB model on first use, CPU-only |
+| **AI matte (u2net)** | ONNX Runtime salient-object matte for hard photographic subjects | optional — a ~176 MB download requires approval, CPU-only |
 
 ## Post-processing (all deterministic)
 
@@ -24,10 +24,22 @@ Batch-capable, mirrors the input folder structure, saves transparent RGBA PNGs.
 Nothing is written until you turn off **Preview only**; originals are never
 touched. A `cutout_manifest.csv` records every file when an output folder is set.
 
+Before a real batch starts, Alpha Doctor resolves every destination. It refuses
+an output that would replace a selected source and refuses two inputs that
+would produce the same PNG. Numeric settings are finite and bounded, custom
+keys must use `#RRGGBB`, and unknown methods/models fail visibly.
+
+AI stays opt-in at both levels: selecting AI does not silently authorize a
+network request. If the model is absent, the UI asks before downloading it.
+Cached and downloaded models are checksum-verified; a corrupt cached model is
+rejected rather than handed to ONNX Runtime. A verified unchanged model is
+remembered for the app session so batch items do not repeat the hash.
+
 ## Dependencies
 
 - Default (deterministic): **Pillow** + **numpy** — `pip install pillow numpy`.
-- Optional **AI matte** method only: `pip install onnxruntime` (model auto-downloaded).
+- Optional **AI matte** method only: `pip install onnxruntime` (the model is
+  downloaded only after explicit approval).
 
 Works fully without AI: product renders, sprites, logos, and green/blue-screen
 images need none of it.
@@ -38,8 +50,10 @@ images need none of it.
 python -m tools.alpha_doctor.test_smoke
 ```
 
-The deterministic core is verified with just numpy + Pillow (no model); the AI
-method is exercised only if onnxruntime and a cached model are present.
+The deterministic core is verified with just numpy + Pillow (no model); the
+suite also proves source/collision protection, strict settings, download
+consent, and cached-model checksum rejection. The AI method is exercised only
+if onnxruntime and a cached model are present.
 
 ## Credits
 

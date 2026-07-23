@@ -85,7 +85,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | To SVG | VTracer | Deterministic | expose presets/path controls, score path complexity and reconstruction error |
 | Icon Normalizer | alpha geometry, fixed canvas placement, durable queue, validated RGBA reuse | Deterministic | perceptual visual-mass normalization and platform keyline presets |
 | Showcase | Pillow compositing, mode-aware durable queue, grouped identity, exact output validation | Deterministic | attention/entropy smart crop and reusable layout presets |
-| Alpha Doctor | chroma/solid/edge flood plus optional U2Net ONNX | Hybrid | uncertainty routing, matte cache, better optional high-resolution specialist |
+| Alpha Doctor | chroma/solid/edge flood plus explicit-consent, checksum-verified optional U2Net ONNX; source/collision/settings guards | Hybrid | durable validated queue, uncertainty routing, matte cache, better optional high-resolution specialist |
 | Material Converter | map discovery, channel operations, grouped durable queue, set-wide identity and validated provenance | Deterministic | canonical MaterialX/OpenPBR mapping, color-space validation, packed-map presets |
 | Sprite Viewer | Pillow frames/grid/connected-component slices | Deterministic | Aseprite metadata, trim/extrude/deduplicate, atlas export and timing preservation |
 | Tileset Checker | opposite-edge score, deterministic previews, durable queue, exact artifact validation, collision protection | Deterministic | multi-scale/gradient/perceptual seam score calibrated on labeled examples |

@@ -10,7 +10,7 @@ Methods (pick per batch):
     solid       - auto-detect the flat background colour and key it out  (default)
     chroma      - key a chosen colour (green/blue/white/custom)
     edge_flood  - remove background regions connected to the image border
-    ai          - u2net matte (opt-in; downloads the model on first use)
+    ai          - u2net matte (opt-in; model download requires explicit permission)
 
 Post-ops (all deterministic): green despill, defringe (erode+feather), premultiply.
 
@@ -27,15 +27,22 @@ Public (pure) interface:
 from __future__ import annotations
 
 import hashlib
+import math
+import re
 import sys
 import urllib.request
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from toolbox.engine_common import IMAGE_EXTS, ok as _ok, err as _err
+from toolbox.engine_common import (
+    IMAGE_EXTS,
+    find_output_collisions as _find_output_collisions,
+    ok as _ok,
+    err as _err,
+)
 
 METHODS = ("solid", "chroma", "edge_flood", "ai")
 KEY_PRESETS = {"green": "#00FF00", "blue": "#0000FF", "white": "#FFFFFF",
@@ -52,6 +59,9 @@ AI_MODELS = tuple(_ONNX_MODELS)
 _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 _SESSIONS: dict[str, Any] = {}
+_VERIFIED_MODELS: dict[str, tuple[int, int, str]] = {}
+_HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+_MAX_COLOR_DISTANCE = math.sqrt(3 * 255 * 255)
 
 
 def _hex_to_rgb(s: str) -> np.ndarray:
@@ -124,6 +134,17 @@ def _model_dirs() -> list[Path]:
     return dirs
 
 
+def cached_model_path(model: str) -> Path | None:
+    if model not in _ONNX_MODELS:
+        return None
+    filename = f"{model}.onnx"
+    return next(
+        (directory / filename for directory in _model_dirs()
+         if (directory / filename).is_file()),
+        None,
+    )
+
+
 def _md5(path: Path) -> str:
     h = hashlib.md5()
     with open(path, "rb") as f:
@@ -132,13 +153,40 @@ def _md5(path: Path) -> str:
     return h.hexdigest()
 
 
-def _ensure_model(model: str) -> dict:
-    fname = f"{model}.onnx"
-    for d in _model_dirs():
-        if (d / fname).is_file():
-            return _ok(d / fname)
+def _verified_model(path: Path, expected_md5: str) -> dict:
+    try:
+        stat = path.stat()
+        cache_key = str(path.resolve(strict=False))
+        signature = (stat.st_size, stat.st_mtime_ns, expected_md5)
+        if _VERIFIED_MODELS.get(cache_key) == signature:
+            return _ok(path)
+        if expected_md5 and _md5(path) != expected_md5:
+            _VERIFIED_MODELS.pop(cache_key, None)
+            return _err(
+                "model.corrupt",
+                f"{path.name} failed its checksum; remove or replace {path}",
+            )
+        _VERIFIED_MODELS[cache_key] = signature
+        return _ok(path)
+    except OSError as ex:
+        return _err(
+            "model.unreadable", f"could not verify {path.name}: {ex}", retryable=True
+        )
+
+
+def _ensure_model(model: str, allow_download: bool = False) -> dict:
     if model not in _ONNX_MODELS:
-        return _err("model.unknown", f"no download known for model '{model}'")
+        return _err("model.unknown", f"no verified model is known for '{model}'")
+    fname = f"{model}.onnx"
+    _url, expected_md5 = _ONNX_MODELS[model]
+    candidate = cached_model_path(model)
+    if candidate is not None:
+        return _verified_model(candidate, expected_md5)
+    if not allow_download:
+        return _err(
+            "model.permission",
+            f"{model} is not installed; explicit permission is required before download",
+        )
     url, md5 = _ONNX_MODELS[model]
     dst = Path.home() / ".u2net" / fname
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -152,16 +200,20 @@ def _ensure_model(model: str) -> dict:
         tmp.unlink(missing_ok=True)
         return _err("model.corrupt", f"{model} model failed its checksum")
     tmp.replace(dst)
+    stat = dst.stat()
+    _VERIFIED_MODELS[str(dst.resolve(strict=False))] = (
+        stat.st_size, stat.st_mtime_ns, md5,
+    )
     return _ok(dst, degraded=True, details=f"downloaded {model} model")
 
 
-def _ai_matte(img_rgb, model: str) -> dict:
+def _ai_matte(img_rgb, model: str, allow_download: bool = False) -> dict:
     try:
         import onnxruntime as ort
         from PIL import Image
     except ImportError as ex:
         return _err("dep.missing", f"the AI method needs onnxruntime ({ex.name}) — pip install onnxruntime")
-    mp = _ensure_model(model)
+    mp = _ensure_model(model, allow_download=allow_download)
     if mp["error"]:
         return mp
     key = str(mp["data"])
@@ -224,6 +276,7 @@ class AlphaOptions:
     tolerance: float = 100.0          # keying tolerance / flood threshold
     feather_band: float = 60.0        # chroma soft-edge width
     model: str = "u2net"              # ai method only
+    allow_model_download: bool = False
     do_defringe: bool = True
     erode_px: int = 1
     feather: float = 0.6
@@ -231,6 +284,70 @@ class AlphaOptions:
     do_premultiply: bool = False
     min_coverage: float = 0.005
     dry_run: bool = True
+
+
+def normalized_options(opts: AlphaOptions) -> tuple[AlphaOptions | None, str]:
+    method = str(opts.method).strip().lower()
+    if method not in METHODS:
+        return None, f"unknown alpha method: {opts.method!r}"
+    model = str(opts.model).strip().lower()
+    if method == "ai" and model not in AI_MODELS:
+        return None, f"unknown AI model: {opts.model!r}"
+    key_color = str(opts.key_color).strip()
+    if method == "chroma" and not _HEX_COLOR.fullmatch(key_color):
+        return None, "key colour must use #RRGGBB"
+    numeric = {
+        "tolerance": opts.tolerance,
+        "feather band": opts.feather_band,
+        "feather": opts.feather,
+        "minimum coverage": opts.min_coverage,
+    }
+    try:
+        values = {name: float(value) for name, value in numeric.items()}
+    except (TypeError, ValueError):
+        return None, "alpha numeric settings must be numbers"
+    if any(not math.isfinite(value) for value in values.values()):
+        return None, "alpha numeric settings must be finite"
+    if not 0 <= values["tolerance"] <= _MAX_COLOR_DISTANCE:
+        return None, f"tolerance must be between 0 and {_MAX_COLOR_DISTANCE:.1f}"
+    if not 0 <= values["feather band"] <= _MAX_COLOR_DISTANCE:
+        return None, f"feather band must be between 0 and {_MAX_COLOR_DISTANCE:.1f}"
+    if not 0 <= values["feather"] <= 100:
+        return None, "defringe feather must be between 0 and 100"
+    if not 0 <= values["minimum coverage"] <= 1:
+        return None, "minimum coverage must be between 0 and 1"
+    if isinstance(opts.erode_px, bool):
+        return None, "defringe erosion must be a whole number between 0 and 32"
+    try:
+        erode_px = int(opts.erode_px)
+    except (TypeError, ValueError):
+        return None, "defringe erosion must be a whole number between 0 and 32"
+    if erode_px != opts.erode_px or not 0 <= erode_px <= 32:
+        return None, "defringe erosion must be a whole number between 0 and 32"
+    try:
+        out_root = Path(opts.out_root) if opts.out_root is not None else None
+        input_root = Path(opts.input_root) if opts.input_root is not None else None
+    except TypeError:
+        return None, "input and output roots must be filesystem paths"
+    return replace(
+        opts,
+        out_root=out_root,
+        input_root=input_root,
+        method=method,
+        model=model,
+        key_color=key_color.upper(),
+        tolerance=values["tolerance"],
+        feather_band=values["feather band"],
+        feather=values["feather"],
+        min_coverage=values["minimum coverage"],
+        erode_px=erode_px,
+        mirror=bool(opts.mirror),
+        allow_model_download=bool(opts.allow_model_download),
+        do_defringe=bool(opts.do_defringe),
+        green_despill=bool(opts.green_despill),
+        do_premultiply=bool(opts.do_premultiply),
+        dry_run=bool(opts.dry_run),
+    ), ""
 
 
 def plan_output(src: Path, opts: AlphaOptions) -> Path:
@@ -247,8 +364,22 @@ def plan_output(src: Path, opts: AlphaOptions) -> Path:
     return src.parent / "cutouts" / (src.stem + ".png")
 
 
+def find_output_collisions(paths, opts: AlphaOptions) -> dict[str, tuple[str, ...]]:
+    normalized, _ = normalized_options(opts)
+    if normalized is None:
+        return {}
+    return _find_output_collisions(
+        [Path(path) for path in paths],
+        lambda source: [plan_output(source, normalized)],
+    )
+
+
 def remove_background(path: str | Path, opts: AlphaOptions) -> dict:
     """RGBA cut for one image by the chosen method. Envelope out."""
+    normalized, options_error = normalized_options(opts)
+    if normalized is None:
+        return _err("options.invalid", options_error)
+    opts = normalized
     p = Path(path)
     if not p.is_file():
         return _err("file.missing", f"not a file: {p}")
@@ -264,7 +395,9 @@ def remove_background(path: str | Path, opts: AlphaOptions) -> dict:
 
     degraded, details = False, ""
     if opts.method == "ai":
-        am = _ai_matte(src, opts.model)
+        am = _ai_matte(
+            src, opts.model, allow_download=opts.allow_model_download
+        )
         if am["error"]:
             return am
         alpha = am["data"]; degraded, details = am["degraded"], am["details"]
@@ -292,7 +425,17 @@ class Result:
 def process(path: str | Path, opts: AlphaOptions) -> Result:
     """key -> [despill] -> [defringe] -> [premultiply] -> save RGBA PNG."""
     src = Path(path)
+    normalized, options_error = normalized_options(opts)
+    if normalized is None:
+        return Result(str(src), "failed", options_error, detail="options.invalid")
+    opts = normalized
     dst = plan_output(src, opts)
+    collisions = find_output_collisions([src], opts)
+    if collisions:
+        return Result(
+            str(src), "failed", "output would overwrite the selected source",
+            out_path=str(dst), detail="output.collision",
+        )
     if opts.dry_run:
         return Result(str(src), "dry-run", f"would cut ({opts.method})", out_path=str(dst))
 
