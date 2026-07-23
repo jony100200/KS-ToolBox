@@ -36,7 +36,13 @@ import shutil
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from toolbox.engine_common import IMAGE_EXTS, err, ok, sha256_file
+from toolbox.engine_common import (
+    IMAGE_EXTS,
+    err,
+    find_output_collisions as _find_collisions,
+    ok,
+    sha256_file,
+)
 
 OPERATIONS = ("pair_report", "replace", "bucket", "split")
 BUCKET_MODES = ("dimensions", "aspect")
@@ -237,6 +243,103 @@ class Report:
     degraded: bool = False
     manifest: dict | None = None
     pair_report: dict | None = None
+
+
+@dataclass(frozen=True)
+class PlanItem:
+    image: Path
+    caption: Path | None
+    width: int | None
+    height: int | None
+    split: str = ""
+    bucket: str = ""
+    image_output: Path | None = None
+    caption_output: Path | None = None
+
+
+@dataclass
+class DatasetPlan:
+    items: list[PlanItem]
+    pairing: dict
+    captions: list[Path]
+    collisions: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    degraded: bool = False
+    messages: list[str] = field(default_factory=list)
+
+
+def build_plan(paths, opts: DatasetOptions) -> DatasetPlan:
+    """Resolve every source/output before execution; read each dimension once."""
+    images = sorted(
+        {Path(path) for path in paths if Path(path).suffix.lower() in IMAGE_EXTS},
+        key=lambda path: (_natural_key(path.name.lower()), str(path.parent).lower()),
+    )
+    scratch = Report(operation=opts.operation)
+    cap_exts = _norm_exts(opts.caption_exts) or _norm_exts(_DEFAULT_CAPTION_EXTS)
+    captions = _discover_captions(images, cap_exts, scratch)
+    pairing = pair_files([*images, *captions], cap_exts)
+    caption_of = {image: caption for image, caption in pairing["pairs"]}
+    pil_ok = _pillow_available()
+    dimensions: dict[Path, tuple[int, int] | None] = {}
+    if pil_ok:
+        for image in images:
+            dimensions[image] = image_dims(image)
+            if dimensions[image] is None:
+                scratch.messages.append(f"dimensions unavailable for {image.name}")
+    else:
+        scratch.messages.append("Pillow not installed — width/height unavailable in manifest.")
+    split_map = (
+        split_assign([str(path) for path in images], opts.ratios)
+        if opts.operation == "split" else {}
+    )
+    out_root = Path(opts.out_root) if opts.out_root is not None else None
+    items: list[PlanItem] = []
+    outputs_by_source: dict[str, list[Path]] = {}
+
+    def own(source: Path, output: Path) -> None:
+        outputs_by_source.setdefault(str(source.resolve(strict=False)), []).append(output)
+
+    for image in images:
+        caption = caption_of.get(image)
+        dims = dimensions.get(image)
+        width, height = dims if dims else (None, None)
+        split = split_map.get(str(image), "train") if opts.operation == "split" else ""
+        bucket = bucket_for(width, height, opts.bucket_mode) if opts.operation == "bucket" else ""
+        image_output = caption_output = None
+        if out_root is not None and opts.operation in {"replace", "bucket", "split"}:
+            destination = out_root
+            if opts.operation == "split":
+                destination /= split
+            elif opts.operation == "bucket":
+                destination /= bucket
+            image_output = destination / image.name
+            own(image, image_output)
+            if caption is not None:
+                caption_output = destination / caption.name
+                own(caption, caption_output)
+        items.append(PlanItem(
+            image, caption, width, height, split, bucket,
+            image_output, caption_output,
+        ))
+
+    if out_root is not None and images:
+        fixed = [out_root / "dataset_manifest.csv", out_root / "dataset_manifest.json"]
+        if opts.operation == "pair_report":
+            fixed.extend([out_root / "pair_report.csv", out_root / "pair_report.json"])
+        outputs_by_source.setdefault(str(images[0].resolve(strict=False)), []).extend(fixed)
+
+    sources = [*images, *captions]
+    collisions = _find_collisions(
+        sources,
+        lambda source: outputs_by_source.get(str(source.resolve(strict=False)), ()),
+    )
+    return DatasetPlan(
+        items=items,
+        pairing=pairing,
+        captions=captions,
+        collisions=collisions,
+        degraded=(not pil_ok) or any(value is None for value in dimensions.values()),
+        messages=scratch.messages,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -445,34 +548,33 @@ def run(paths, opts: DatasetOptions, log=None, progress=None, should_stop=None) 
             report.messages.append(f"invalid regex: {ex}")
             return report
 
-    cap_exts = _norm_exts(opts.caption_exts) or _norm_exts(_DEFAULT_CAPTION_EXTS)
-    captions = _discover_captions(images, cap_exts, report)
-    pairing = pair_files([*images, *captions], cap_exts)
-    caption_of = {img: cap for img, cap in pairing["pairs"]}
+    plan = build_plan(images, opts)
+    report.messages.extend(plan.messages)
+    report.degraded = plan.degraded
+    if plan.collisions:
+        report.failed = len(plan.collisions)
+        report.messages.append(
+            f"unsafe output plan: {len(plan.collisions)} destination collision(s)"
+        )
+        for output, owners in list(plan.collisions.items())[:10]:
+            report.messages.append(f"collision: {output} ← {', '.join(owners)}")
+        return report
+    pairing = plan.pairing
     report.pairs = len(pairing["pairs"])
     report.missing = len(pairing["missing"])
     report.orphans = len(pairing["orphans"])
     log(f"paired {report.pairs} · missing captions {report.missing} · orphan captions {report.orphans}")
 
-    pil_ok = _pillow_available()
-    if not pil_ok:
-        report.degraded = True
-        report.messages.append("Pillow not installed — width/height unavailable in manifest.")
-
-    ordered = sorted(images, key=lambda p: _natural_key(p.name.lower()))
-    split_map = split_assign([p.name for p in ordered], opts.ratios) if opts.operation == "split" else {}
-
     if not opts.dry_run and out_root is None and opts.operation != "pair_report":
         report.messages.append("No output folder set — nothing copied (preview only).")
 
-    total = len(ordered)
-    for i, img in enumerate(ordered, 1):
+    total = len(plan.items)
+    for i, item in enumerate(plan.items, 1):
         if should_stop():
             report.messages.append("— stopped —")
             break
-        cap = caption_of.get(img)
-        dims = image_dims(img) if pil_ok else None
-        w, h = dims if dims else (None, None)
+        img, cap = item.image, item.caption
+        w, h = item.width, item.height
         try:
             digest = sha256_file(img)
         except OSError as ex:
@@ -480,17 +582,15 @@ def run(paths, opts: DatasetOptions, log=None, progress=None, should_stop=None) 
             report.failed += 1
             report.messages.append(f"sha256 failed {img.name}: {ex}")
 
-        bucket = ""
-        split = ""
+        bucket = item.bucket
+        split = item.split
         log(f"[{i}/{total}] {img.name}")
         if opts.operation == "bucket":
-            bucket = bucket_for(w, h, opts.bucket_mode)
-            if out_root is not None:
-                _copy_pair(img, cap, out_root / bucket, report, log, writable)
+            if item.image_output is not None:
+                _copy_pair(img, cap, item.image_output.parent, report, log, writable)
         elif opts.operation == "split":
-            split = split_map.get(img.name, "train")
-            if out_root is not None:
-                _copy_pair(img, cap, out_root / split, report, log, writable)
+            if item.image_output is not None:
+                _copy_pair(img, cap, item.image_output.parent, report, log, writable)
         elif opts.operation == "replace":
             if out_root is not None or opts.dry_run:
                 _replace_pair(img, cap, out_root or img.parent, opts, report, log, writable)
@@ -509,7 +609,7 @@ def run(paths, opts: DatasetOptions, log=None, progress=None, should_stop=None) 
             report.manifest = res["data"]
         if opts.operation == "pair_report":
             try:
-                report.pair_report = _write_pair_report(out_root, pairing)
+                report.pair_report = _write_pair_report(out_root, plan.pairing)
             except OSError as ex:
                 report.messages.append(f"pair report write failed: {ex}")
 

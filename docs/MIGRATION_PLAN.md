@@ -316,10 +316,17 @@ two selected `same.png` inputs reported two copies but produced one output.
 
 The first checkpoint adds a resolved-path guard that rejects any real output
 root equal to a selected source folder before discovery, hashing, copying, or
-manifest writes. The smoke suite snapshots every source byte and proves the
-mistaken configuration writes nothing. Cross-input destination collisions,
-grouped queue execution, cancellation, staged whole-run provenance, and exact
-reuse remain part of this active slice and are not yet claimed complete.
+manifest writes. The second introduces one deterministic destination plan for
+images, captions, manifests, and pair reports. Dimensions read for bucket
+planning are carried into execution rather than decoded twice. All selected
+sources are checked with the shared collision primitive, and the reproduced
+same-name case now fails before creating its output folder.
+
+The smoke suite snapshots every source byte and proves the mistaken
+configuration writes nothing, then selects two different `same.png` sources
+and proves the collision plan produces zero outputs. Grouped queue execution,
+strict settings, streaming cancellation, staged whole-run provenance, and
+exact reuse remain part of this active slice and are not yet claimed complete.
 
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display

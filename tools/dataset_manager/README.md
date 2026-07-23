@@ -41,6 +41,9 @@ Point it at a folder of images. Sidecar captions are matched by **stem** —
   copied or changed, writing nothing.
 - **Deterministic.** Pairing, bucketing, and the split are pure functions of the
   sorted inputs — reproducible, no RNG.
+- **Collision-safe planning.** Every image, caption, manifest, and pair-report
+  destination is resolved before copying. Same-name inputs that would share an
+  output are rejected as one unsafe plan before the first write.
 - **Atomic writes.** Every file is written to a `.part` temp then swapped into
   place, so a crash can't leave a half-written caption or manifest.
 
@@ -51,7 +54,7 @@ Point it at a folder of images. Sidecar captions are matched by **stem** —
 | Caption extensions | all | Comma-separated, e.g. `.txt, .caption`. |
 | Find / Replace / Regex | replace | Regex uses Python `re`; an invalid pattern fails loudly before any write. |
 | Bucket by | bucket | `dimensions` (WxH folders) or `aspect` (portrait/landscape/square). |
-| Split ratios | split | `train / val / test`; normalised, so they need not sum to 1. |
+| Split ratios | split | `train / val / test`; normalised, so they need not sum to 1. Assignment uses the sorted full source path, so duplicate filenames remain deterministic. |
 | Output folder | all | Results are copied here. Required unless *Preview only*. |
 | Preview only | all | Default on — lists actions, writes nothing. |
 

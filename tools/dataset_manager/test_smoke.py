@@ -138,6 +138,25 @@ def test_full_pipeline() -> None:
         guarded_after = {path: path.read_bytes() for path in src.iterdir() if path.is_file()}
         assert guarded_before == guarded_after, "same-folder output modified a source"
 
+        # Two source trees with the same destination name must be rejected as a
+        # complete plan before the first copy, never silently last-writer-wins.
+        left = Path(td) / "left"; right = Path(td) / "right"
+        left.mkdir(); right.mkdir()
+        from PIL import Image
+        left_image = left / "same.png"; right_image = right / "same.png"
+        Image.new("RGB", (16, 16), "red").save(left_image)
+        Image.new("RGB", (16, 16), "blue").save(right_image)
+        collision_out = Path(td) / "collision"
+        collision = e.run(
+            [left_image, right_image],
+            e.DatasetOptions(
+                operation="split", ratios=(1, 0, 0),
+                out_root=collision_out, dry_run=False,
+            ),
+        )
+        assert collision.failed and any("destination collision" in m for m in collision.messages)
+        assert not collision_out.exists(), "collision plan wrote partial output"
+
     print("PASS: full pipeline — pair_report + split + bucket copied; SOURCES UNCHANGED; manifest non-empty.")
 
 
