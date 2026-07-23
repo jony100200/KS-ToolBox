@@ -64,7 +64,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Preview, confirm, logging | Batch tools use preview/manifests; destructive compressor confirms | Good, verify per new feature |
 | Atomic output | Common pattern is temporary output then replace | Good, standardize and test crash recovery |
 | Error envelope | Shared `ok`/`err` helpers exist | Good, add conformance tests |
-| Durable batch execution | Runner/store plus shell queue implemented for twelve contrasting image, media, document, material, analysis, archive, and grouped-audit workflows | Good proven core; migrate remaining tools individually |
+| Durable batch execution | Runner/store plus shell queue implemented for thirteen contrasting image, media, document, material, analysis, archive, grouped-audit, and dataset workflows | Good proven core; migrate remaining tools individually |
 | Failure isolation/recovery | Per-item quarantine/retry, pause/resume/cancel, history, and finalization warnings | Good contract; manual item retry remains |
 | Content identity/cache | No shared persistent content-addressed cache | Missing |
 | Incremental recomputation | Mostly output-exists checks | Partial and settings-blind |
@@ -92,7 +92,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Texture Renderer | user-provided Substance/Material Maker CLIs | Deterministic orchestration | executable/version capability checks, render cache, preset/schema normalization |
 | Package Extractor | cancellable safe stdlib extraction, preview bomb budgets, atomic reports, durable queue, recursive hash validation, collision protection | Deterministic | optional Unity bundle adapter, entry-count profiling, stronger fuzz corpus |
 | Asset Auditor | durable grouped corruption/exact-duplicate checks, indexed dHash grouping, health analysis, cancellable exact report-set validation/reuse | Deterministic | optional embedding escalation only for ambiguous semantic similarity after deterministic candidates |
-| Dataset Manager | pair/split/bucket with copy-only safety | Deterministic | stable hash splits, leakage/duplicate checks, class balance and optional label QA |
+| Dataset Manager | durable grouped pair/replace/split/bucket; copy-only planner; JSON-last provenance; exact output reuse and repair | Deterministic | stable hash splits, leakage/duplicate checks, class balance and optional label QA |
 
 ## Cross-cutting performance findings
 
@@ -108,7 +108,7 @@ The old audit's startup and package-size numbers were measured against five tool
 ### Batch processing
 
 Files are independent and most batch tools run them serially. This is a safe
-baseline. Twelve contrasting tools now run serially through the durable shared
+baseline. Thirteen contrasting tools now run serially through the durable shared
 runner; the remaining tools retain existing panel loops until migrated.
 Concurrency is not automatically an optimization:
 
@@ -185,7 +185,7 @@ Every implementation slice in the roadmap must record:
 
 ## Audit conclusion
 
-The architecture is being evolved, not rewritten. Twelve durable batch slices and
+The architecture is being evolved, not rewritten. Thirteen durable batch slices and
 the shell-owned queue are implemented and verified without changing
 CustomTkinter or proven processing algorithms. They now cover in-process image,
 external-media, grouped-material, analytical, and secure archive contracts.

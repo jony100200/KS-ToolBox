@@ -307,32 +307,55 @@ The 4s are explicit boundaries: peak RAM is not yet measured, reports retain
 professional detail, reuse is whole-collection rather than content-addressed
 per stage, and the necessary report/recovery failure paths increase local code.
 
-### Slice 3m — in progress: safe, durable Dataset Manager
+### Slice 3m — implemented safe, durable Dataset Manager
 
-The opening audit reproduced a source-integrity defect: selecting the source
-folder as the real output changed an original caption during Replace while the
-report claimed zero failures. It also reproduced cross-folder same-name loss:
-two selected `same.png` inputs reported two copies but produced one output.
+The audit reproduced two data-integrity defects. Selecting a source folder as
+the real output changed an original caption during Replace while reporting zero
+failures. Selecting two same-name images from different folders reported two
+copies but silently produced one output. Resolved-path guards and a complete
+destination plan now reject both configurations before the first output write.
+The plan includes images, captions, manifests, pair reports, and the completion
+marker, and carries dimensions into execution instead of decoding twice.
 
-The first checkpoint adds a resolved-path guard that rejects any real output
-root equal to a selected source folder before discovery, hashing, copying, or
-manifest writes. The second introduces one deterministic destination plan for
-images, captions, manifests, and pair reports. Dimensions read for bucket
-planning are carried into execution rather than decoded twice. All selected
-sources are checked with the shared collision primitive, and the reproduced
-same-name case now fails before creating its output folder.
+One selected dataset is now one durable queue item. All selected images and
+discovered sidecars contribute to its identity. Copy, caption read/write,
+dimension inspection, report generation, hashing, and exact validation observe
+cancellation at bounded checkpoints. Files commit atomically, SHA-256 is
+collected from the same bounded byte stream used for each copy, and
+`dataset_provenance.json` commits last only after the completed artifact set
+exactly matches the planned paths. Reuse re-hashes every recorded output;
+same-size corruption causes deterministic re-execution and repair.
 
-The smoke suite snapshots every source byte and proves the mistaken
-configuration writes nothing, then selects two different `same.png` sources
-and proves the collision plan produces zero outputs. The third checkpoint adds
-strict normalized settings: safe unique caption suffixes, three finite
-non-negative split ratios, compiled bounded regex text, a 1 MiB replacement
-ceiling, required real-run destination, and a 100,000-image grouped-run cap.
-Malformed settings now fail before directory discovery or decoding.
+Strict normalized settings reject unsafe or duplicate caption suffixes,
+non-finite/negative/empty split ratios, invalid or oversized regex text,
+replacement text over 1 MiB, missing real-run destinations, captions over
+16 MiB, and grouped runs over 100,000 selected images. Detailed manifests stay
+on disk while SQLite receives a bounded result summary and one marker artifact.
+Provenance cannot name duplicate outputs, itself, or a path outside the chosen
+output root.
 
-Grouped queue execution, streaming cancellation, staged whole-run provenance,
-and exact reuse remain part of this active slice and are not yet claimed
-complete.
+| Review item | Evidence |
+|---|---|
+| Current behavior | Panel-local aggregate execution; boundary-only stop; no durable pause/recovery; copy/report failures could be undercounted; reports committed independently; no exact stored-result validation; unsafe source-root and same-name plans could alter or lose data |
+| Proposed behavior | One grouped durable job with all-source identity, strict planning/settings, bounded cancellation, controlled retry/quarantine, atomic outputs, JSON-last provenance, exact reuse, corruption repair, history, and completion report |
+| Architecture/language | Existing headless Python engine, CustomTkinter panel, deterministic pairing/split/bucket/replace primitives, Pillow metadata path, and shared shell queue are composed without changing the plugin contract, adding a service, or introducing a rewrite |
+| Functionality and quality | Pair reports, copy-only replace, dimension/aspect buckets, deterministic train/val/test splits, CSV/JSON manifests, preview, degradation reporting, and source preservation remain; invalid UTF-8 captions now fail visibly instead of being silently rewritten with replacement characters |
+| Code and dependency impact | Dataset Manager production source 781 → 1,287 nonblank lines (+506 for typed compact results, one-pass planning, cancellation, atomic artifact capture, provenance, validation, durable UI adapter, and explicit failure paths); zero dependencies, models, assets, binaries, processes, or services added |
+| Package-size impact | Source-only change with no dependency/binary payload; the complete packaged artifact was not rebuilt, so no package-size change is claimed |
+| Startup and runtime impact | Ready-to-mainloop measured 157 ms with 28 ms discovery and no optional-heavy imports; paired five-run 200 image-caption split medians measured 722.3 → 910.4 ms (+188.0 ms, +26.0%) for atomic streaming plus complete provenance; an earlier double-read design measured 2,033.4 ms and was rejected; exact reuse validation measured 508.5 ms |
+| RAM, VRAM, CPU, disk, and GPU transfer | The grouped plan, manifest rows, and provenance are O(n); selected images cap at 100,000, persisted warnings at 101, captions at 16 MiB, copy buffers at 1 MiB; initial copies hash their write stream rather than rereading outputs; exact reuse performs one streamed read per output; peak RAM/CPU/disk throughput are not claimed measured; no GPU, VRAM, model, or transfer |
+| AI and model-loading impact | Zero AI calls and model loads; pairing, path planning, copying, replacement, bucketing, splitting, hashing, and validation are exact deterministic work |
+| Batch, cache, and incremental impact | Whole-dataset retry/quarantine/checkpoint and exact output-set reuse replace the panel loop; unchanged work avoids recopying after 508.5 ms validation versus 910.4 ms execution on the measured sample; identity includes discovered caption sidecars; reuse remains whole-dataset rather than per-stage content caching |
+| Reliability, security, tests, and benchmarks | Source-root and all-output collision gates run before writes; old provenance is invalidated before execution; item failures continue scanning but fail the grouped job; marker-last publication prevents partial work being trusted; paths are confined to the output root; focused smoke covers source snapshots, collisions, malformed settings, cancellation cleanup, forged provenance, same-size corruption, and exact validation; thirteen-workflow UI integration proves reuse and repair |
+| Risks and rollback | A grouped collection is the recovery/quarantine unit, JSON/manifest construction remains O(n), exact reuse deliberately rereads all outputs, Pillow decode cannot be interrupted inside one native call, and cross-file atomic commit is unavailable. Revert panel/tool adapter and process/provenance/validation layer together; the earlier source guard, planner, settings validation, and deterministic engine can remain independently |
+
+Cartridge score: functional completeness 5, output quality 5, runtime 4,
+startup 5, memory 4, storage 4, batch 5, cache 4, incremental execution 4,
+AI efficiency 5, reliability 5, maintainability 4, portability 5, and security 5.
+The 4s are explicit boundaries: durable validation adds measured runtime,
+peak resources are not yet instrumented, professional manifests/provenance are
+O(n), reuse is whole-dataset rather than stage-level, and explicit recovery
+paths necessarily add local code.
 
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display

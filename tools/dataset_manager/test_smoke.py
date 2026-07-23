@@ -13,6 +13,7 @@ Run standalone:  python -m tools.dataset_manager.test_smoke
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -174,6 +175,69 @@ def test_full_pipeline() -> None:
         )
         assert collision.failed and any("destination collision" in m for m in collision.messages)
         assert not collision_out.exists(), "collision plan wrote partial output"
+
+        # Durable grouped result: JSON-last provenance, exact reuse validation,
+        # same-size corruption rejection, preview validation, and cancellation.
+        durable_out = Path(td) / "durable"
+        durable_opts = e.DatasetOptions(
+            operation="split", out_root=durable_out,
+            ratios=(0.8, 0.1, 0.1), dry_run=False,
+        )
+        durable = e.process(images, durable_opts)
+        assert durable.action == "processed", durable.reason
+        assert e.validate_result(durable, durable_opts)
+        marker = durable_out / "dataset_provenance.json"
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        assert payload["schema"] == 1 and payload["outputs"]
+        victim = Path(payload["outputs"][0]["path"])
+        victim_bytes = victim.read_bytes()
+        victim.write_bytes(b"X" * len(victim_bytes))
+        assert not e.validate_result(durable, durable_opts), "corrupt output was reused"
+        victim.write_bytes(victim_bytes)
+        assert e.validate_result(durable, durable_opts)
+        marker_bytes = marker.read_bytes()
+        payload["outputs"][0]["path"] = str(images[0])
+        marker.write_text(json.dumps(payload), encoding="utf-8")
+        forged = e.DatasetResult(**durable.to_dict())
+        forged.artifacts = [e._artifact(marker)]
+        assert not e.validate_result(
+            forged, durable_opts
+        ), "provenance escaped the output root"
+        marker.write_bytes(marker_bytes)
+        assert e.validate_result(durable, durable_opts)
+
+        preview_opts = e.DatasetOptions(operation="bucket", dry_run=True)
+        preview = e.process(images, preview_opts)
+        assert preview.action == "preview" and e.validate_result(preview, preview_opts)
+        cancelled_out = Path(td) / "cancelled"
+        try:
+            e.process(
+                images,
+                e.DatasetOptions(operation="split", out_root=cancelled_out, dry_run=False),
+                cancelled=lambda: True,
+            )
+        except e.CommandCancelled:
+            pass
+        else:
+            raise AssertionError("dataset cancellation did not propagate")
+        assert not cancelled_out.exists()
+
+        csv_calls = 0
+        def cancel_csv() -> bool:
+            nonlocal csv_calls
+            csv_calls += 1
+            return csv_calls > 2
+        cancelled_csv = Path(td) / "cancelled.csv"
+        try:
+            e._write_csv(
+                cancelled_csv, ["value"], [[index] for index in range(20)], cancel_csv
+            )
+        except e.CommandCancelled:
+            pass
+        else:
+            raise AssertionError("CSV cancellation did not propagate")
+        assert not cancelled_csv.exists()
+        assert not list(Path(td).rglob("*.part.*")), "dataset left staged files"
 
     print("PASS: full pipeline — pair_report + split + bucket copied; SOURCES UNCHANGED; manifest non-empty.")
 

@@ -9,7 +9,8 @@ changing tool algorithms. `image_rescale`, `video_compressor`,
 multi-family `format_converter`, `material_converter`, mode-aware `showcase`,
 analytical `tileset_checker`, and secure multi-artifact `package_extractor` are
 joined by grouped, exact-report-set `asset_auditor` as the first production
-whole-collection audit integration.
+whole-collection audit integration, and grouped `dataset_manager` with
+JSON-last output provenance and exact repair-on-corruption reuse.
 
 ## Job lifecycle
 

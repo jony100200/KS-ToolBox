@@ -34,7 +34,8 @@ Point it at a folder of images. Sidecar captions are matched by **stem** —
 ## Why it's safe
 
 - **Non-destructive.** Nothing is moved or deleted; sources are never modified.
-  All output goes under one output root via `shutil.copy2` / freshly written text.
+  All output goes under one output root via bounded streaming copies or freshly
+  written text.
   A real run refuses an output folder that is itself one of the selected source
   folders, preventing Replace or Copy from targeting an original file.
 - **Preview-first.** *Preview only* (the default) lists exactly what *would* be
@@ -46,6 +47,15 @@ Point it at a folder of images. Sidecar captions are matched by **stem** —
   output are rejected as one unsafe plan before the first write.
 - **Atomic writes.** Every file is written to a `.part` temp then swapped into
   place, so a crash can't leave a half-written caption or manifest.
+- **Durable grouped queue.** The selected collection is one recoverable job with
+  pause, cancellation, one controlled retry, quarantine, history, and a morning
+  report. Every selected image and discovered caption contributes to job identity.
+- **Validated reuse.** Each committed output records its byte count and SHA-256
+  in `dataset_provenance.json`, which commits last. An unchanged job is reused
+  only after every output hashes correctly; corruption triggers a fresh run.
+- **Bounded work.** Copies hash the same byte stream they write using a 1 MiB
+  buffer. Captions are capped at 16 MiB and persisted queue messages are bounded.
+  Provenance paths must be unique and remain inside the chosen output folder.
 
 ## Options
 
@@ -80,7 +90,9 @@ $env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; H:\Apps\scoop\shims\uv.exe run --no-pr
 
 The smoke test proves pairing/bucketing/split/replace math, then runs a real
 temp dataset through pair_report + split + bucket and **asserts the sources are
-byte-for-byte unchanged** afterward.
+byte-for-byte unchanged** afterward. It also covers unsafe output plans, strict
+settings, cancellation cleanup, JSON-last provenance, same-size corruption,
+path confinement, and exact validation.
 
 ## Credits
 

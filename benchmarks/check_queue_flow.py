@@ -112,6 +112,35 @@ def main() -> int:
             assert not app._services.queue.completion(audit_job_id).report.reused
             assert b"<html" in audit_html.read_bytes().lower()
 
+            dataset_src = root / "dataset_src"
+            dataset_src.mkdir()
+            dataset_a, dataset_b = dataset_src / "ds_a.png", dataset_src / "ds_b.png"
+            Image.new("RGB", (48, 48), (120, 30, 30)).save(dataset_a)
+            Image.new("RGB", (64, 48), (30, 120, 30)).save(dataset_b)
+            (dataset_src / "ds_a.txt").write_text("red subject", encoding="utf-8")
+            (dataset_src / "ds_b.txt").write_text("green subject", encoding="utf-8")
+            app._select("dataset_manager")
+            dataset_panel = app._panels["dataset_manager"]
+            dataset_panel._add([dataset_a, dataset_b])
+            dataset_panel._op.set("Train / val / test split")
+            dataset_panel._on_op_change("Train / val / test split")
+            dataset_panel._dry.deselect()
+            dataset_out = root / "dataset_out"
+            dataset_panel._out_entry.insert(0, str(dataset_out))
+            dataset_job_id = _run_and_wait(app, dataset_panel, "Dataset Manager", 1)
+            dataset_marker = dataset_out / "dataset_provenance.json"
+            assert dataset_marker.is_file()
+            assert len(list(dataset_out.rglob("ds_*.png"))) == 2
+            dataset_reuse_id = _run_and_wait(app, dataset_panel, "Dataset Manager reuse", 1)
+            assert dataset_reuse_id == dataset_job_id
+            assert app._services.queue.completion(dataset_job_id).report.reused
+            dataset_victim = next(dataset_out.rglob("ds_*.png"))
+            dataset_victim.write_bytes(b"X" * dataset_victim.stat().st_size)
+            dataset_repair_id = _run_and_wait(app, dataset_panel, "Dataset Manager repair", 1)
+            assert dataset_repair_id == dataset_job_id
+            assert not app._services.queue.completion(dataset_job_id).report.reused
+            assert dataset_victim.read_bytes() != b"X" * dataset_victim.stat().st_size
+
             app._select("material_converter")
             material_panel = app._panels["material_converter"]
             material_panel._add([material_base, material_rough])
@@ -215,6 +244,7 @@ def main() -> int:
             assert any(item.job_id == pixel_job_id for item in app._services.queue.history())
             assert any(item.job_id == format_job_id for item in app._services.queue.history())
             assert any(item.job_id == audit_job_id for item in app._services.queue.history())
+            assert any(item.job_id == dataset_job_id for item in app._services.queue.history())
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
@@ -229,7 +259,7 @@ def main() -> int:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "Format Converter, Asset Auditor, Material Converter, Showcase, Tileset Checker, Package "
+          "Format Converter, Asset Auditor, Dataset Manager, Material Converter, Showcase, Tileset Checker, Package "
           "Extractor, Audio Tool, Video Compressor, and Video Chopper through the shell "
           "queue; history UI rendered.")
     return 0

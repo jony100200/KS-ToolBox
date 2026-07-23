@@ -6,6 +6,7 @@ engine.py. The operation dropdown swaps which sub-options are visible.
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 import customtkinter as ctk
@@ -14,6 +15,8 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 _OP_LABELS = {
@@ -30,8 +33,10 @@ class DatasetManagerPanel(BaseBatchPanel):
     RESULTS_ICON = Icons.CHART
     RUN_LABEL = "Preview & Run"
 
-    def __init__(self, parent):
-        super().__init__(parent)
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
+        self._stage_progress: tuple[int, int] | None = None
+        self._last_stage_position = 0
         self._on_op_change(self._op.get())
 
     # -- options (tool-specific) ----------------------------------------------
@@ -161,31 +166,117 @@ class DatasetManagerPanel(BaseBatchPanel):
         def progress(done: int, total: int):
             self.after(0, self._progress.set, done / total if total else 1)
 
-        report = e.run(files, opts, log=log, progress=progress, should_stop=self._stop.is_set)
-        self.after(0, self._done, report)
+        result = e.process(
+            files, opts, log=log, progress=progress,
+            cancelled=lambda: self._stop.is_set(),
+        )
+        self.after(0, self._done, result, result.out_path)
 
-    def _write_manifest(self, opts, results):   # engine writes its own manifest inside run()
-        return None
+    def _build_submission(self, files: list[Path], opts: e.DatasetOptions) -> QueueSubmission:
+        files = sorted(files, key=lambda path: str(path).casefold())
+        dependencies = e.identity_dependencies(files, opts)
+        self._stage_progress = None
+        self._last_stage_position = 0
+        definition = JobDefinition.create(
+            tool_id="dataset_manager",
+            tool_version="1",
+            workflow_version="grouped-dataset.v2",
+            inputs=[files[0]],
+            identity_dependencies=dependencies,
+            settings=asdict(opts),
+            max_retries=1,
+        )
 
-    def _show(self, *_):                          # streaming handled via the log callback
-        pass
+        def execute(_anchor: Path, token) -> e.DatasetResult:
+            return e.process(
+                files, opts,
+                progress=self._record_stage_progress,
+                cancelled=lambda: token.is_cancelled,
+            )
 
-    def _done(self, report: e.Report):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        state = "error" if report.failed else ("waiting" if report.degraded else "done")
-        self._status.set_state("DONE", state)
-        self._progress.set(1)
-        for msg in report.messages:
+        def classify(result: e.DatasetResult) -> ItemOutcome:
+            data = result.to_dict()
+            if result.action == "processed":
+                if result.degraded or result.messages:
+                    return ItemOutcome.warning(data, result.reason)
+                return ItemOutcome.completed(data, result.reason)
+            if result.action == "preview":
+                return ItemOutcome.skipped(data, result.reason)
+            return ItemOutcome.failed(
+                result.reason, retryable=result.retryable, data=data
+            )
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Dataset Manager {opts.operation.replace('_', ' ').title()} · {len(files)} image(s)",
+            execute=execute,
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="dataset_manager"
+            ),
+        )
+
+    def _record_stage_progress(self, done: int, total: int) -> None:
+        self._stage_progress = (done, total)
+
+    def _on_queue_snapshot(self, snapshot) -> None:
+        super()._on_queue_snapshot(snapshot)
+        stage = self._stage_progress
+        if stage is not None and stage[0] != self._last_stage_position:
+            self._last_stage_position = stage[0]
+            self._progress.set(stage[0] / stage[1] if stage[1] else 1)
+
+    def _write_manifest(self, _opts, results):
+        return next(
+            (result.out_path for result in results if result.action == "processed"),
+            None,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.DatasetResult:
+        if item.data and {"action", "reason", "operation"}.issubset(item.data):
+            return e.DatasetResult(**item.data)
+        return e.DatasetResult(
+            "failed", item.details or "dataset run quarantined", "unknown",
+            detail="batch.quarantined",
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        result = payload.results[0] if payload.results else e.DatasetResult(
+            "failed", "dataset run produced no terminal result", "unknown",
+            detail="batch.empty",
+        )
+        self._done(
+            result, payload.manifest or result.out_path, payload.report_path,
+            self._queue_completion_state(completion), completion.report.recovered,
+            completion.report.reused,
+        )
+
+    def _show(self, result: e.DatasetResult, _position: int, _total: int):
+        icon = "✓" if result.action in {"processed", "preview"} else "✗"
+        color = t.STATE["done"][1] if result.action == "processed" else t.TEXT_MUTED
+        if result.action == "failed":
+            color = t.STATE["error"][1]
+        self._logline(f"  {icon} {result.reason}", color)
+
+    def _done(self, result: e.DatasetResult, manifest=None, report_path=None,
+              job_state=JobState.COMPLETED, recovered=False, reused=False):
+        for msg in result.messages:
             self._logline(f"  {msg}", t.TEXT_MUTED)
-        op = report.operation
+        op = result.operation
         if op == "pair_report":
-            summary = f"paired {report.pairs} · missing {report.missing} · orphans {report.orphans}"
+            summary = f"paired {result.pairs} · missing {result.missing} · orphans {result.orphans}"
         elif op == "replace":
-            summary = f"{report.changed} replacement(s) · copied {report.copied} · failed {report.failed}"
+            summary = f"{result.changed} replacement(s) · copied {result.copied} · failed {result.failed}"
         else:
-            summary = f"copied {report.copied} · pairs {report.pairs} · failed {report.failed}"
-        self._summary.configure(text=summary)
-        if report.manifest:
-            self._logline(f"  manifest: {report.manifest['csv']}", t.TEXT_MUTED)
-        if report.pair_report:
-            self._logline(f"  pair report: {report.pair_report['csv']}", t.TEXT_MUTED)
+            summary = f"copied {result.copied} · pairs {result.pairs} · failed {result.failed}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

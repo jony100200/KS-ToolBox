@@ -16,7 +16,7 @@ class DatasetManagerTool:
     )
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
-        # Lazy import: the panel pulls Pillow. Keeping it out of module import
-        # means discovery/the sidebar work even before Pillow is installed.
+        # Lazy import keeps presentation and engine modules out of discovery.
+        # The engine resolves optional Pillow support only when needed.
         from .panel import DatasetManagerPanel
-        return DatasetManagerPanel(parent)
+        return DatasetManagerPanel(parent, services.queue)
