@@ -24,13 +24,29 @@ VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm", ".wmv",
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 
 
-def sha256_file(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
+class CommandCancelled(subprocess.SubprocessError):
+    """Raised after an owned external command or file operation is cancelled."""
+
+    def __init__(self, cmd: list[str]) -> None:
+        super().__init__(f"command cancelled: {Path(cmd[0]).name}")
+        self.cmd = cmd
+
+
+def sha256_file(
+    path: str | Path,
+    chunk_size: int = 1024 * 1024,
+    cancelled: Callable[[], bool] | None = None,
+) -> str:
     """Stream a file into SHA-256 without loading it into memory."""
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
+    if cancelled is not None and cancelled():
+        raise CommandCancelled(["sha256", str(path)])
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
         for chunk in iter(lambda: handle.read(chunk_size), b""):
+            if cancelled is not None and cancelled():
+                raise CommandCancelled(["sha256", str(path)])
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -127,14 +143,6 @@ def run_cmd(cmd: list[str], timeout: int | None = None) -> subprocess.CompletedP
     No console window flashes on Windows."""
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
                           creationflags=(0x08000000 if os.name == "nt" else 0))
-
-
-class CommandCancelled(subprocess.SubprocessError):
-    """Raised after an owned external process is stopped by user cancellation."""
-
-    def __init__(self, cmd: list[str]) -> None:
-        super().__init__(f"command cancelled: {Path(cmd[0]).name}")
-        self.cmd = cmd
 
 
 def run_cancellable_cmd(

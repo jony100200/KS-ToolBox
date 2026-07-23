@@ -18,4 +18,4 @@ class AudioTool:
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import: keeps discovery/the sidebar working before the panel loads.
         from .panel import AudioToolPanel
-        return AudioToolPanel(parent)
+        return AudioToolPanel(parent, services.queue)

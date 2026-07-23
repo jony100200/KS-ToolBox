@@ -5,8 +5,9 @@ owns shell-wide submission, priority ordering, pause/resume/cancel controls,
 immutable progress snapshots, and history. Together they remove recovery,
 retry, failure-isolation, and worker ownership from migrated panels without
 changing tool algorithms. `image_rescale`, `video_compressor`,
-`icon_normalizer`, `pixel_art`, `material_converter`, mode-aware `showcase`, and
-analytical `tileset_checker` are the first production integrations.
+`audio_tool`, `icon_normalizer`, `pixel_art`, `material_converter`, mode-aware
+`showcase`, and analytical `tileset_checker` are the first production
+integrations.
 
 ## Job lifecycle
 

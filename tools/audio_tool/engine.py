@@ -26,12 +26,21 @@ Public interface:
 """
 from __future__ import annotations
 
+import math
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
 from toolbox.engine_common import (
-    ok, err, resolve_tool, run_cmd, tools_status as _tools_status_raw,
+    CommandCancelled,
+    find_output_collisions as _find_collisions,
+    ok,
+    err,
+    resolve_tool,
+    run_cancellable_cmd,
+    sha256_file,
+    tools_status as _tools_status_raw,
 )
 
 # Every extension accepted as input. Output is restricted to the seven formats
@@ -94,15 +103,19 @@ def _parse_time(s: str | None) -> float | None:
             sec = 0.0
             for part in s.split(":"):
                 sec = sec * 60 + float(part)
-            return sec
-        return float(s)
+            return sec if math.isfinite(sec) else None
+        value = float(s)
+        return value if math.isfinite(value) else None
     except ValueError:
         return None
 
 
 # --- probe (ffprobe) ----------------------------------------------------------
 
-def probe_duration(path: str | Path) -> dict:
+def probe_duration(
+    path: str | Path,
+    cancelled: Callable[[], bool] | None = None,
+) -> dict:
     """Total duration in seconds. Standard envelope."""
     p = Path(path)
     if not p.is_file():
@@ -113,16 +126,19 @@ def probe_duration(path: str | Path) -> dict:
     cmd = [fp, "-v", "error", "-show_entries", "format=duration",
            "-of", "default=noprint_wrappers=1:nokey=1", str(p)]
     try:
-        r = run_cmd(cmd, timeout=60)
+        r = run_cancellable_cmd(cmd, timeout=60, cancelled=cancelled)
     except subprocess.TimeoutExpired:
         return err("probe.timeout", f"ffprobe timed out on {p.name}", retryable=True)
     if r.returncode != 0:
         return err("probe.failed", f"ffprobe failed: {(r.stderr or '').strip()[:200]}")
     text = (r.stdout or "").strip()
     try:
-        return ok(float(text))
+        duration = float(text)
     except ValueError:
         return err("probe.parse", f"could not read duration from ffprobe ({text!r})")
+    if not math.isfinite(duration) or duration <= 0:
+        return err("probe.parse", f"invalid duration from ffprobe ({text!r})")
+    return ok(duration)
 
 
 # --- filter chain (pure) ------------------------------------------------------
@@ -174,6 +190,10 @@ class Result:
     ops: str = ""                       # human summary of operations
     out_path: str | None = None
     detail: str = ""
+    output_bytes: int = 0
+    output_sha256: str = ""
+    duration_seconds: float = 0.0
+    retryable: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -198,6 +218,11 @@ def plan_output(src: str | Path, opts: AudioOptions) -> Path:
     return src.parent / "audio" / name
 
 
+def find_output_collisions(paths, opts: AudioOptions) -> dict[str, tuple[str, ...]]:
+    """Find shared output names and outputs that target selected inputs."""
+    return _find_collisions(paths, lambda source: (plan_output(source, opts),))
+
+
 def _describe_ops(opts: AudioOptions, src: Path, tgt_ext: str) -> str:
     ops: list[str] = []
     if src.suffix.lower() != tgt_ext:
@@ -216,7 +241,8 @@ def _describe_ops(opts: AudioOptions, src: Path, tgt_ext: str) -> str:
 # --- ffmpeg run ---------------------------------------------------------------
 
 def _run_ffmpeg(src: Path, dst: Path, opts: AudioOptions,
-                start: float | None, end: float | None, af: str) -> dict:
+                start: float | None, end: float | None, af: str,
+                cancelled: Callable[[], bool] | None = None) -> dict:
     """`ffmpeg -y [-ss][-to] -i SRC -vn [-af] <codec> -f <muxer> TMP` then
     atomic-replace. Envelope out."""
     ff = resolve_tool("ffmpeg")
@@ -226,7 +252,10 @@ def _run_ffmpeg(src: Path, dst: Path, opts: AudioOptions,
     muxer = _muxer(tgt_ext)
     if not muxer:
         return err("unsupported.target", f"no ffmpeg muxer for {tgt_ext}")
-    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as ex:
+        return err("io.prepare", f"could not prepare output folder: {ex}")
     tmp = dst.with_name(f"{dst.stem}.part{dst.suffix}")
 
     # Input-side seek: `-ss X -to Y` yields the [X, Y] segment and resets output
@@ -242,20 +271,62 @@ def _run_ffmpeg(src: Path, dst: Path, opts: AudioOptions,
     cmd = [ff, "-y", *pre, "-i", str(src), "-vn",
            *filt, *_audio_codec(tgt_ext, opts.bitrate), "-f", muxer, str(tmp)]
     try:
-        r = run_cmd(cmd, timeout=3600)
+        r = run_cancellable_cmd(cmd, timeout=3600, cancelled=cancelled)
+    except CommandCancelled:
+        tmp.unlink(missing_ok=True)
+        raise
     except subprocess.TimeoutExpired:
         tmp.unlink(missing_ok=True)
         return err("ff.timeout", f"ffmpeg timed out on {src.name}", retryable=True)
-    if r.returncode != 0 or not tmp.is_file() or tmp.stat().st_size == 0:
+    try:
+        candidate_ready = tmp.is_file() and tmp.stat().st_size > 0
+        candidate_error = ""
+    except OSError as ex:
+        candidate_ready = False
+        candidate_error = f"; candidate inspection failed: {ex}"
+    if r.returncode != 0 or not candidate_ready:
         tmp.unlink(missing_ok=True)
-        return err("ff.failed", f"ffmpeg failed: {(r.stderr or '')[-300:]}")
-    tmp.replace(dst)
-    return ok({"out_bytes": dst.stat().st_size})
+        return err("ff.failed", f"ffmpeg failed: {(r.stderr or '')[-300:]}{candidate_error}")
+
+    try:
+        inspected = probe_duration(tmp, cancelled=cancelled)
+    except CommandCancelled:
+        tmp.unlink(missing_ok=True)
+        raise
+    if inspected["error"] or not inspected["data"] or inspected["data"] <= 0:
+        tmp.unlink(missing_ok=True)
+        details = inspected["details"] if inspected["error"] else "output duration is zero"
+        return err(
+            "output.invalid",
+            f"ffmpeg candidate failed validation: {details}",
+            retryable=bool(inspected.get("retryable")),
+        )
+    try:
+        out_bytes = tmp.stat().st_size
+        digest = sha256_file(tmp, cancelled=cancelled)
+        if cancelled is not None and cancelled():
+            raise CommandCancelled(["audio-commit", str(tmp)])
+        tmp.replace(dst)
+    except CommandCancelled:
+        tmp.unlink(missing_ok=True)
+        raise
+    except OSError as ex:
+        tmp.unlink(missing_ok=True)
+        return err("io.commit", f"could not commit processed audio: {ex}", retryable=True)
+    return ok({
+        "out_bytes": out_bytes,
+        "output_sha256": digest,
+        "duration_seconds": float(inspected["data"]),
+    })
 
 
 # --- process ------------------------------------------------------------------
 
-def process(path: str | Path, opts: AudioOptions) -> Result:
+def process(
+    path: str | Path,
+    opts: AudioOptions,
+    cancelled: Callable[[], bool] | None = None,
+) -> Result:
     """validate → plan → (dry-run report | probe if needed → ffmpeg), one file."""
     src = Path(path)
     if not src.is_file():
@@ -279,6 +350,19 @@ def process(path: str | Path, opts: AudioOptions) -> Result:
     if start is not None and end is not None and end <= start:
         return Result(str(src), "failed", f"trim end ({end:g}) must be after start ({start:g})",
                       detail="bad.trim")
+    if (start is not None and start < 0) or (end is not None and end < 0):
+        return Result(str(src), "failed", "trim times must be zero or positive", detail="bad.trim")
+    try:
+        fades_valid = (
+            math.isfinite(opts.fade_in)
+            and math.isfinite(opts.fade_out)
+            and opts.fade_in >= 0
+            and opts.fade_out >= 0
+        )
+    except (TypeError, ValueError):
+        fades_valid = False
+    if not fades_valid:
+        return Result(str(src), "failed", "fade times must be zero or positive", detail="bad.fade")
 
     dst = plan_output(src, opts)
     before, after = src.suffix.lstrip("."), opts.target_format
@@ -297,10 +381,10 @@ def process(path: str | Path, opts: AudioOptions) -> Result:
     # Fade-out needs the effective (post-trim) duration to place `st`.
     duration: float | None = None
     if opts.fade_out and opts.fade_out > 0:
-        pr = probe_duration(src)
+        pr = probe_duration(src, cancelled=cancelled)
         if pr["error"]:
             return Result(str(src), "failed", pr["details"], before=before, after=after,
-                          ops=ops, detail=pr["error_type"])
+                          ops=ops, detail=pr["error_type"], retryable=pr["retryable"])
         full = pr["data"]
         s = start or 0.0
         e_end = end if end is not None else full
@@ -309,9 +393,56 @@ def process(path: str | Path, opts: AudioOptions) -> Result:
         duration = max(0.0, e_end - s)
 
     af = build_filters(opts, duration)
-    res = _run_ffmpeg(src, dst, opts, start, end, af)
+    res = _run_ffmpeg(src, dst, opts, start, end, af, cancelled=cancelled)
     if res["error"]:
         return Result(str(src), "failed", res["details"], before=before, after=after,
-                      ops=ops, detail=res["error_type"])
+                      ops=ops, detail=res["error_type"], retryable=res["retryable"])
+    data = res["data"]
     return Result(str(src), "processed", ops, before=before, after=after, ops=ops,
-                  out_path=str(dst), detail=f"{res['data']['out_bytes'] / 1024:.0f} KB")
+                  out_path=str(dst), detail=f"{data['out_bytes'] / 1024:.0f} KB",
+                  output_bytes=data["out_bytes"], output_sha256=data["output_sha256"],
+                  duration_seconds=data["duration_seconds"])
+
+
+def validate_result(result: Result, opts: AudioOptions) -> bool:
+    """Verify stored decisions and exact, pre-validated audio artifacts."""
+    if result.action == "skipped":
+        return True
+    if result.action == "dry-run":
+        if not result.out_path:
+            return False
+        try:
+            return Path(result.out_path).resolve(strict=False) == plan_output(
+                result.src, opts
+            ).resolve(strict=False)
+        except (OSError, TypeError, ValueError):
+            return False
+    try:
+        metadata_valid = (
+            result.action == "processed"
+            and bool(result.out_path)
+            and isinstance(result.output_bytes, int)
+            and not isinstance(result.output_bytes, bool)
+            and result.output_bytes > 0
+            and isinstance(result.output_sha256, str)
+            and bool(result.output_sha256)
+            and isinstance(result.duration_seconds, (int, float))
+            and not isinstance(result.duration_seconds, bool)
+            and math.isfinite(result.duration_seconds)
+            and result.duration_seconds > 0
+        )
+    except (TypeError, ValueError):
+        return False
+    if not metadata_valid:
+        return False
+    try:
+        output = Path(result.out_path)
+        if output.resolve(strict=False) != plan_output(result.src, opts).resolve(strict=False):
+            return False
+        return (
+            output.is_file()
+            and output.stat().st_size == result.output_bytes
+            and sha256_file(output) == result.output_sha256
+        )
+    except (OSError, TypeError, ValueError):
+        return False

@@ -78,7 +78,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 |---|---|---:|---|
 | Video Compressor | cancellable ffprobe/x265/NVENC/HandBrake, staged candidate, VMAF rejection gate | Deterministic | per-title encode search, AV1 option, sampled/full VMAF policy, probe/VMAF cache |
 | Video Chopper | ffmpeg `blackdetect`, stream copy or H.264 cuts | Deterministic | adaptive/content cuts and fades before optional neural shot detection |
-| Audio Tool | ffmpeg convert, trim, fade, normalize | Deterministic | two-pass loudness measurement, silence/chapters, optional stem separation |
+| Audio Tool | cancellable ffmpeg convert/trim/fade/normalize, staged ffprobe validation, durable queue, exact artifact reuse, collision protection | Deterministic | two-pass loudness measurement, silence/chapters, optional stem separation |
 | Image Rescale | Pillow resampling and fit modes; durable validated shell-queue execution | Deterministic | content hashes, streaming/native backend benchmark, optional restoration upscale |
 | Format Converter | Pillow/ffmpeg/document adapters | Deterministic | capability matrix, metadata/color handling, modern formats, backend provenance |
 | Pixel Art | nearest-neighbor pixelization, median-cut palette, durable queue, validated artifact reuse | Deterministic | perceptual palette benchmark, palette locking, alpha-aware quantization |

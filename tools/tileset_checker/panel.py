@@ -75,19 +75,7 @@ class TilesetCheckerPanel(BaseBatchPanel):
     def _pre_run_check(self, opts: e.TileOptions) -> bool:
         if opts.dry_run:
             return True
-        collisions = e.find_output_collisions(self._files, opts)
-        if not collisions:
-            return True
-        self._logline(
-            f"Cannot start: {len(collisions)} output path collision(s). "
-            "Choose mirror mode, a different output folder, or rename the inputs.",
-            t.STATE["error"][1],
-        )
-        for output, owners in list(collisions.items())[:5]:
-            self._logline(f"  {output}", t.STATE["error"][1])
-            for owner in owners:
-                self._logline(f"    ← {owner}", t.TEXT_MUTED)
-        return False
+        return self._check_output_collisions(e.find_output_collisions(self._files, opts))
 
     def _build_submission(self, files: list[Path], opts: e.TileOptions) -> QueueSubmission:
         definition = JobDefinition.create(

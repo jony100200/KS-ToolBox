@@ -22,8 +22,8 @@ Tool registry + lazy single-lane BatchRunner
 ```
 
 The first durable vertical slices are `image_rescale`, `video_compressor`,
-`icon_normalizer`, `pixel_art`, `material_converter`, `showcase`, and
-`tileset_checker`. Other tools still use the existing `BaseBatchPanel` loop
+`audio_tool`, `icon_normalizer`, `pixel_art`, `material_converter`, `showcase`,
+and `tileset_checker`. Other tools still use the existing `BaseBatchPanel` loop
 until migrated and verified individually.
 
 ## Allowed dependency directions
@@ -60,7 +60,7 @@ tool engine ──► toolbox.engine_common
 | `JobStore` | `toolbox/batch_core.py` | Small persistence boundary used by the runner |
 | `SQLiteJobStore` | `toolbox/sqlite_job_store.py` | Transactional jobs and per-item checkpoints |
 | error envelope | `toolbox/engine_common.py` | Headless engine error-as-value convention |
-| file integrity/collision helpers | `toolbox/engine_common.py` | Shared streaming hashes and normalized output-path safety checks |
+| file integrity/collision helpers | `toolbox/engine_common.py` | Shared cancellable streaming hashes and normalized output-path safety checks |
 
 ## Deliberately not implemented yet
 

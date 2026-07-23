@@ -35,9 +35,17 @@ folder (folders are scanned recursively).
 - **Preview first** — "Preview only" (the default) lists exactly what each file
   would become, with no writes.
 - **Atomic writes** — each output is written to a `name.part.ext` temp then
-  renamed on success, so an interrupted run never leaves a half-written file.
+  independently probed, hashed, and renamed on success, so an interrupted or
+  invalid encode never replaces a completed destination.
 - **Mirror** — optionally recreate the input folder structure under the output
   root; a real batch also writes an `audio_manifest.csv` audit log.
+- **Durable queue** — pause/resume, process-tree cancellation, per-file retry,
+  checkpoints, quarantine, manifest/report finalization, and validated reuse.
+- **Collision protection** — flat same-stem outputs and any output targeting a
+  selected input are blocked before a real run instead of being overwritten.
+
+Stored outputs are reused only when their planned path, exact byte count, and
+streamed SHA-256 still match the candidate that ffprobe validated before commit.
 
 ## Dependencies
 
@@ -52,5 +60,6 @@ $env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; uv run --no-project --python 3.12 --wi
 ```
 
 The pure leg always runs (filter-chain + codec/muxer maps). The ffmpeg leg
-synthesizes a 3s sine tone and runs convert / trim / normalize / fade
-end-to-end; it SKIPs cleanly if ffmpeg isn't available.
+synthesizes a 3s sine tone and runs convert / trim / normalize / fade plus
+artifact validation, collision detection, cancellation cleanup, and malformed
+time handling end-to-end; it SKIPs cleanly if ffmpeg isn't available.

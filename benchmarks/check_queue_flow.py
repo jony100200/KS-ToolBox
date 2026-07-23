@@ -94,6 +94,7 @@ def main() -> int:
             tileset_panel._add([first, second])
             tileset_job_id = _run_and_wait(app, tileset_panel, "Tileset Checker", 2)
 
+            audio_job_id = None
             video_job_id = None
             ffmpeg = resolve_tool("ffmpeg")
             if ffmpeg:
@@ -109,6 +110,28 @@ def main() -> int:
                 video_panel._add([sample])
                 video_job_id = _run_and_wait(app, video_panel, "Video Compressor", 1)
 
+                tone = root / "tone.wav"
+                made_audio = run_cmd([
+                    ffmpeg, "-y", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=0.3", str(tone),
+                ], timeout=30)
+                assert made_audio.returncode == 0 and tone.is_file(), made_audio.stderr[-300:]
+                app._select("audio_tool")
+                audio_panel = app._panels["audio_tool"]
+                audio_panel._add([tone])
+                audio_panel._dry.deselect()
+                audio_out = root / "audio_out"
+                audio_panel._out_entry.insert(0, str(audio_out))
+                audio_job_id = _run_and_wait(app, audio_panel, "Audio Tool", 1)
+                assert (audio_out / "tone.mp3").is_file()
+                assert (audio_out / "audio_manifest.csv").is_file()
+                duplicate_tone = root / "duplicate" / tone.name
+                duplicate_tone.parent.mkdir()
+                duplicate_tone.write_bytes(tone.read_bytes())
+                audio_panel._add([duplicate_tone])
+                audio_panel._mirror.deselect()
+                assert not audio_panel._pre_run_check(audio_panel._collect_options())
+
             app._select(app.QUEUE_ID)
             app.update()
             queue_panel = app._panels[app.QUEUE_ID]
@@ -119,14 +142,16 @@ def main() -> int:
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
+            if audio_job_id:
+                assert any(item.job_id == audio_job_id for item in app._services.queue.history())
             if video_job_id:
                 assert any(item.job_id == video_job_id for item in app._services.queue.history())
         finally:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "Material Converter, Showcase, Tileset Checker, and Video Compressor through shell queue; "
-          "history UI rendered.")
+          "Material Converter, Showcase, Tileset Checker, Audio Tool, and Video Compressor "
+          "through shell queue; history UI rendered.")
     return 0
 
 

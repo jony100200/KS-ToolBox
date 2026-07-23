@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tools.audio_tool import engine as e  # noqa: E402
+from toolbox.engine_common import run_cancellable_cmd  # noqa: E402
 
 
 def test_pure() -> None:
@@ -59,19 +60,29 @@ def test_ffmpeg() -> None:
         tmp = Path(td); out = tmp / "out"
         src = tmp / "tone.wav"
         make = [ff, "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", str(src)]
-        if e.run_cmd(make, timeout=120).returncode != 0:
+        if run_cancellable_cmd(make, timeout=120).returncode != 0:
             print("SKIP: could not synthesize a sample with this ffmpeg."); return
 
         # (a) convert wav -> mp3
-        r = e.process(src, e.AudioOptions(target_format="mp3", out_root=out, dry_run=False))
+        convert_opts = e.AudioOptions(target_format="mp3", out_root=out, dry_run=False)
+        r = e.process(src, convert_opts)
         assert r.action == "processed", f"convert: {r.reason}"
         assert Path(r.out_path).is_file() and Path(r.out_path).stat().st_size > 0, "convert: empty"
+        assert r.output_bytes > 0 and r.output_sha256 and r.duration_seconds > 0
+        assert e.validate_result(r, convert_opts), "convert: stored artifact validation failed"
+        converted = r
+        recorded_bytes = converted.output_bytes
+        converted.output_bytes = "bad"
+        assert not e.validate_result(converted, convert_opts), "malformed metadata must fail"
+        converted.output_bytes = recorded_bytes
 
         # (b) trim to first 1s (wav -> wav)
-        r = e.process(src, e.AudioOptions(target_format="wav", trim_end="1",
-                                          out_root=out / "trim", dry_run=False))
+        trim_opts = e.AudioOptions(target_format="wav", trim_end="1",
+                                   out_root=out / "trim", dry_run=False)
+        r = e.process(src, trim_opts)
         assert r.action == "processed", f"trim: {r.reason}"
         assert Path(r.out_path).is_file() and Path(r.out_path).stat().st_size > 0, "trim: empty"
+        assert e.validate_result(r, trim_opts), "trim: stored artifact validation failed"
         dur = e.probe_duration(r.out_path)
         assert not dur["error"] and dur["data"] < 1.6, f"trim length off: {dur}"
 
@@ -86,7 +97,45 @@ def test_ffmpeg() -> None:
                                           out_root=out / "fade", dry_run=False))
         assert r.action == "processed", f"fade: {r.reason}"
         assert Path(r.out_path).is_file() and Path(r.out_path).stat().st_size > 0, "fade: empty"
-    print("PASS: ffmpeg — convert, trim, normalize, fade produced real output.")
+
+        # Stored bytes are exact; size-preserving replacement still cannot be reused.
+        converted_path = Path(converted.out_path)
+        original = converted_path.read_bytes()
+        converted_path.write_bytes(b"X" * len(original))
+        assert not e.validate_result(converted, convert_opts), "corrupt hash must be rejected"
+
+        # Flat same-stem outputs and selected-input overwrites are rejected pre-run.
+        other = tmp / "other" / src.name
+        other.parent.mkdir()
+        other.write_bytes(src.read_bytes())
+        collisions = e.find_output_collisions([src, other], convert_opts)
+        assert len(collisions) == 1, collisions
+        input_target = tmp / "tone.mp3"
+        input_target.write_bytes(original)
+        clobber_opts = e.AudioOptions(target_format="mp3", out_root=tmp, dry_run=False)
+        assert str(input_target.resolve()) in e.find_output_collisions(
+            [src, input_target], clobber_opts
+        )
+
+        # Cancellation propagates to BatchRunner and removes the staged candidate.
+        cancel_opts = e.AudioOptions(target_format="flac", out_root=out / "cancel", dry_run=False)
+        try:
+            e.process(src, cancel_opts, cancelled=lambda: True)
+        except e.CommandCancelled:
+            pass
+        else:
+            raise AssertionError("immediate cancellation did not propagate")
+        assert not e.plan_output(src, cancel_opts).exists()
+        assert not list((out / "cancel").glob("*.part.*"))
+
+        negative = e.process(src, e.AudioOptions(trim_start="-1", dry_run=True))
+        assert negative.action == "failed" and negative.detail == "bad.trim"
+        nonfinite_trim = e.process(src, e.AudioOptions(trim_start="nan", dry_run=True))
+        assert nonfinite_trim.action == "failed" and nonfinite_trim.detail == "bad.trim"
+        nonfinite_fade = e.process(src, e.AudioOptions(fade_in=float("nan"), dry_run=True))
+        assert nonfinite_fade.action == "failed" and nonfinite_fade.detail == "bad.fade"
+    print("PASS: ffmpeg — convert, trim, normalize, fade, validation, collision, "
+          "and cancellation checks passed.")
 
 
 def main() -> int:

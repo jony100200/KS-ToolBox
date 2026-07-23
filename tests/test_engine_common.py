@@ -55,6 +55,8 @@ class CancellableCommandTests(unittest.TestCase):
             )
             with self.assertRaises(ValueError):
                 sha256_file(source, chunk_size=0)
+            with self.assertRaises(CommandCancelled):
+                sha256_file(source, chunk_size=1, cancelled=lambda: True)
 
     def test_success_captures_output(self) -> None:
         result = run_cancellable_cmd(

@@ -181,6 +181,21 @@ class BaseBatchPanel(ctk.CTkFrame):
         """Override for a confirmation dialog before running. Return True to proceed."""
         return True
 
+    def _check_output_collisions(self, collisions) -> bool:
+        """Report an unsafe multi-item output plan; return whether it may run."""
+        if not collisions:
+            return True
+        self._logline(
+            f"Cannot start: {len(collisions)} output path collision(s). "
+            "Choose mirror mode, a different output folder, or rename the inputs.",
+            t.STATE["error"][1],
+        )
+        for output, owners in list(collisions.items())[:5]:
+            self._logline(f"  {output}", t.STATE["error"][1])
+            for owner in owners:
+                self._logline(f"    ← {owner}", t.TEXT_MUTED)
+        return False
+
     def _sweep_stale(self, opts) -> None:
         """Clear orphaned `.part` temps in the output root before a run (a prior
         hard kill can leave them). Only an explicit out_root is swept; beside-source

@@ -139,6 +139,33 @@ blocks a real run with visible remediation instead of silently overwriting data.
 | Tests/benchmarks | 21 unit tests; focused math/preview/hash/collision smoke; seven-tool real queue flow; 17/17 panels and smokes; durable core 10,611 items/s |
 | Risk/rollback | Hashing adds bounded output I/O and strict collision checks reject formerly destructive cases; revert the panel/tool adapter and result validator while retaining the generic helper |
 
+### Slice 3h — implemented cancellable Audio Tool
+
+Audio Tool retains its existing single-pass FFmpeg conversion, trim, fade, and
+loudness filter construction. FFmpeg and ffprobe now run through the shared
+cancellable process-tree adapter. Each candidate remains staged until ffprobe
+proves a positive duration; the engine then records its exact byte count and a
+cancellable streamed SHA-256 before atomic replacement. Timeout/probe failures
+retain retryability for one controlled per-item retry.
+
+Flat same-stem and selected-input collisions are rejected before a real batch.
+The shared collision presentation moved into `BaseBatchPanel` after Audio became
+its second user. Manifest failures are visible finalization warnings, and stored
+outputs are reused only while their planned path, size, and exact hash match.
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-owned blocking loop and commit-on-FFmpeg-exit → shell queue with process-tree cancellation, staged validation, retries, checkpoints, and reports |
+| Architecture/language | Existing Python command builder and native FFmpeg/ffprobe retained; shared queue, process, hash, collision, and completion primitives reused |
+| Functionality and quality | Formats, bitrate presets, trim, fade, normalize, mirroring, dry run, and filenames unchanged; invalid/non-finite times now fail visibly |
+| Code/dependencies | Audio production source 399 → 567 nonblank lines; shared `engine_common`/`batch_panel` 511 → 533 (+190 combined); zero dependencies added |
+| Package/startup/runtime | No dependency/model/binary added; ready-to-mainloop 126 → 122 ms; isolated 3 s WAV→MP3 median 50.5 → 83.9 ms (+33.4 ms) from independent pre-commit probing/hashing |
+| RAM/VRAM/CPU/disk/GPU | One sequential ffprobe validation plus one streamed output read with a 1 MiB buffer; FFmpeg remains single-process; no model, GPU, VRAM, or transfer change; child peak RAM not claimed measured |
+| Batch/cache/AI | Per-file pause boundary, cancellable active process, one retry for retryable failures, quarantine, checkpoint/reuse validation; zero AI calls |
+| Reliability/security | Invalid candidates never replace destinations; cancellation removes staged files; collisions are blocked; no shell invocation; manifest errors no longer disappear |
+| Tests/benchmarks | 21 unit tests; full audio convert/trim/normalize/fade/hash/collision/cancellation smoke; real WAV→MP3 queue output + manifest + UI collision gate; eight-tool queue flow; 17/17 panels and smokes; durable core 10,387 items/s |
+| Risk/rollback | Independent validation adds measured latency, most visible on tiny clips; revert Audio panel/tool adapter and engine metadata/candidate probe while retaining backward-compatible shared helpers |
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.
