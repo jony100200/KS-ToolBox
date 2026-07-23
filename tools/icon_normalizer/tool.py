@@ -12,6 +12,7 @@ class IconNormalizerTool:
         id="icon_normalizer",
         title="Icon Normalizer",
         icon=Icons.GRID,
+        category="images",
         subtitle="Trim, square-pad and resize icons/sprites (batch)",
     )
 

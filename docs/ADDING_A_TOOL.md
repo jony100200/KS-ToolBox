@@ -35,6 +35,7 @@ class ExampleTool:
         id="example_tool",
         title="Example Tool",
         icon="…",
+        category="images",
         subtitle="One precise job",
     )
 
@@ -46,7 +47,9 @@ TOOL = ExampleTool()
 ```
 
 The panel import remains inside `build_panel`; discovery must not import heavy
-or optional dependencies.
+or optional dependencies. `category` must be one of `images`, `video_audio`,
+`game_assets`, or `files_data`; the catalog validation test fails closed on an
+unknown value.
 
 New batch tools should implement `_build_submission()` and return a
 `QueueSubmission`; the shared panel submits it to `services.queue`. Keep the

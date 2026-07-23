@@ -12,6 +12,7 @@ class VideoCompressorTool:
         id="video_compressor",
         title="Video Compressor",
         icon=Icons.VIDEO,
+        category="video_audio",
         subtitle="Shrink videos without losing quality (VMAF-verified)",
     )
 

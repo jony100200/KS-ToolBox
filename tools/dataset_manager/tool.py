@@ -12,6 +12,7 @@ class DatasetManagerTool:
         id="dataset_manager",
         title="Dataset Manager",
         icon=Icons.CHART,
+        category="files_data",
         subtitle="Pair, split, bucket & audit image/caption datasets (copy-only)",
     )
 

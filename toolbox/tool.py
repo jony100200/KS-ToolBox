@@ -22,6 +22,7 @@ class ToolMeta:
     id: str                       # stable slug, e.g. "video_compressor"
     title: str                    # sidebar label, e.g. "Video Compressor"
     icon: str                     # FontAwesome glyph or emoji
+    category: str                 # stable catalog group, e.g. "video_audio"
     subtitle: str = ""            # one-line description
     os_support: tuple[str, ...] = ("windows", "linux", "macos")
 

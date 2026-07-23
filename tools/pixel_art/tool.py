@@ -12,6 +12,7 @@ class PixelArtTool:
         id="pixel_art",
         title="Pixel Art Converter",
         icon=Icons.GRID,
+        category="images",
         subtitle="Turn images into clean, palettized pixel art (batch)",
     )
 

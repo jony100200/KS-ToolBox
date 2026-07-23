@@ -17,6 +17,7 @@ class TextureRendererTool:
         id="texture_renderer",
         title="Texture Renderer",
         icon=Icons.LAYERS,
+        category="game_assets",
         subtitle="Batch-export textures from Substance & Material Maker",
     )
 

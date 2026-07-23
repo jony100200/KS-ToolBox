@@ -12,6 +12,7 @@ class ImageRescaleTool:
         id="image_rescale",
         title="Image Rescale",
         icon=Icons.EXPAND,
+        category="images",
         subtitle="Batch-resize images (longest-side, megapixels, factor, fit)",
     )
 

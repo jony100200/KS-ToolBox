@@ -12,6 +12,7 @@ class ShowcaseTool:
         id="showcase",
         title="Showcase",
         icon=Icons.GRID,
+        category="images",
         subtitle="Contact sheets, framed heroes & before/after renders",
     )
 

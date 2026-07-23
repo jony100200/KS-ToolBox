@@ -12,6 +12,7 @@ class TilesetCheckerTool:
         id="tileset_checker",
         title="Tileset Checker",
         icon=Icons.GRID,
+        category="game_assets",
         subtitle="Score & preview how seamlessly textures tile",
     )
 

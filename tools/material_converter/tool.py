@@ -12,6 +12,7 @@ class MaterialConverterTool:
         id="material_converter",
         title="Material Converter",
         icon=Icons.LAYERS,
+        category="game_assets",
         subtitle="Pack/convert/rename PBR texture-map sets (Unity/Unreal/Godot/Blender)",
     )
 

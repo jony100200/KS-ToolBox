@@ -12,6 +12,7 @@ class VideoChopperTool:
         id="video_chopper",
         title="Video Chopper",
         icon=Icons.SCISSORS,
+        category="video_audio",
         subtitle="Split a video into clips at black-frame gaps",
     )
 

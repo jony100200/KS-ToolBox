@@ -17,6 +17,7 @@ class SpriteViewerTool:
         id="sprite_viewer",
         title="Sprite Viewer",
         icon=Icons.PLAY,
+        category="game_assets",
         subtitle="View & play sprite sheets and animations",
     )
 

@@ -12,6 +12,7 @@ class AlphaDoctorTool:
         id="alpha_doctor",
         title="Alpha Doctor",
         icon=Icons.BROOM,
+        category="images",
         subtitle="Remove backgrounds & repair alpha (deterministic; AI optional)",
     )
 

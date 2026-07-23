@@ -12,6 +12,7 @@ class ToSvgTool:
         id="to_svg",
         title="To SVG",
         icon=Icons.EXPAND,
+        category="images",
         subtitle="Vectorize raster images to SVG (batch)",
     )
 

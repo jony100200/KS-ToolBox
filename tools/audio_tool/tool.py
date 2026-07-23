@@ -12,6 +12,7 @@ class AudioTool:
         id="audio_tool",
         title="Audio Tool",
         icon=Icons.PLAY,
+        category="video_audio",
         subtitle="Batch convert, trim, fade & normalize audio",
     )
 

@@ -12,6 +12,7 @@ class AssetAuditorTool:
         id="asset_auditor",
         title="Asset Auditor",
         icon=Icons.CHART,
+        category="files_data",
         subtitle="Find duplicates, corrupt files, and asset issues (report)",
     )
 

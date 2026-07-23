@@ -12,6 +12,7 @@ class FormatConverterTool:
         id="format_converter",
         title="Format Converter",
         icon=Icons.ARROW,
+        category="video_audio",
         subtitle="Convert images, audio/video and documents (batch)",
     )
 

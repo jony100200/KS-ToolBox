@@ -12,6 +12,7 @@ class PackageExtractorTool:
         id="package_extractor",
         title="Package Extractor",
         icon=Icons.FOLDER,
+        category="files_data",
         subtitle="Extract Unity packages & archives, rebuild folders (safe)",
     )
 
