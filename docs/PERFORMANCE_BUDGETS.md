@@ -7,15 +7,15 @@ They are evidence for this revision, not universal hardware guarantees.
 
 | Metric | Measured | Command |
 |---|---:|---|
-| Ready-to-mainloop, measured range; latest 125 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
-| Discovery + shell import; latest 30 ms | 21–36 ms | same |
+| Ready-to-mainloop, measured range; latest 132 ms | 99–197 ms | `python benchmarks/measure_startup.py` |
+| Discovery + shell import; latest 29 ms | 21–36 ms | same |
 | Optional AI/numeric modules at startup | none | same |
-| Python source after this slice | 112 files / 15,148 lines | bounded repository scan |
-| Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s; latest 90.13 ms / 11,095 items/s | `measure_batch_core.py` |
+| Python source after this slice | 112 files / 15,659 lines | bounded repository scan |
+| Durable runner, 1,000 no-op items | 90.05–115.59 ms / 8,651–11,106 items/s; latest 90.36 ms / 11,066 items/s | `measure_batch_core.py` |
 | Job identity, 1,000 path/stat inputs | 95.43–122.26 ms | same |
-| Completed-job reuse, 1,000 items | 5.29–6.22 ms / zero executor calls | same |
+| Completed-job reuse, 1,000 items | 5.19–6.22 ms / zero executor calls | same |
 | SQLite checkpoint, 1,000 items | 270,336 bytes | same |
-| Shell queue integration | PASS for eleven image/audio/video/document/material/archive workflows and history UI | `python benchmarks/check_queue_flow.py` |
+| Shell queue integration | PASS for twelve image/audio/video/document/material/archive/audit workflows, audit reuse/repair, and history UI | `python benchmarks/check_queue_flow.py` |
 | Runtime dependency added by batch core | 0 | SQLite is Python standard library |
 | Runtime dependency added by job queue | 0 | threading/heapq are Python standard library |
 

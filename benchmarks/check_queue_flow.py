@@ -93,6 +93,25 @@ def main() -> int:
             assert (format_out / "first.jpg").is_file()
             assert (format_out / "convert_manifest.csv").is_file()
 
+            app._select("asset_auditor")
+            audit_panel = app._panels["asset_auditor"]
+            audit_panel._add([first, second])
+            audit_out = root / "audit_out"
+            audit_panel._out_entry.insert(0, str(audit_out))
+            audit_job_id = _run_and_wait(app, audit_panel, "Asset Auditor", 1)
+            assert (audit_out / "audit.html").is_file()
+            assert (audit_out / "audit.json").is_file()
+            assert (audit_out / "audit_issues.csv").is_file()
+            audit_reuse_id = _run_and_wait(app, audit_panel, "Asset Auditor reuse", 1)
+            assert audit_reuse_id == audit_job_id
+            assert app._services.queue.completion(audit_job_id).report.reused
+            audit_html = audit_out / "audit.html"
+            audit_html.write_bytes(b"X" * audit_html.stat().st_size)
+            audit_repair_id = _run_and_wait(app, audit_panel, "Asset Auditor repair", 1)
+            assert audit_repair_id == audit_job_id
+            assert not app._services.queue.completion(audit_job_id).report.reused
+            assert b"<html" in audit_html.read_bytes().lower()
+
             app._select("material_converter")
             material_panel = app._panels["material_converter"]
             material_panel._add([material_base, material_rough])
@@ -195,6 +214,7 @@ def main() -> int:
             assert any(item.job_id == icon_job_id for item in app._services.queue.history())
             assert any(item.job_id == pixel_job_id for item in app._services.queue.history())
             assert any(item.job_id == format_job_id for item in app._services.queue.history())
+            assert any(item.job_id == audit_job_id for item in app._services.queue.history())
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
@@ -209,7 +229,7 @@ def main() -> int:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "Format Converter, Material Converter, Showcase, Tileset Checker, Package "
+          "Format Converter, Asset Auditor, Material Converter, Showcase, Tileset Checker, Package "
           "Extractor, Audio Tool, Video Compressor, and Video Chopper through the shell "
           "queue; history UI rendered.")
     return 0

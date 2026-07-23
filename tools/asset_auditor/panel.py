@@ -4,6 +4,7 @@ back via after(), then write the HTML/JSON/CSV reports. No inspection logic here
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 import customtkinter as ctk
@@ -12,6 +13,8 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 
@@ -20,6 +23,11 @@ class AssetAuditorPanel(BaseBatchPanel):
     FILE_LABEL = "file"
     RESULTS_ICON = Icons.CHART
     RUN_LABEL = "Run Audit"
+
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
+        self._stage_progress: tuple[int, int, str] | None = None
+        self._last_stage_position = 0
 
     # -- options (tool-specific) ----------------------------------------------
     def _build_options_card(self):
@@ -65,66 +73,169 @@ class AssetAuditorPanel(BaseBatchPanel):
             out_root = Path(out)
         elif scan_root:
             out_root = Path(scan_root) / "asset_audit"
+        elif self._files:
+            out_root = self._files[0].parent / "asset_audit"
         else:
             out_root = None
-        return e.AuditOptions(out_root=out_root, scan_root=scan_root,
+        opts = e.AuditOptions(out_root=out_root, scan_root=scan_root,
                               near_dup_hamming=hamming, oversized_mb=oversized,
                               min_dimension=min_dim, check_health=bool(self._health.get()))
+        normalized, error = e.normalized_options(opts)
+        if normalized is None:
+            self._logline(error, t.STATE["error"][1])
+            return None
+        return normalized
 
     # -- batch loop (tool-specific) --------------------------------------------
     def _work(self, files: list[Path], opts: e.AuditOptions):
         def progress(i, total, name):
             self.after(0, self._tick, i, total, name)
 
-        report = e.audit(files, opts, progress=progress)
-        manifest = self._write_manifest(opts, report)
-        self.after(0, self._done, report, manifest)
+        result = e.process(
+            files, opts, progress=progress, cancelled=lambda: self._stop.is_set()
+        )
+        self.after(0, self._done, result, result.out_path)
+
+    def _build_submission(self, files: list[Path], opts: e.AuditOptions) -> QueueSubmission:
+        self._stage_progress = None
+        self._last_stage_position = 0
+        files = sorted(
+            files, key=lambda path: str(path).casefold()
+        )
+        definition = JobDefinition.create(
+            tool_id="asset_auditor",
+            tool_version="1",
+            workflow_version="grouped-audit.v2",
+            inputs=[files[0]],
+            identity_dependencies=files,
+            settings=asdict(opts),
+            max_retries=1,
+        )
+
+        def execute(_anchor: Path, token) -> e.AuditResult:
+            return e.process(
+                files,
+                opts,
+                progress=self._record_stage_progress,
+                cancelled=lambda: token.is_cancelled,
+            )
+
+        def classify(result: e.AuditResult) -> ItemOutcome:
+            data = result.to_dict()
+            if result.action == "audited":
+                if result.warnings:
+                    return ItemOutcome.warning(data, result.reason)
+                return ItemOutcome.completed(data, result.reason)
+            return ItemOutcome.failed(
+                result.reason, retryable=result.retryable, data=data
+            )
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Asset Auditor · {len(files)} file(s)",
+            execute=execute,
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="asset_auditor"
+            ),
+        )
+
+    def _pre_run_check(self, _opts: e.AuditOptions) -> bool:
+        if len(self._files) <= e.MAX_AUDIT_FILES:
+            return True
+        self._logline(
+            f"Audit limit is {e.MAX_AUDIT_FILES:,} files; split this collection.",
+            t.STATE["error"][1],
+        )
+        return False
+
+    def _record_stage_progress(self, i: int, total: int, name: str) -> None:
+        """Worker-safe handoff; Tk reads this tuple during its normal poll."""
+        self._stage_progress = (i, total, name)
+
+    def _on_queue_snapshot(self, snapshot) -> None:
+        super()._on_queue_snapshot(snapshot)
+        progress = self._stage_progress
+        if progress is not None and progress[0] != self._last_stage_position:
+            self._last_stage_position = progress[0]
+            self._tick(*progress)
 
     def _tick(self, i: int, total: int, name: str):
         self._progress.set(i / total if total else 1)
-        self._logline(f"[{i}/{total}] {name}", t.TEXT_MUTED)
+        interval = max(1, total // 100)
+        if i == 1 or i == total or i % interval == 0:
+            self._logline(f"[{i}/{total}] {name}", t.TEXT_MUTED)
 
-    def _write_manifest(self, opts: e.AuditOptions, report) -> str | None:
-        """Writes the three report files. Returns the HTML path (the headline
-        output) or None. Reports are the tool's output — the audit is read-only."""
-        if opts.out_root is None:
-            return None
-        res = e.write_reports(report, opts.out_root)
-        if res["error"]:
-            self.after(0, self._logline, f"  report write failed: {res['details']}",
-                       t.STATE["error"][1])
-            return None
-        return res["data"]["html"]
+    def _write_manifest(self, _opts: e.AuditOptions,
+                        results: list[e.AuditResult]) -> str | None:
+        """The engine already publishes the three-file audit report atomically."""
+        return next(
+            (result.out_path for result in results if result.action == "audited"),
+            None,
+        )
 
-    def _done(self, report, manifest: str | None = None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._progress.set(1)
-        issues = report.issue_count()
-        self._status.set_state("DONE", "done" if not issues else "waiting")
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.AuditResult:
+        if item.data and {"action", "reason"}.issubset(item.data):
+            return e.AuditResult(**item.data)
+        return e.AuditResult(
+            "failed", item.details or "asset audit quarantined",
+            detail="batch.quarantined",
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        result = payload.results[0] if payload.results else e.AuditResult(
+            "failed", "asset audit produced no terminal result",
+            detail="batch.empty",
+        )
+        self._done(
+            result, payload.manifest or result.out_path, payload.report_path,
+            self._queue_completion_state(completion), completion.report.recovered,
+            completion.report.reused,
+        )
+
+    def _show(self, result: e.AuditResult, _position: int, _total: int):
+        icon = "✓" if result.action == "audited" else "✗"
+        color = t.STATE["done"][1] if result.action == "audited" else t.STATE["error"][1]
+        self._logline(f"  {icon} {result.reason}", color)
+        if result.out_path:
+            self._logline(f"    report: {result.out_path}", t.TEXT_MUTED)
+        for warning in result.warnings[:5]:
+            self._logline(f"    warning: {warning}", t.STATE["waiting"][1])
+
+    def _done(self, result: e.AuditResult, manifest: str | None = None,
+              report_path: str | None = None, job_state=JobState.COMPLETED,
+              recovered: bool = False, reused: bool = False):
+        issues = result.issues
 
         # a per-category breakdown in the results log
         rows = [
-            ("exact duplicate groups", len(report.exact_dups)),
-            ("near-duplicate groups", len(report.near_dups)),
-            ("corrupt / unreadable", len(report.corrupt)),
-            ("unsafe filenames", len(report.unsafe_names)),
-            ("empty files", len(report.empty_files)),
-            ("oversized files", len(report.oversized)),
-            ("empty folders", len(report.empty_folders)),
-            ("tiny images", len(report.tiny_images)),
-            ("image health flags", len(report.health_flags)),
+            ("exact duplicate groups", result.counts.get("exact_duplicate_groups", 0)),
+            ("near-duplicate groups", result.counts.get("near_duplicate_groups", 0)),
+            ("corrupt / unreadable", result.counts.get("corrupt", 0)),
+            ("unsafe filenames", result.counts.get("unsafe_names", 0)),
+            ("empty files", result.counts.get("empty_files", 0)),
+            ("oversized files", result.counts.get("oversized", 0)),
+            ("empty folders", result.counts.get("empty_folders", 0)),
+            ("tiny images", result.counts.get("tiny_images", 0)),
+            ("image health flags", result.counts.get("health_flags", 0)),
         ]
         self._logline("", t.TEXT_MAIN)
         for label, n in rows:
             color = t.STATE["waiting"][1] if n else t.TEXT_MUTED
             self._logline(f"  {n:>4}  {label}", color)
-        if report.resolution_histogram:
-            top = list(report.resolution_histogram.items())[:5]
+        if result.resolution_histogram:
+            top = list(result.resolution_histogram.items())[:5]
             self._logline("  resolutions: " + ", ".join(f"{k}×{v}" for k, v in top), t.TEXT_MUTED)
 
-        self._summary.configure(text=f"{report.scanned} scanned · {issues} issue(s)")
-        if manifest:
-            self._logline(f"  report: {manifest}", t.TEXT_MUTED)
-        elif report.scanned:
-            self._logline("  no report folder set — add one to write audit.html/json/csv",
-                          t.TEXT_MUTED)
+        self._finish_queue_ui(
+            f"{result.scanned} scanned · {issues} issue(s)",
+            job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

@@ -8,7 +8,8 @@ changing tool algorithms. `image_rescale`, `video_compressor`,
 `video_chopper`, `audio_tool`, `icon_normalizer`, `pixel_art`,
 multi-family `format_converter`, `material_converter`, mode-aware `showcase`,
 analytical `tileset_checker`, and secure multi-artifact `package_extractor` are
-the first production integrations.
+joined by grouped, exact-report-set `asset_auditor` as the first production
+whole-collection audit integration.
 
 ## Job lifecycle
 

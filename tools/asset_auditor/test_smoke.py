@@ -10,6 +10,7 @@ Run standalone:  python -m tools.asset_auditor.test_smoke
 from __future__ import annotations
 
 import importlib.util
+import json
 import random
 import sys
 import tempfile
@@ -130,6 +131,7 @@ def test_full_audit() -> None:
         (tmp / "empty.png").write_bytes(b"")
         # a garbage .png
         (tmp / "garbage.png").write_bytes(b"\x00\x01\x02 not an image \x03")
+        (tmp / "garbage_copy.png").write_bytes((tmp / "garbage.png").read_bytes())
         # a tiny image
         Image.new("RGB", (8, 8), (0, 0, 0)).save(tmp / "tiny.png")
         # an empty sub-folder
@@ -186,8 +188,53 @@ def test_full_audit() -> None:
         assert json_path.stat().st_size > 0, "audit.json is empty"
         assert "<html" in html_path.read_text(encoding="utf-8").lower()
 
+        # Durable process result: exact artifacts, completion marker, corruption
+        # rejection, strict options, and active cancellation cleanup.
+        durable_out = tmp / "durable_report"
+        opts = e.AuditOptions(
+            out_root=durable_out, scan_root=tmp, min_dimension=32
+        )
+        result = e.process(paths, opts)
+        assert result.action == "audited", result.reason
+        assert len(result.artifacts) == 3 and e.validate_result(result, opts)
+        assert result.warnings, "corrupt duplicate thumbnails must be announced"
+        marker = durable_out / "audit.json"
+        marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+        assert marker_payload["report_schema"] == 2
+        assert set(marker_payload["report_artifacts"]) == {"csv", "html"}
+
+        html_bytes = (durable_out / "audit.html").read_bytes()
+        (durable_out / "audit.html").write_bytes(b"X" * len(html_bytes))
+        assert not e.validate_result(result, opts), "same-size report corruption was reused"
+        (durable_out / "audit.html").write_bytes(html_bytes)
+        assert e.validate_result(result, opts)
+
+        invalid = e.process(
+            paths, e.AuditOptions(out_root=tmp / "invalid", near_dup_hamming=65)
+        )
+        assert invalid.action == "failed" and invalid.detail == "bad.options"
+        invalid_size = e.process(
+            paths, e.AuditOptions(out_root=tmp / "invalid_size", oversized_mb=float("nan"))
+        )
+        assert invalid_size.action == "failed" and invalid_size.detail == "bad.options"
+        too_many = e.process(
+            [paths[0]] * (e.MAX_AUDIT_FILES + 1),
+            e.AuditOptions(out_root=tmp / "too_many"),
+        )
+        assert too_many.action == "failed" and too_many.detail == "resource.limit"
+        try:
+            e.process(
+                paths, e.AuditOptions(out_root=tmp / "cancelled"),
+                cancelled=lambda: True,
+            )
+        except e.CommandCancelled:
+            pass
+        else:
+            raise AssertionError("audit cancellation did not propagate")
+        assert not list(tmp.rglob("*.part")), "audit left staged report files"
+
     print(f"PASS: full audit — dup group, corrupt, empty, tiny, empty-folder; "
-          f"reports written; {unsafe_note}.")
+          f"durable reports validated/cancelled; {unsafe_note}.")
 
 
 def main() -> int:

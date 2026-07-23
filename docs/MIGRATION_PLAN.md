@@ -269,35 +269,43 @@ list, provenance consumes bounded metadata/storage, reuse is whole-item rather
 than a shared content cache, and the multi-family adapter necessarily carries
 more failure-path code.
 
-### Slice 3l — in progress: indexed Asset Auditor
+### Slice 3l — implemented indexed, durable Asset Auditor
 
-The first Asset Auditor improvement replaces exhaustive dHash pair comparison
-with an exact BK-tree Hamming-metric index feeding the existing union-find.
-This is a focused deterministic optimization before the grouped durable-queue
-adapter; no audit policy, threshold meaning, report format, UI, or dependency
-changes in this checkpoint.
+Asset Auditor replaces exhaustive dHash pair comparison with an exact BK-tree
+Hamming-metric index feeding the existing union-find. One selected collection
+is now one durable queue item; every selected source contributes to grouped job
+identity. The queue persists only a compact summary and exact report artifacts,
+while the detailed per-file records remain in `audit.json` rather than bloating
+SQLite checkpoints.
+
+HTML and CSV render to staged files first. JSON records their size and SHA-256
+and commits last as the report-set completion marker. Recovery reuses the audit
+only while all three artifacts and the stored settings/summary still match;
+corruption causes deterministic re-execution. Hashing, decode boundaries,
+metric grouping, folder traversal, thumbnails, report writes, and validation
+observe cancellation.
 
 | Review item | Evidence |
 |---|---|
-| Current behavior | Every valid image hash was compared with every later hash, doing 1,999,000 Python string comparisons for 2,000 unrelated images |
-| Proposed behavior | Query prior hashes through an exact metric tree, union every match within the same threshold, retain a defensive all-pairs path for externally constructed unequal/non-binary records, and special-case whole-width thresholds |
-| Architecture/language | Existing Python dHash and union-find remain; a compact in-module index is justified by the measured hot path and avoids a dependency or cross-module abstraction |
-| Functionality and quality | Exact grouping semantics are preserved, including exact duplicates and transitive A~B~C groups; no approximate search, false-negative tolerance, or output-quality change is introduced |
-| Code and dependency impact | Asset Auditor production source 682 → 730 nonblank lines (+48); zero dependencies, models, assets, binaries, processes, or services added |
-| Package-size impact | Source-only change; no dependency/binary payload added. The packaged artifact was not rebuilt, so no total package-size reduction is claimed |
-| Startup and runtime impact | Ready-to-mainloop measured 125 ms with 30 ms discovery and no optional-heavy imports; seeded 2,000-random-64-bit-hash threshold-8 workload measured 4,451.3 → 509.5 ms (8.7× faster, −88.6%) |
-| RAM, VRAM, CPU, disk, and GPU transfer | The index stores one small node per distinct hash and trades bounded O(n) RAM for far fewer CPU comparisons; it performs no disk I/O, GPU work, VRAM allocation, or transfer; peak RAM is not yet measured |
+| Current behavior | Every valid image hash was compared with every later hash; the panel owned one blocking aggregate loop; report files committed independently without cross-file provenance; stop was boundary-only and report failures were UI-local |
+| Proposed behavior | Exact metric-index search plus union-find; grouped shell job with all-source identity, strict bounds, active cancellation, bounded warnings, staged report set, JSON completion marker, exact validation, retry/quarantine, checkpoint, repair, and morning report |
+| Architecture/language | Existing Python/Pillow/NumPy inspection, CustomTkinter panel, dHash, and union-find remain; a compact measured index and shared queue/hash/report contracts are composed around them without a rewrite, service, or new abstraction layer |
+| Functionality and quality | Filename, corruption, exact/near duplicate, size, empty-folder, dimension, health, histogram, HTML, JSON, CSV, and offline thumbnail behavior remains; grouping is exact, omitted thumbnails and unreadable folders are now announced, and invalid settings fail before scanning |
+| Code and dependency impact | Asset Auditor production source 682 → 1,178 nonblank lines (+496 for indexed search, cancellation, strict settings/resource ceilings, compact durable result, staged provenance, exact validation, UI adapter, and failure paths); zero dependencies, models, assets, binaries, processes, or services added |
+| Package-size impact | Source-only change with no dependency/binary payload; the complete packaged artifact was not rebuilt, so no total package-size change is claimed |
+| Startup and runtime impact | Ready-to-mainloop measured 132 ms with 29 ms discovery and no optional-heavy imports; 2,000 seeded hashes at threshold 8 measured 4,451.3 → 509.5 ms (8.7×, −88.6%); full 200-image audit+three reports measured 174.9 → 186.0 ms (+11.1 ms, +6.4%) from provenance/hashing |
+| RAM, VRAM, CPU, disk, and GPU transfer | The metric index adds O(n) compact nodes; one audit caps at 100,000 files; queue data stores summary/artifacts instead of full records; hashes stream in bounded buffers; warning lists cap at 101 entries; report rendering remains in process and detailed JSON remains O(n); no GPU, VRAM, model, or transfer; peak RAM is not claimed measured |
 | AI and model-loading impact | Zero AI calls and model loads; Hamming radius search is an exact deterministic metric problem |
-| Batch, cache, and incremental impact | Audit aggregation is faster but still panel-owned in this checkpoint; cancellation, durable grouped identity, report validation, and reuse remain the next part of Slice 3l and are not claimed implemented |
-| Reliability, security, tests, and benchmarks | Seeded parity checks compare indexed output with the former all-pairs algorithm at thresholds 0, 1, 2, 8, and 64; the real full-audit smoke remains green; no source mutation or new trust boundary exists |
-| Risks and rollback | BK-tree lookup can approach quadratic work for dense/adversarial hashes and adds O(n) nodes; revert only `_group_near_dups` and its parity test to restore the former algorithm without data or schema migration |
+| Batch, cache, and incremental impact | Whole-collection retry/quarantine/checkpoints and validator-backed reuse replace the panel loop; all selected files affect identity; unchanged 200-image report validation measured 1.9 ms and avoids audit work; granularity is collection-level, not per-file or per-stage content caching |
+| Reliability, security, tests, and benchmarks | JSON commits last and authenticates HTML/CSV; cancellation cleans candidates; strict finite/resource bounds apply; subscriber work never calls Tk from the worker; parity tests cover five thresholds; focused smoke covers real issues, degradation, corruption, options, cancellation; twelve-workflow UI integration proves reuse and repair |
+| Risks and rollback | BK-tree lookup can approach quadratic work for dense hashes; HTML still embeds duplicate thumbnails and detailed JSON remains proportional to the collection; multi-file publication uses JSON validation rather than impossible cross-platform transactional renames. Revert panel/tool adapter and process/validation/report-marker layer together; revert `_group_near_dups` separately if the index itself must roll back |
 
-Interim cartridge score: functional completeness 5, output quality 5, runtime
-performance 5 on the representative grouping workload, startup 5, memory 4
-(the new index has not had peak RAM measured), storage 5, batch 4, cache 4,
-incremental execution 4, AI efficiency 5, reliability 5, maintainability 4,
-portability 5, and security 5. Batch/cache/incremental remain 4 because the
-durable grouped-job portion of this slice is explicitly still pending.
+Cartridge score: functional completeness 5, output quality 5, runtime 5,
+startup 5, memory 4, storage 4, batch 5, cache 4, incremental execution 4,
+AI efficiency 5, reliability 5, maintainability 4, portability 5, and security 5.
+The 4s are explicit boundaries: peak RAM is not yet measured, reports retain
+professional detail, reuse is whole-collection rather than content-addressed
+per stage, and the necessary report/recovery failure paths increase local code.
 
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display

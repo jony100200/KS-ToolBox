@@ -16,7 +16,7 @@ class AssetAuditorTool:
     )
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
-        # Lazy import: the panel pulls Pillow + numpy. Keeping them out of module
-        # import means discovery/the sidebar work even before they're installed.
+        # Lazy import: discovery/sidebar stay independent from processing;
+        # Pillow and NumPy load only when an audit actually inspects pixels.
         from .panel import AssetAuditorPanel
-        return AssetAuditorPanel(parent)
+        return AssetAuditorPanel(parent, services.queue)

@@ -38,6 +38,17 @@ Written atomically (`.part` → replace) to the report folder:
 - **`audit.json`** — the full machine-readable report, including a per-file record.
 - **`audit_issues.csv`** — one flat, greppable row per issue (`issue_type, path, detail`).
 
+The three reports are one durable artifact set. HTML and CSV are staged first;
+`audit.json` records their sizes and SHA-256 values and publishes last as the
+completion marker. Queue recovery reuses a prior audit only while all three
+files still match that provenance. A corrupt or incomplete set is rebuilt.
+
+One selected collection is one grouped queue item, while every selected source
+participates in job identity. Active hashing, decoding boundaries, grouping,
+folder scans, thumbnail rendering, report writes, and report validation observe
+cancellation. Retriable I/O failures are isolated and the morning completion
+report remains available through the shared queue history.
+
 ## Options
 
 | Option | Meaning | Default |
@@ -47,6 +58,13 @@ Written atomically (`.part` → replace) to the report folder:
 | Min dimension (px) | images with a side below this are "tiny" | `32` |
 | Image health flags | compute dark/bright/low-contrast flags | on |
 | Report folder | where the reports go (blank = `./asset_audit` beside the scanned folder) | — |
+
+The Hamming threshold is validated against the dHash width (0–64 with the
+current 8×8 hash), the oversized threshold must be finite and positive, and the
+minimum dimension must be 1–1,000,000 pixels. Invalid settings stop before any
+source is scanned or report is written. A single grouped audit is capped at
+100,000 files so detailed records, thumbnails, and checkpoint metadata have a
+defined ceiling; larger collections should be split into production units.
 
 ## Dependencies
 
@@ -61,8 +79,9 @@ python -m tools.asset_auditor.test_smoke
 Checks the filename-safety rules (no deps), then — with numpy + Pillow — the
 dHash/Hamming behaviour, exact indexed/all-pairs grouping parity across five
 thresholds, the corrupt/dimension check, and a full audit over a temp folder
-built to contain one of every issue class, ending in a written `audit.html` +
-`audit.json`. Skips cleanly if numpy/Pillow are absent.
+built to contain every issue class. It then validates exact three-report reuse,
+same-size corruption rejection, strict options, announced thumbnail fallback,
+and cancellation cleanup. Skips cleanly if numpy/Pillow are absent.
 
 ## Credits
 
