@@ -196,6 +196,38 @@ errors surface as finalization warnings.
 | Tests/benchmarks | 22 unit tests; focused real-media chop/duration/hash/corruption/collision/cancellation/no-gap smoke; Audio regression smoke; nine-workflow real queue flow; 17/17 panels and tool smokes; durable core 10,843 items/s |
 | Risk/rollback | Independent validation adds measured latency, especially for tiny clips; committed clips before a later clip failure remain for inspection and are reported rather than group-rolled back; revert the Video Chopper panel/tool adapter and staged metadata/validator while retaining compatible shared helpers |
 
+### Slice 3j — implemented secure durable Package Extractor
+
+Package Extractor retains its existing standard-library ZIP, TAR, compressed
+TAR, and Unity-package parsing. One archive is now one durable queue item and
+failure boundary. Streaming extraction observes active cancellation; an
+interrupted attempt removes only the member paths it recorded as newly created,
+while pre-existing collision targets remain untouched. Same-stem selected
+archives that would share an extraction directory are rejected before a real
+batch begins.
+
+Declared byte limits now run during preview as well as extraction, actual-byte
+limits remain enforced while streaming, and a 100,000-member default cap bounds
+generated report and per-entry bookkeeping. Per-archive CSV and JSON reports are
+staged, flushed, and published atomically with JSON as the completion marker.
+The stored result records both report hashes; reuse recursively validates every
+top-level and nested output path, size, and SHA-256 from that trusted report
+tree. Security rejections and per-member extraction errors are visible warning
+outcomes instead of clean completions.
+
+| Review item | Evidence |
+|---|---|
+| Current → proposed behavior | Panel-owned archive loop with boundary-only stop and silent manifest/report failure → shell queue with streaming cancellation, attempt-local rollback, checkpoints, exact recursive validation, warnings, and reports |
+| Architecture/language | Existing Python stdlib `zipfile`/`tarfile` algorithms and CustomTkinter UI retained; shared queue, collision, hash, completion, and report contracts reused; no parser rewrite or service added |
+| Functionality and quality | ZIP/TAR/Unity reconstruction, filters, rename/skip, nested depth, hashes, dry run, and safe paths remain; `.bz2`/`.xz` suffixes now reach already-supported TAR dispatch; preview now rejects declared bombs and invalid limits before writes |
+| Code/dependencies | Package Extractor production source 580 → 1,144 nonblank lines (+564 for durable UI adapter, cancellation/rollback, atomic provenance, recursive validation, bounds, and visible failure paths); zero dependencies added |
+| Package/startup/runtime | No package component/model/binary added; ready-to-mainloop measured 123 ms with no heavy imports; controlled 100-file/1.6 MiB ZIP process median 91.3 → 100.9 ms (+9.6 ms, +10.5%) across five runs |
+| RAM/VRAM/CPU/disk/GPU | Existing 1 MiB streaming member buffer remains; 100,000-member default and 1,000,000 hard ceiling bound KS report bookkeeping, while `zipfile` still reads the central directory as an acknowledged stdlib format cost; report flush/hash adds small I/O; no GPU, VRAM, model, or transfer use |
+| Batch/cache/AI | Per-archive pause/recovery boundary, active streaming cancellation, quarantine, and validator-backed whole-tree reuse; exact warm reuse validation measured 572.5 ms on the 100-small-file workload, so no speed claim is made; zero AI calls |
+| Reliability/security | Traversal and link rejection remain; preview/actual byte and entry caps, staged-member cleanup, cancellation rollback, atomic report marker, same-destination rejection, strict options, and warning-bearing partial results are added |
+| Tests/benchmarks | 22 unit tests; focused traversal/Unity/nested/hash/corruption/atomic-report/bomb/entry-cap/collision/options/cancellation rollback smoke; ten-workflow real queue flow; 17/17 panels and tool smokes; durable core 10,810 items/s |
+| Risk/rollback | Exact validation reopens every output and can be slower than re-extraction for many tiny, highly compressible files; cancellation leaves harmless empty directories; revert the panel/tool adapter and new validation/report metadata while retaining the original extraction handlers if rollback is required |
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

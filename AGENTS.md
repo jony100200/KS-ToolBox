@@ -48,7 +48,7 @@ Extracting from RupayanFlow/ChobiEngine: keep the engine logic, drop the `runtim
 - **17 tools built + smoke-tested (each has `test_smoke.py`; `tools/video_chopper/` is the reference):**
   - *Video/Audio:* Video Compressor (VMAF-gated, delete-confirm), Video Chopper (ffmpeg blackdetect), Audio Tool (ffmpeg convert/trim/fade/normalize).
   - *Images:* Image Rescale, Format Converter (images/A-V/docs dispatch), Pixel Art Converter, To SVG (vtracer), Icon Normalizer, Showcase (contact-sheet/hero/before-after).
-  - *Game/asset:* Alpha Doctor (deterministic keying + optional u2net), Material Converter (ORM/MOS, DX↔GL, presets), Sprite Viewer (custom viewer panel), Tileset Checker (seam score/preview), Texture Renderer (Substance/Material Maker), Package Extractor (unitypackage/zip/tar, zip-slip/symlink/bomb-safe).
+  - *Game/asset:* Alpha Doctor (deterministic keying + optional u2net), Material Converter (ORM/MOS, DX↔GL, presets), Sprite Viewer (custom viewer panel), Tileset Checker (seam score/preview), Texture Renderer (Substance/Material Maker), Package Extractor (durable unitypackage/zip/tar, cancellation rollback, zip-slip/symlink/bomb-safe).
   - *Library/dataset:* Asset Auditor (dup/corrupt/audit → HTML/JSON), Dataset Manager (pair/split/bucket, copy-only).
 - **Direction:** deterministic-first / AI-optional public line; free tools funnel to the paid KS Production Engine. See the memory `kstoolbox-public-direction` and `docs/EXTRACTION_MAP.md`. **Fix-first if revisited:** Video Rescale (bytes/str ffmpeg bug + `eval()`).
 

@@ -19,4 +19,4 @@ class PackageExtractorTool:
         # Lazy import keeps discovery/the sidebar working without loading the
         # panel; the engine is pure stdlib so there is no heavy dependency here.
         from .panel import PackageExtractorPanel
-        return PackageExtractorPanel(parent)
+        return PackageExtractorPanel(parent, services.queue)

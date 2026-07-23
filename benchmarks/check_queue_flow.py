@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -94,6 +95,24 @@ def main() -> int:
             tileset_panel._add([first, second])
             tileset_job_id = _run_and_wait(app, tileset_panel, "Tileset Checker", 2)
 
+            package = root / "bundle.zip"
+            with zipfile.ZipFile(package, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("Assets/readme.txt", b"queue extraction")
+            app._select("package_extractor")
+            package_panel = app._panels["package_extractor"]
+            package_panel._add([package])
+            package_panel._dry.deselect()
+            package_out = root / "package_out"
+            package_panel._out_entry.insert(0, str(package_out))
+            package_job_id = _run_and_wait(
+                app, package_panel, "Package Extractor", 1
+            )
+            assert (
+                package_out / "bundle" / "Assets" / "readme.txt"
+            ).read_bytes() == b"queue extraction"
+            assert (package_out / "bundle" / "_extract_report.json").is_file()
+            assert (package_out / "extract_manifest.csv").is_file()
+
             audio_job_id = None
             chopper_job_id = None
             video_job_id = None
@@ -165,6 +184,7 @@ def main() -> int:
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
+            assert any(item.job_id == package_job_id for item in app._services.queue.history())
             if audio_job_id:
                 assert any(item.job_id == audio_job_id for item in app._services.queue.history())
             if chopper_job_id:
@@ -175,8 +195,8 @@ def main() -> int:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "Material Converter, Showcase, Tileset Checker, Audio Tool, Video Compressor, "
-          "and Video Chopper through the shell queue; history UI rendered.")
+          "Material Converter, Showcase, Tileset Checker, Package Extractor, Audio Tool, "
+          "Video Compressor, and Video Chopper through the shell queue; history UI rendered.")
     return 0
 
 

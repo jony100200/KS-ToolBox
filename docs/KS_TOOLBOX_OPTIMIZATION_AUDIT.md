@@ -64,7 +64,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Preview, confirm, logging | Batch tools use preview/manifests; destructive compressor confirms | Good, verify per new feature |
 | Atomic output | Common pattern is temporary output then replace | Good, standardize and test crash recovery |
 | Error envelope | Shared `ok`/`err` helpers exist | Good, add conformance tests |
-| Durable batch execution | Runner/store plus shell queue implemented for Image Rescale and Video Compressor | Good first vertical slice; migrate remaining tools |
+| Durable batch execution | Runner/store plus shell queue implemented for ten contrasting image, media, material, analysis, and archive workflows | Good proven core; migrate remaining tools individually |
 | Failure isolation/recovery | Per-item quarantine/retry, pause/resume/cancel, history, and finalization warnings | Good contract; manual item retry remains |
 | Content identity/cache | No shared persistent content-addressed cache | Missing |
 | Incremental recomputation | Mostly output-exists checks | Partial and settings-blind |
@@ -90,7 +90,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Sprite Viewer | Pillow frames/grid/connected-component slices | Deterministic | Aseprite metadata, trim/extrude/deduplicate, atlas export and timing preservation |
 | Tileset Checker | opposite-edge score, deterministic previews, durable queue, exact artifact validation, collision protection | Deterministic | multi-scale/gradient/perceptual seam score calibrated on labeled examples |
 | Texture Renderer | user-provided Substance/Material Maker CLIs | Deterministic orchestration | executable/version capability checks, render cache, preset/schema normalization |
-| Package Extractor | safe stdlib archive and `.unitypackage` extraction | Deterministic | optional Unity bundle adapter, streamed manifests, stronger fuzz corpus |
+| Package Extractor | cancellable safe stdlib extraction, preview bomb budgets, atomic reports, durable queue, recursive hash validation, collision protection | Deterministic | optional Unity bundle adapter, entry-count profiling, stronger fuzz corpus |
 | Asset Auditor | corruption/duplicate/asset checks and reports | Deterministic | exact→perceptual→embedding duplicate cascade and incremental index |
 | Dataset Manager | pair/split/bucket with copy-only safety | Deterministic | stable hash splits, leakage/duplicate checks, class balance and optional label QA |
 
@@ -108,9 +108,9 @@ The old audit's startup and package-size numbers were measured against five tool
 ### Batch processing
 
 Files are independent and most batch tools run them serially. This is a safe
-baseline. Image Rescale and Video Compressor now run serially through the
-durable shared runner; the remaining tools retain existing panel loops until
-migrated. Concurrency is not automatically an optimization:
+baseline. Ten contrasting tools now run serially through the durable shared
+runner; the remaining tools retain existing panel loops until migrated.
+Concurrency is not automatically an optimization:
 
 - Pillow/NumPy work may benefit from a small bounded pool.
 - ffmpeg and native encoders are already threaded; multiple jobs may reduce throughput.
@@ -185,10 +185,11 @@ Every implementation slice in the roadmap must record:
 
 ## Audit conclusion
 
-The architecture is being evolved, not rewritten. The first durable batch slice
-and shell-owned queue are implemented and verified without changing
-CustomTkinter or image algorithms. Image Rescale and Video Compressor prove the
-contrasting contracts. Next, migrate additional deterministic tools and measure
+The architecture is being evolved, not rewritten. Ten durable batch slices and
+the shell-owned queue are implemented and verified without changing
+CustomTkinter or proven processing algorithms. They now cover in-process image,
+external-media, grouped-material, analytical, and secure archive contracts.
+Next, migrate additional deterministic tools and measure
 resource profiles before adding scheduling lanes or dependency graphs.
 Content-addressed caching remains later work. Improve deterministic
 paths with mature native algorithms and add specialist AI only as optional,

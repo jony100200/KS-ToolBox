@@ -1,10 +1,8 @@
-"""Package Extractor — the tool's UI. Thin over engine.py: collect archives +
-options, run on a worker thread, stream per-archive results back via after().
-No extraction or safe-path logic here — that all lives in the engine.
-"""
+"""Package Extractor UI; secure archive work uses the shell-owned queue."""
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict
 from pathlib import Path
 
 import customtkinter as ctk
@@ -13,6 +11,8 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 
@@ -21,6 +21,9 @@ class PackageExtractorPanel(BaseBatchPanel):
     FILE_LABEL = "archive"
     RESULTS_ICON = Icons.FOLDER
     RUN_LABEL = "Preview & Extract"
+
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
 
     # -- options (tool-specific) ----------------------------------------------
     def _build_options_card(self):
@@ -68,24 +71,77 @@ class PackageExtractorPanel(BaseBatchPanel):
             dry_run=bool(self._dry.get()),
         )
 
-    # -- batch loop (tool-specific) --------------------------------------------
-    def _work(self, files: list[Path], opts: e.ExtractOptions):
-        extracted = skipped = failed = 0
-        results = []
-        for i, f in enumerate(files, 1):
-            if self._stop.is_set():
-                self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
-            self.after(0, self._logline, f"[{i}/{len(files)}] {f.name} …", t.TEXT_MUTED)
-            res = e.process(f, opts); results.append(res)
+    # -- queue submission (tool-specific) --------------------------------------
+
+    def _pre_run_check(self, opts: e.ExtractOptions) -> bool:
+        if opts.dry_run:
+            return True
+        return self._check_output_collisions(e.find_output_collisions(self._files, opts))
+
+    def _build_submission(self, files: list[Path], opts: e.ExtractOptions) -> QueueSubmission:
+        settings = asdict(opts)
+        settings["filter_exts"] = sorted(opts.filter_exts)
+        definition = JobDefinition.create(
+            tool_id="package_extractor",
+            tool_version="1",
+            workflow_version="secure-extract.v2",
+            inputs=files,
+            settings=settings,
+        )
+
+        def classify(res: e.Result) -> ItemOutcome:
+            data = res.to_dict()
             if res.action == "extracted":
-                extracted += 1
-            elif res.action == "dry-run":
-                skipped += 1
-            else:
-                failed += 1
-            self.after(0, self._show, res, i, len(files))
-        manifest = self._write_manifest(opts, results)
-        self.after(0, self._done, extracted, skipped, failed, manifest)
+                if res.degraded:
+                    return ItemOutcome.warning(data, res.reason)
+                return ItemOutcome.completed(data, res.reason)
+            if res.action == "dry-run":
+                if res.degraded:
+                    return ItemOutcome.warning(data, res.reason)
+                return ItemOutcome.skipped(data, res.reason)
+            return ItemOutcome.failed(res.reason, data=data)
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Package Extractor · {len(files)} archive(s)",
+            execute=lambda path, token: e.process(
+                path, opts, cancelled=lambda: token.is_cancelled
+            ),
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="package_extractor"
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        extracted = sum(result.action == "extracted" for result in results)
+        previewed = sum(result.action == "dry-run" for result in results)
+        failed = len(results) - extracted - previewed
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            extracted, previewed, failed, remaining, payload.manifest,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"src", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path,
+            "failed",
+            item.details or "archive item quarantined",
+            detail="batch.quarantined",
+        )
 
     def _write_manifest(self, opts: e.ExtractOptions, results: list) -> str | None:
         """Top-level CSV summarising every archive in the run (per-archive JSON+CSV
@@ -93,37 +149,47 @@ class PackageExtractorPanel(BaseBatchPanel):
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            path = root / "extract_manifest.csv"
-            new = not path.exists()
-            with open(path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["src", "action", "written", "skipped", "rejected",
-                                "errors", "out_path", "report", "reason"])
-                for r in results:
-                    w.writerow([r.src, r.action, r.written, r.skipped, r.rejected,
-                                r.errors, r.out_path, r.report_path, r.reason])
-            return str(path)
-        except OSError:
-            return None
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "extract_manifest.csv"
+        new = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["src", "action", "written", "skipped", "rejected",
+                            "errors", "out_path", "report", "reason"])
+            for r in results:
+                w.writerow([r.src, r.action, r.written, r.skipped, r.rejected,
+                            r.errors, r.out_path, r.report_path, r.reason])
+        return str(path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
         icon = {"extracted": "✓", "dry-run": "?", "failed": "✗"}.get(res.action, "•")
         color = {"extracted": t.STATE["done"][1], "failed": t.STATE["error"][1]}.get(res.action, t.TEXT_MUTED)
+        if res.degraded:
+            icon = "⚠"
+            color = t.STATE["error"][1]
         name = Path(res.src).name
         self._logline(f"  {icon} {name}  — {res.reason}", color)
-        if res.action == "extracted" and res.rejected:
-            self._logline(f"      ⚠ {res.rejected} unsafe entr(y/ies) rejected (see report)", t.STATE["error"][1])
+        if res.rejected:
+            self._logline(
+                f"      ⚠ {res.rejected} unsafe entr(y/ies) rejected (see report)",
+                t.STATE["error"][1],
+            )
+        if res.errors:
+            self._logline(
+                f"      ⚠ {res.errors} extraction error(s) recorded (see report)",
+                t.STATE["error"][1],
+            )
         if res.report_path:
             self._logline(f"      report: {res.report_path}", t.TEXT_MUTED)
 
-    def _done(self, extracted, skipped, failed, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"extracted {extracted} · preview {skipped} · failed {failed}")
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+    def _done(self, extracted, previewed, failed, remaining=0, manifest=None,
+              report_path=None, job_state=JobState.COMPLETED, recovered=False, reused=False):
+        summary = f"extracted {extracted} · preview {previewed} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )
