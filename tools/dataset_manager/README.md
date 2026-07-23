@@ -58,6 +58,13 @@ Point it at a folder of images. Sidecar captions are matched by **stem** —
 | Output folder | all | Results are copied here. Required unless *Preview only*. |
 | Preview only | all | Default on — lists actions, writes nothing. |
 
+Settings are validated before discovery: caption suffixes must be unique safe
+extensions, split ratios must be three finite non-negative values with a
+positive sum, regex/find text is capped at 4,096 characters, replacement text
+at 1 MiB, and every real run requires an output folder. A grouped run is capped
+at 100,000 selected images so plans, manifests, and recovery metadata have a
+defined ceiling.
+
 ## Dependencies
 
 - **stdlib only** for pairing, splitting, bucketing, replace, sha256, manifests.

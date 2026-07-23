@@ -133,11 +133,25 @@ class DatasetManagerPanel(BaseBatchPanel):
             self._logline("Choose an output folder to write the report (or keep Preview only).",
                           t.STATE["error"][1]); return None
 
-        return e.DatasetOptions(
+        opts = e.DatasetOptions(
             operation=op, caption_exts=caption_exts,
             find=self._find.get(), replace=self._replace.get(), regex=bool(self._regex.get()),
             bucket_mode=self._bucket_mode.get(), ratios=ratios,
             out_root=out_root, dry_run=dry_run)
+        normalized, error = e.normalized_options(opts)
+        if normalized is None:
+            self._logline(error, t.STATE["error"][1])
+            return None
+        return normalized
+
+    def _pre_run_check(self, _opts: e.DatasetOptions) -> bool:
+        if len(self._files) <= e.MAX_DATASET_FILES:
+            return True
+        self._logline(
+            f"Dataset limit is {e.MAX_DATASET_FILES:,} images; split this collection.",
+            t.STATE["error"][1],
+        )
+        return False
 
     # -- batch loop (tool-specific) --------------------------------------------
     def _work(self, files: list[Path], opts: e.DatasetOptions):

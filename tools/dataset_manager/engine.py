@@ -31,9 +31,10 @@ from __future__ import annotations
 import csv
 import importlib.util
 import json
+import math
 import re
 import shutil
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from pathlib import Path
 
 from toolbox.engine_common import (
@@ -49,6 +50,9 @@ BUCKET_MODES = ("dimensions", "aspect")
 SPLITS = ("train", "val", "test")
 
 _DEFAULT_CAPTION_EXTS = (".txt", ".caption")
+MAX_DATASET_FILES = 100_000
+MAX_REGEX_CHARS = 4_096
+MAX_REPLACEMENT_BYTES = 1024 * 1024
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +217,71 @@ class DatasetOptions:
     ratios: tuple = (0.8, 0.1, 0.1)         # train / val / test
     out_root: Path | None = None
     dry_run: bool = True
+
+
+def normalized_options(opts: DatasetOptions) -> tuple[DatasetOptions | None, str]:
+    """Validate settings and resource ceilings before discovery or decoding."""
+    operation = str(opts.operation).strip().lower()
+    if operation not in OPERATIONS:
+        return None, f"unknown operation: {operation or '?'}"
+    bucket_mode = str(opts.bucket_mode).strip().lower()
+    if bucket_mode not in BUCKET_MODES:
+        return None, f"unknown bucket mode: {bucket_mode or '?'}"
+    try:
+        raw_extensions = tuple(opts.caption_exts)
+    except TypeError:
+        return None, "caption extensions must be a list of suffixes"
+    if not 1 <= len(raw_extensions) <= 16:
+        return None, "provide between 1 and 16 caption extensions"
+    extensions = sorted(_norm_exts(raw_extensions))
+    if len(extensions) != len(raw_extensions) or any(
+        re.fullmatch(r"\.[a-z0-9][a-z0-9_-]{0,15}", extension) is None
+        for extension in extensions
+    ):
+        return None, "caption extensions must be unique safe suffixes such as .txt"
+    try:
+        ratios = tuple(float(value) for value in opts.ratios)
+    except (TypeError, ValueError):
+        return None, "split ratios must contain exactly three numbers"
+    if (
+        len(ratios) != 3 or any(not math.isfinite(value) or value < 0 for value in ratios)
+        or sum(ratios) <= 0
+    ):
+        return None, "split ratios must be three finite non-negative values with a positive sum"
+    if not isinstance(opts.find, str) or not isinstance(opts.replace, str):
+        return None, "find and replacement values must be text"
+    if operation == "replace" and not opts.find:
+        return None, "replace requires non-empty text or a regex to find"
+    if len(opts.find) > MAX_REGEX_CHARS:
+        return None, f"find/regex text is limited to {MAX_REGEX_CHARS:,} characters"
+    try:
+        replacement_bytes = len(opts.replace.encode("utf-8"))
+    except UnicodeEncodeError:
+        return None, "replacement is not valid Unicode text"
+    if replacement_bytes > MAX_REPLACEMENT_BYTES:
+        return None, "replacement text is limited to 1 MiB"
+    if bool(opts.regex) and operation == "replace":
+        try:
+            re.compile(opts.find)
+        except re.error as ex:
+            return None, f"invalid regex: {ex}"
+    try:
+        out_root = Path(opts.out_root) if opts.out_root is not None else None
+    except (TypeError, ValueError, OSError) as ex:
+        return None, f"invalid output folder: {ex}"
+    dry_run = bool(opts.dry_run)
+    if not dry_run and out_root is None:
+        return None, "a real run requires an output folder"
+    return replace(
+        opts,
+        operation=operation,
+        caption_exts=tuple(extensions),
+        bucket_mode=bucket_mode,
+        ratios=ratios,
+        out_root=out_root,
+        regex=bool(opts.regex),
+        dry_run=dry_run,
+    ), ""
 
 
 @dataclass
@@ -521,14 +590,24 @@ def run(paths, opts: DatasetOptions, log=None, progress=None, should_stop=None) 
     progress = progress or (lambda *a, **k: None)
     should_stop = should_stop or (lambda: False)
 
-    report = Report(operation=opts.operation)
-    if opts.operation not in OPERATIONS:
-        report.messages.append(f"unknown operation: {opts.operation}")
+    report = Report(operation=str(opts.operation))
+    normalized, options_error = normalized_options(opts)
+    if normalized is None:
+        report.failed = 1
+        report.messages.append(options_error)
         return report
+    opts = normalized
+    report.operation = opts.operation
 
     images = [Path(p) for p in paths if Path(p).suffix.lower() in IMAGE_EXTS]
     if not images:
         report.messages.append("No images to process.")
+        return report
+    if len(images) > MAX_DATASET_FILES:
+        report.failed = 1
+        report.messages.append(
+            f"dataset has {len(images)} images; maximum is {MAX_DATASET_FILES}"
+        )
         return report
 
     out_root = Path(opts.out_root) if opts.out_root else None
@@ -539,14 +618,6 @@ def run(paths, opts: DatasetOptions, log=None, progress=None, should_stop=None) 
             "Output folder must not be a source folder; refusing to modify source files."
         )
         return report
-
-    # validate a regex up front so a bad pattern fails loudly, not per-file
-    if opts.operation == "replace" and opts.regex and opts.find:
-        try:
-            re.compile(opts.find)
-        except re.error as ex:
-            report.messages.append(f"invalid regex: {ex}")
-            return report
 
     plan = build_plan(images, opts)
     report.messages.extend(plan.messages)

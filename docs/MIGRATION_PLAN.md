@@ -324,9 +324,15 @@ same-name case now fails before creating its output folder.
 
 The smoke suite snapshots every source byte and proves the mistaken
 configuration writes nothing, then selects two different `same.png` sources
-and proves the collision plan produces zero outputs. Grouped queue execution,
-strict settings, streaming cancellation, staged whole-run provenance, and
-exact reuse remain part of this active slice and are not yet claimed complete.
+and proves the collision plan produces zero outputs. The third checkpoint adds
+strict normalized settings: safe unique caption suffixes, three finite
+non-negative split ratios, compiled bounded regex text, a 1 MiB replacement
+ceiling, required real-run destination, and a 100,000-image grouped-run cap.
+Malformed settings now fail before directory discovery or decoding.
+
+Grouped queue execution, streaming cancellation, staged whole-run provenance,
+and exact reuse remain part of this active slice and are not yet claimed
+complete.
 
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display

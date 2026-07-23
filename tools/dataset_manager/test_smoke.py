@@ -66,6 +66,24 @@ def test_replace() -> None:
     print("PASS: apply_replace — literal + regex + no-op.")
 
 
+def test_options() -> None:
+    invalid_cases = (
+        e.DatasetOptions(operation="unknown"),
+        e.DatasetOptions(caption_exts=("../txt",)),
+        e.DatasetOptions(ratios=(float("nan"), 0.1, 0.9)),
+        e.DatasetOptions(ratios=(-1, 1, 1)),
+        e.DatasetOptions(operation="replace", find=""),
+        e.DatasetOptions(operation="replace", find="(", regex=True),
+        e.DatasetOptions(operation="split", dry_run=False, out_root=None),
+    )
+    for options in invalid_cases:
+        normalized, error = e.normalized_options(options)
+        assert normalized is None and error, options
+    normalized, error = e.normalized_options(e.DatasetOptions())
+    assert normalized is not None and not error
+    print("PASS: options — malformed, non-finite, unsafe, and incomplete settings rejected.")
+
+
 def _make_dataset(root: Path) -> None:
     from PIL import Image
     Image.new("RGB", (512, 512), (200, 60, 60)).save(root / "img01.png")   # square, has caption
@@ -165,6 +183,7 @@ def main() -> int:
     test_bucket()
     test_split()
     test_replace()
+    test_options()
     test_full_pipeline()
     return 0
 
