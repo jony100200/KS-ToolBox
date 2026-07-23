@@ -5,6 +5,7 @@ refreshes whenever the file list changes.
 from __future__ import annotations
 
 import csv
+from dataclasses import asdict
 from pathlib import Path
 
 import customtkinter as ctk
@@ -13,6 +14,8 @@ from toolbox import components as c
 from toolbox import theme as t
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 _ALL_TARGETS = sorted({tgt for (_k, tgt) in e.DISPATCH})
@@ -23,6 +26,9 @@ class FormatConverterPanel(BaseBatchPanel):
     FILE_LABEL = "file"
     RESULTS_ICON = Icons.ARROW
     RUN_LABEL = "Preview & Convert"
+
+    def __init__(self, parent, queue_service):
+        super().__init__(parent, queue_service=queue_service)
 
     # -- options (tool-specific) ----------------------------------------------
     def _build_options_card(self):
@@ -73,14 +79,15 @@ class FormatConverterPanel(BaseBatchPanel):
         kinds = sorted({e.source_kind(p.suffix) for p in self._files} - {""})
         if not kinds:
             self._kinds_hint.configure(text=""); return
-        targets: set[str] = set()
-        for k in kinds:
-            targets.update(e.targets_for(k))
-        values = sorted(targets) or _ALL_TARGETS
+        target_sets = [set(e.targets_for(kind)) for kind in kinds]
+        common = set.intersection(*target_sets) if target_sets else set()
+        targets = set.union(*target_sets) if target_sets else set()
+        values = sorted(common or targets) or _ALL_TARGETS
         self._target.configure(values=values)
         if self._target.get() not in values:
             self._target.set(values[0])
-        self._kinds_hint.configure(text=f"loaded: {', '.join(kinds)}")
+        suffix = "" if common else " · no target fits every kind"
+        self._kinds_hint.configure(text=f"loaded: {', '.join(kinds)}{suffix}")
 
     # -- option collection -----------------------------------------------------
     def _collect_options(self):
@@ -89,6 +96,12 @@ class FormatConverterPanel(BaseBatchPanel):
             fps = int(self._fps.get()); dpi = int(self._dpi.get())
         except ValueError:
             self._logline("Quality / GIF / DPI must be integers.", t.STATE["error"][1]); return None
+        if not 1 <= quality <= 100 or not 16 <= gifw <= 8192 or not 0 <= fps <= 240 or not 36 <= dpi <= 1200:
+            self._logline(
+                "Quality 1–100 · GIF width 16–8192 · FPS 0–240 · DPI 36–1200.",
+                t.STATE["error"][1],
+            )
+            return None
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
         mirror = bool(self._mirror.get())
@@ -97,41 +110,101 @@ class FormatConverterPanel(BaseBatchPanel):
                                 mirror=mirror, dry_run=bool(self._dry.get()), quality=quality,
                                 gif_width=gifw, fps=fps, dpi=dpi)
 
-    # -- batch loop ------------------------------------------------------------
-    def _work(self, files: list[Path], opts: e.ConvertOptions):
-        converted = skipped = failed = 0; results = []
-        for i, f in enumerate(files, 1):
-            if self._stop.is_set():
-                self.after(0, self._logline, "— stopped —", t.TEXT_MUTED); break
-            self.after(0, self._logline, f"[{i}/{len(files)}] {f.name} …", t.TEXT_MUTED)
-            res = e.process(f, opts); results.append(res)
+    # -- queue submission ------------------------------------------------------
+
+    def _pre_run_check(self, opts: e.ConvertOptions) -> bool:
+        incompatible = [
+            path.name for path in self._files
+            if (e.source_kind(path.suffix), opts.target) not in e.DISPATCH
+        ]
+        if incompatible:
+            shown = ", ".join(incompatible[:4])
+            more = "" if len(incompatible) <= 4 else f" (+{len(incompatible) - 4} more)"
+            self._logline(
+                f"Target {opts.target} does not support: {shown}{more}. Split this mixed batch.",
+                t.STATE["error"][1],
+            )
+            return False
+        if opts.dry_run:
+            return True
+        return self._check_output_collisions(e.find_output_collisions(self._files, opts))
+
+    def _build_submission(self, files: list[Path], opts: e.ConvertOptions) -> QueueSubmission:
+        definition = JobDefinition.create(
+            tool_id="format_converter",
+            tool_version="1",
+            workflow_version="multi-family-convert.v2",
+            inputs=files,
+            settings=asdict(opts),
+            max_retries=1,
+        )
+
+        def classify(res: e.Result) -> ItemOutcome:
+            data = res.to_dict()
             if res.action == "converted":
-                converted += 1
-            elif res.action in ("skipped", "dry-run"):
-                skipped += 1
-            else:
-                failed += 1
-            self.after(0, self._show, res, i, len(files))
-        manifest = self._write_manifest(opts, results)
-        self.after(0, self._done, converted, skipped, failed, manifest)
+                return ItemOutcome.completed(data, res.reason)
+            if res.action in {"skipped", "dry-run"}:
+                return ItemOutcome.skipped(data, res.reason)
+            return ItemOutcome.failed(
+                res.reason, retryable=res.retryable, data=data
+            )
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"Format Converter · {len(files)} file(s)",
+            execute=lambda path, token: e.process(
+                path, opts, cancelled=lambda: token.is_cancelled
+            ),
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts
+            ),
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="format_converter"
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        converted = sum(result.action == "converted" for result in results)
+        skipped = sum(result.action in {"skipped", "dry-run"} for result in results)
+        failed = len(results) - converted - skipped
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            converted, skipped, failed, remaining, payload.manifest,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"src", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path,
+            "failed",
+            item.details or "conversion item quarantined",
+            detail="batch.quarantined",
+        )
 
     def _write_manifest(self, opts: e.ConvertOptions, results: list) -> str | None:
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            path = root / "convert_manifest.csv"
-            new = not path.exists()
-            with open(path, "a", newline="", encoding="utf-8") as f:
-                w = csv.writer(f)
-                if new:
-                    w.writerow(["src", "action", "before", "after", "out_path", "detail", "reason"])
-                for r in results:
-                    w.writerow([r.src, r.action, r.before, r.after, r.out_path, r.detail, r.reason])
-            return str(path)
-        except OSError:
-            return None
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "convert_manifest.csv"
+        new = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["src", "action", "before", "after", "out_path", "detail", "reason"])
+            for r in results:
+                w.writerow([r.src, r.action, r.before, r.after, r.out_path, r.detail, r.reason])
+        return str(path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
@@ -148,10 +221,12 @@ class FormatConverterPanel(BaseBatchPanel):
             extra = f"  — {res.reason}"
         self._logline(f"  {icon} {name}{extra}", color)
 
-    def _done(self, converted, skipped, failed, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"converted {converted} · skipped {skipped} · failed {failed}")
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+    def _done(self, converted, skipped, failed, remaining=0, manifest=None,
+              report_path=None, job_state=JobState.COMPLETED, recovered=False, reused=False):
+        summary = f"converted {converted} · skipped {skipped} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

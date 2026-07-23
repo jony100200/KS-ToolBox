@@ -64,7 +64,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Preview, confirm, logging | Batch tools use preview/manifests; destructive compressor confirms | Good, verify per new feature |
 | Atomic output | Common pattern is temporary output then replace | Good, standardize and test crash recovery |
 | Error envelope | Shared `ok`/`err` helpers exist | Good, add conformance tests |
-| Durable batch execution | Runner/store plus shell queue implemented for ten contrasting image, media, material, analysis, and archive workflows | Good proven core; migrate remaining tools individually |
+| Durable batch execution | Runner/store plus shell queue implemented for eleven contrasting image, media, document, material, analysis, and archive workflows | Good proven core; migrate remaining tools individually |
 | Failure isolation/recovery | Per-item quarantine/retry, pause/resume/cancel, history, and finalization warnings | Good contract; manual item retry remains |
 | Content identity/cache | No shared persistent content-addressed cache | Missing |
 | Incremental recomputation | Mostly output-exists checks | Partial and settings-blind |
@@ -80,7 +80,7 @@ The Alpha Doctor smoke test was corrected to skip cleanly when NumPy is unavaila
 | Video Chopper | cancellable ffmpeg blackdetect/cuts, staged ffprobe validation, durable multi-artifact queue, exact clip-set reuse, collision protection | Deterministic | adaptive/content cuts and fades before optional neural shot detection |
 | Audio Tool | cancellable ffmpeg convert/trim/fade/normalize, staged ffprobe validation, durable queue, exact artifact reuse, collision protection | Deterministic | two-pass loudness measurement, silence/chapters, optional stem separation |
 | Image Rescale | Pillow resampling and fit modes; durable validated shell-queue execution | Deterministic | content hashes, streaming/native backend benchmark, optional restoration upscale |
-| Format Converter | Pillow/ffmpeg/document adapters | Deterministic | capability matrix, metadata/color handling, modern formats, backend provenance |
+| Format Converter | cancellable staged Pillow/ffmpeg/document adapters, strict capability routing, typed artifact validation, durable queue, collision protection | Deterministic | metadata/color-profile policies, modern formats, backend provenance |
 | Pixel Art | nearest-neighbor pixelization, median-cut palette, durable queue, validated artifact reuse | Deterministic | perceptual palette benchmark, palette locking, alpha-aware quantization |
 | To SVG | VTracer | Deterministic | expose presets/path controls, score path complexity and reconstruction error |
 | Icon Normalizer | alpha geometry, fixed canvas placement, durable queue, validated RGBA reuse | Deterministic | perceptual visual-mass normalization and platform keyline presets |
@@ -108,7 +108,7 @@ The old audit's startup and package-size numbers were measured against five tool
 ### Batch processing
 
 Files are independent and most batch tools run them serially. This is a safe
-baseline. Ten contrasting tools now run serially through the durable shared
+baseline. Eleven contrasting tools now run serially through the durable shared
 runner; the remaining tools retain existing panel loops until migrated.
 Concurrency is not automatically an optimization:
 
@@ -185,7 +185,7 @@ Every implementation slice in the roadmap must record:
 
 ## Audit conclusion
 
-The architecture is being evolved, not rewritten. Ten durable batch slices and
+The architecture is being evolved, not rewritten. Eleven durable batch slices and
 the shell-owned queue are implemented and verified without changing
 CustomTkinter or proven processing algorithms. They now cover in-process image,
 external-media, grouped-material, analytical, and secure archive contracts.

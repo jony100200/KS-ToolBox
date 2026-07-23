@@ -6,8 +6,9 @@ immutable progress snapshots, and history. Together they remove recovery,
 retry, failure-isolation, and worker ownership from migrated panels without
 changing tool algorithms. `image_rescale`, `video_compressor`,
 `video_chopper`, `audio_tool`, `icon_normalizer`, `pixel_art`,
-`material_converter`, mode-aware `showcase`, analytical `tileset_checker`, and
-secure multi-artifact `package_extractor` are the first production integrations.
+multi-family `format_converter`, `material_converter`, mode-aware `showcase`,
+analytical `tileset_checker`, and secure multi-artifact `package_extractor` are
+the first production integrations.
 
 ## Job lifecycle
 

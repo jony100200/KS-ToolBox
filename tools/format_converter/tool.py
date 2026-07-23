@@ -16,7 +16,7 @@ class FormatConverterTool:
     )
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
-        # Lazy import: the panel/engine pull Pillow (and optional doc libs).
-        # Discovery/the sidebar work without them; missing deps announce per-file.
+        # Lazy import: discovery/sidebar stay independent from the processing
+        # module; Pillow and optional document engines load only during work.
         from .panel import FormatConverterPanel
-        return FormatConverterPanel(parent)
+        return FormatConverterPanel(parent, services.queue)

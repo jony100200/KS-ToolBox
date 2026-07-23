@@ -80,6 +80,19 @@ def main() -> int:
             pixel_panel._add([first, second])
             pixel_job_id = _run_and_wait(app, pixel_panel, "Pixel Art Converter", 2)
 
+            app._select("format_converter")
+            format_panel = app._panels["format_converter"]
+            format_panel._add([first])
+            format_panel._target.set("jpg")
+            format_panel._dry.deselect()
+            format_out = root / "format_out"
+            format_panel._out_entry.insert(0, str(format_out))
+            format_job_id = _run_and_wait(
+                app, format_panel, "Format Converter", 1
+            )
+            assert (format_out / "first.jpg").is_file()
+            assert (format_out / "convert_manifest.csv").is_file()
+
             app._select("material_converter")
             material_panel = app._panels["material_converter"]
             material_panel._add([material_base, material_rough])
@@ -181,6 +194,7 @@ def main() -> int:
             assert any(item.job_id == job_id for item in app._services.queue.history())
             assert any(item.job_id == icon_job_id for item in app._services.queue.history())
             assert any(item.job_id == pixel_job_id for item in app._services.queue.history())
+            assert any(item.job_id == format_job_id for item in app._services.queue.history())
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
@@ -195,8 +209,9 @@ def main() -> int:
             app._on_close()
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, "
-          "Material Converter, Showcase, Tileset Checker, Package Extractor, Audio Tool, "
-          "Video Compressor, and Video Chopper through the shell queue; history UI rendered.")
+          "Format Converter, Material Converter, Showcase, Tileset Checker, Package "
+          "Extractor, Audio Tool, Video Compressor, and Video Chopper through the shell "
+          "queue; history UI rendered.")
     return 0
 
 

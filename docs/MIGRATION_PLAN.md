@@ -228,6 +228,47 @@ outcomes instead of clean completions.
 | Tests/benchmarks | 22 unit tests; focused traversal/Unity/nested/hash/corruption/atomic-report/bomb/entry-cap/collision/options/cancellation rollback smoke; ten-workflow real queue flow; 17/17 panels and tool smokes; durable core 10,810 items/s |
 | Risk/rollback | Exact validation reopens every output and can be slower than re-extraction for many tiny, highly compressible files; cancellation leaves harmless empty directories; revert the panel/tool adapter and new validation/report metadata while retaining the original extraction handlers if rollback is required |
 
+### Slice 3k — implemented multi-family Format Converter
+
+Format Converter keeps its established Pillow, FFmpeg, Markdown, HTML, DOCX,
+and PDF adapters and remains one first-party CustomTkinter plugin. Each selected
+file is now a durable queue item. Strict option and capability checks reject an
+invalid mixed batch before it starts, while same-stem sources that would share
+an output are reported as collisions instead of racing.
+
+File outputs use format-preserving sibling candidates; PDF page sets use an
+exclusive staged directory. KS reopens and measures images, probes media,
+checks PDF signatures, streams UTF-8 validation, and hashes the exact artifact
+set before atomic publication. Stored results are reused only while that same
+typed artifact record still validates. PDF text extraction now streams to its
+candidate instead of retaining all pages in memory, and explicit 10,000-page
+and 10,000-frame ceilings bound report/checkpoint growth.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Panel-owned worker loop called converters directly; successful engine return was treated as sufficient, PDF pages appeared incrementally, output collisions and mixed-family incompatibility were not rejected as a batch, and cancellation did not reach active conversion work |
+| Proposed behavior | Shell queue with one file per recovery boundary, strict planning, process-tree/loop cancellation, staged conversion, typed validation, atomic commit, one controlled retry for retryable failures, quarantine, checkpoint, and completion report |
+| Architecture/language | Existing Python plugin, CustomTkinter panel, Pillow algorithms, native FFmpeg/ffprobe, and optional document adapters remain; shared queue, process, hash, collision, completion, and artifact contracts are composed around them rather than rewriting mature engines |
+| Functionality and quality | Existing image, media, Markdown/HTML/DOCX, PDF image/text, mirroring, quality, bitrate, DPI, CSS, and preview behavior remains; malformed settings fail earlier, page sets publish completely, and outputs must independently decode/probe before success |
+| Code and dependencies | Format Converter production source 546 → 1,149 nonblank lines (+603 for strict multi-family planning, cancellation, staged page/file handling, exact provenance, validation, queue adapter, and failure paths); zero dependencies added or removed |
+| Package-size impact | No model, library, binary, asset, or background service was added, so this slice adds no dependency/binary payload; the complete packaged artifact was not rebuilt and no total-package-size change is claimed |
+| Startup and runtime impact | Ready-to-mainloop measured 129 ms with 36 ms discovery and no optional-heavy imports; five-run medians: 1024² PNG→JPEG 11.3 → 19.9 ms (+8.7 ms, +76.7%) and 3 s 320×240 MP4→MP3 52.4 → 87.6 ms (+35.2 ms, +67.2%) because success now includes independent reopen/probe/hash validation |
+| RAM, VRAM, CPU, disk, and GPU transfer | Image/PDF loops remain sequential; PDF text is now streamed; hashing/UTF-8 checks use bounded buffers; one FFmpeg/ffprobe process runs at a time; staged paths do not duplicate a full output; no model, GPU, VRAM, or GPU transfer is introduced; child peak RAM is not claimed measured |
+| AI and model-loading impact | Zero AI calls and zero model loads; exact format conversion and deterministic validation are sufficient for this tool |
+| Batch, cache, and incremental impact | Per-file retry/quarantine/checkpoints and exact validator-backed whole-result reuse replace panel-only execution; unchanged media reuse validation measured 37.2 ms across five runs and avoids conversion, but no universal speedup or content-addressed cache is claimed |
+| Reliability, security, tests, and benchmarks | Invalid candidates never replace destinations; cancellation cleans the active candidate; existing PDF page folders are not implicitly overwritten; subprocesses do not use a shell; focused base and optional-dependency smokes cover corruption, exact page sets, collision, bounds, cancellation, and real conversions; the full 22-unit/17-panel/11-workflow/17-smoke release gate is required below |
+| Risks and rollback | Independent validation is proportionally expensive for tiny files; exact page manifests can be large up to their cap; a fixed sibling candidate assumes the shell queue is the destination owner. Roll back the panel/tool queue adapter and engine validation/candidate layer together while retaining compatible shared helpers; original inputs are never modified |
+
+Cartridge-grade score for this slice: functional completeness 5, output quality
+5, runtime performance 4, startup efficiency 5, memory efficiency 4, storage
+efficiency 4, batch efficiency 5, cache effectiveness 4, incremental execution
+4, AI efficiency 5, reliability 5, maintainability 4, portability 5, and security
+5. The 4s are deliberate boundaries rather than unmeasured 5s: validation has
+a measured small-file runtime cost, animated frames still use a capped in-memory
+list, provenance consumes bounded metadata/storage, reuse is whole-item rather
+than a shared content cache, and the multi-family adapter necessarily carries
+more failure-path code.
+
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display
 flow rather than maintaining duplicate finalization loops.

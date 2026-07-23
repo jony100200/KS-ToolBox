@@ -32,6 +32,28 @@ files you loaded.
 Nothing is written until you turn off **Preview only**; originals are never
 touched. A `convert_manifest.csv` records every file when an output folder is set.
 
+All real conversions run through the shared durable queue. File converters write
+to a format-preserving candidate, KS validates the candidate, and only then is it
+atomically committed. FFmpeg, image-frame loops, PDF pages, hashing, and text
+validation observe cancellation. A malformed input or unavailable optional
+dependency is isolated to that item instead of stopping the batch.
+
+Stored results are reused only while their exact planned artifact set still
+matches:
+
+- images reopen successfully with the recorded geometry, mode, frame count,
+  byte count, and SHA-256;
+- audio/video passes ffprobe duration validation plus exact hashing;
+- PDF output has a PDF signature; HTML/text must be valid streaming UTF-8;
+- PDF page directories contain exactly the numbered pages recorded by the job,
+  with every page reopened and hashed.
+
+PDF page rendering uses a staged sibling directory and commits the complete page
+set at once. An existing page-output directory is not overwritten implicitly.
+Choose another output folder or deliberately remove the old generated directory.
+PDF jobs are capped at 10,000 pages and animated image preservation at 10,000
+frames so report/checkpoint memory cannot grow without a defined ceiling.
+
 ## Options
 
 | Option | Applies to | Default |
@@ -41,6 +63,11 @@ touched. A `convert_manifest.csv` records every file when an output folder is se
 | PDF→image DPI | pdf → png/jpg | 150 |
 | Mirror input structure | all | on |
 | Preview only | all | on |
+
+When several input families are selected, the target menu prefers formats common
+to every family. If no common target exists, the UI asks you to split the mixed
+batch instead of queuing predictable per-file failures. Same-output collisions
+between selected files are rejected before processing.
 
 ## Dependencies
 
@@ -59,5 +86,7 @@ the PDF rendering instead.
 python -m tools.format_converter.test_smoke
 ```
 
-Tests the dispatch table (no deps), the Pillow image leg, the ffmpeg A/V leg, and
-the markdown document leg — each skipping cleanly if its dependency is absent.
+Tests dispatch, strict options, collisions, cancellation cleanup, exact image and
+media reuse, corruption rejection, and page-set validation. Markdown and real
+PDF render/text legs run when their optional dependencies are present and skip
+cleanly otherwise.
