@@ -4,14 +4,21 @@ vectorize logic here."""
 from __future__ import annotations
 
 import csv
+import importlib.util
+import os
+from dataclasses import asdict
 from pathlib import Path
+from tkinter import messagebox
 
 import customtkinter as ctk
 
 from toolbox import components as c
 from toolbox import theme as t
+from toolbox.batch_core import ItemOutcome, ItemRecord, JobDefinition, JobState
 from toolbox.icons import Icons
 from toolbox.batch_panel import BaseBatchPanel
+from toolbox.engine_common import find_output_collisions
+from toolbox.job_queue import QueueCompletion, QueueSubmission
 from . import engine as e
 
 
@@ -64,6 +71,36 @@ class ToSvgPanel(BaseBatchPanel):
                             color_precision=int(self._precision.get()),
                             dry_run=bool(self._dry.get()))
 
+    def _pre_run_check(self, opts: e.SvgOptions) -> bool:
+        normalized, options_error = e.normalized_options(opts)
+        if normalized is None:
+            self._logline(options_error, t.STATE["error"][1])
+            return False
+        collisions = find_output_collisions(
+            self._files, lambda source: [e.plan_output(source, normalized)]
+        )
+        if not self._check_output_collisions(collisions):
+            return False
+        if normalized.dry_run:
+            return True
+        if importlib.util.find_spec("vtracer") is None:
+            self._logline(
+                "vtracer is not installed — install the optional vtracer package.",
+                t.STATE["error"][1],
+            )
+            return False
+        existing = sum(
+            e.plan_output(source, normalized).exists() for source in self._files
+        )
+        return messagebox.askyesno(
+            "Confirm SVG batch",
+            f"{len(self._files)} image(s) will be vectorized.\n"
+            f"{existing} existing SVG file(s) may be replaced atomically.\n\n"
+            "Continue?",
+            icon="warning",
+            parent=self,
+        )
+
     # -- batch loop (tool-specific) --------------------------------------------
 
     def _work(self, files: list[Path], opts: e.SvgOptions):
@@ -83,23 +120,103 @@ class ToSvgPanel(BaseBatchPanel):
         manifest = self._write_manifest(opts, results)
         self.after(0, self._done, converted, skipped, failed, manifest)
 
+    def _build_submission(
+        self, files: list[Path], opts: e.SvgOptions
+    ) -> QueueSubmission:
+        definition = JobDefinition.create(
+            tool_id="to_svg",
+            tool_version="1",
+            workflow_version="vtracer-svg.v1",
+            inputs=files,
+            settings=asdict(opts),
+        )
+
+        def classify(result: e.Result) -> ItemOutcome:
+            data = result.to_dict()
+            if result.action == "converted":
+                return ItemOutcome.completed(data, result.reason)
+            if result.action == "dry-run":
+                return ItemOutcome.skipped(data, result.reason)
+            return ItemOutcome.failed(result.reason, data=data)
+
+        return QueueSubmission(
+            definition=definition,
+            label=f"To SVG · {len(files)} image(s)",
+            execute=lambda path, token: e.process(
+                path, opts, cancelled=lambda: token.is_cancelled
+            ),
+            classify=classify,
+            validate_stored=lambda item: e.validate_result(
+                self._result_from_record(item), opts,
+                expected_src=item.input_path,
+            ),
+            finalize=lambda report: self._prepare_queue_completion(
+                report, opts, tool_id="to_svg"
+            ),
+        )
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        report = completion.report
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        converted = sum(result.action == "converted" for result in results)
+        skipped = sum(result.action == "dry-run" for result in results)
+        failed = len(results) - converted - skipped
+        remaining = len(report.items) - len(payload.finished_items)
+        self._done(
+            converted, skipped, failed, payload.manifest, remaining,
+            payload.report_path, self._queue_completion_state(completion),
+            report.recovered, report.reused,
+        )
+
+    @staticmethod
+    def _result_from_record(item: ItemRecord) -> e.Result:
+        if item.data and {"src", "action", "reason"}.issubset(item.data):
+            return e.Result(**item.data)
+        return e.Result(
+            item.input_path, "failed",
+            item.details or "SVG item quarantined",
+            detail="batch.quarantined",
+        )
+
     def _write_manifest(self, opts: e.SvgOptions, results: list) -> str | None:
         if opts.dry_run or not results or not opts.out_root:
             return None
         root = Path(opts.out_root)
+        path = root / "svg_manifest.csv"
+        candidate = root / "svg_manifest.part.csv"
         try:
             root.mkdir(parents=True, exist_ok=True)
-            path = root / "svg_manifest.csv"
-            new = not path.exists()
-            with open(path, "a", newline="", encoding="utf-8") as f:
+            with open(candidate, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
-                if new:
-                    w.writerow(["src", "action", "out_path", "detail", "reason"])
+                w.writerow([
+                    "src", "action", "out_path", "bytes", "sha256",
+                    "elements", "paths", "detail", "reason",
+                ])
                 for r in results:
-                    w.writerow([r.src, r.action, r.out_path, r.detail, r.reason])
-            return str(path)
-        except OSError:
-            return None
+                    artifact = r.artifact or {}
+                    w.writerow([
+                        r.src, r.action, r.out_path,
+                        artifact.get("bytes", ""), artifact.get("sha256", ""),
+                        artifact.get("elements", ""), artifact.get("paths", ""),
+                        r.detail, r.reason,
+                    ])
+                f.flush()
+                os.fsync(f.fileno())
+            candidate.replace(path)
+        except BaseException as ex:
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError as cleanup:
+                raise OSError(
+                    f"SVG manifest failed and staged cleanup failed: {cleanup}"
+                ) from ex
+            raise
+        return str(path)
 
     def _show(self, res: e.Result, i: int, total: int):
         self._progress.set(i / total)
@@ -109,10 +226,13 @@ class ToSvgPanel(BaseBatchPanel):
         extra = f"  → {res.out_path}" if res.action == "converted" else f"  — {res.reason}"
         self._logline(f"  {icon} {name}{extra}", color)
 
-    def _done(self, converted, skipped, failed, manifest=None):
-        self._run_btn.configure(state="normal"); self._stop_btn.configure(state="disabled")
-        self._status.set_state("DONE", "done" if not failed else "error")
-        self._progress.set(1)
-        self._summary.configure(text=f"vectorized {converted} · previewed {skipped} · failed {failed}")
-        if manifest:
-            self._logline(f"  manifest: {manifest}", t.TEXT_MUTED)
+    def _done(self, converted, skipped, failed, manifest=None, remaining=0,
+              report_path=None, job_state=JobState.COMPLETED,
+              recovered=False, reused=False):
+        summary = f"vectorized {converted} · previewed {skipped} · failed {failed}"
+        if remaining:
+            summary += f" · remaining {remaining}"
+        self._finish_queue_ui(
+            summary, job_state=job_state, recovered=recovered, reused=reused,
+            manifest=manifest, report_path=report_path,
+        )

@@ -20,4 +20,4 @@ class ToSvgTool:
         # of module import means discovery/the sidebar work even before vtracer
         # is installed — the missing dep is reported when the tool is used.
         from .panel import ToSvgPanel
-        return ToSvgPanel(parent)
+        return ToSvgPanel(parent, services.queue)

@@ -8,8 +8,15 @@ vector graphics. Point it at files or a folder, preview the plan, then run.
 For each image it calls [vtracer](https://github.com/visioncortex/vtracer) — a
 fast Rust image tracer — to convert the pixels into stacked (or cut-out) vector
 paths and writes a `.svg` beside the source (or into an output folder, mirroring
-the input tree if you ask it to). Every real run is atomic (writes a `.part`
-temp, then renames) and logged to a `svg_manifest.csv` in the output folder.
+the input tree if you ask it to).
+
+The CustomTkinter screen uses the shared durable queue: pause/resume,
+cancellation boundaries, crash recovery, per-image quarantine, history, and a
+morning report are consistent with the other KS batch tools. Every real output
+is staged, parsed as bounded XML, rejected if it contains document/entity
+declarations, hashed with SHA-256, and atomically published. Identical completed
+jobs reuse only exact valid SVGs; missing or same-size-corrupted outputs retrace
+only their source image.
 
 ## Dependencies
 
@@ -29,8 +36,20 @@ temp, then renames) and logged to a `svg_manifest.csv` in the output folder.
 | **Preview only** | Dry-run: list what would be written, no files touched. |
 | **Mirror input structure** | Recreate the source subtree under the output folder. |
 
-Preview + Confirm + Logging: the panel defaults to preview-only, and every real
-run writes a manifest — per the batch-tool contract.
+Preview + Confirm + Logging: the panel defaults to preview-only. Every real run
+preflights same-name/source collisions, confirms the batch and overwrite count,
+writes an atomic `svg_manifest.csv`, and writes the shared JSON completion
+report. A failed or cancelled trace cleans its `.part` file and preserves an
+existing valid destination.
+
+## Bounds and validation
+
+- Input and output files are capped at 512 MiB each.
+- SVG parsing caps at 1,000,000 elements.
+- Color mode, hierarchy, speckle, color precision, and path precision are
+  validated before dry-run or conversion.
+- Symlinked inputs are rejected.
+- VTracer remains lazy and optional; no model or AI runtime is used.
 
 ## Verify
 
@@ -40,8 +59,11 @@ Run the smoke test in an ephemeral uv overlay (does not touch the app venv):
 $env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; uv run --no-project --python 3.12 --with vtracer --with pillow python -m tools.to_svg.test_smoke
 ```
 
-It writes a real PNG, vectorizes it, and asserts a non-empty `.svg` containing an
-`<svg` tag. Skips cleanly (prints SKIP, exits 0) if vtracer or Pillow is absent.
+Deterministic stub checks always run: strict options, collision detection,
+staged cleanup, cancellation, forbidden XML declarations, SVG/hash validation,
+and same-size corruption repair. When vtracer and Pillow are available, the
+same smoke also performs and validates a real trace; otherwise only that
+optional leg is skipped.
 
 ## Credit
 

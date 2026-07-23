@@ -244,6 +244,58 @@ def main() -> int:
                 renderer_module._run = original_renderer_run
                 renderer_panel_module.messagebox.askyesno = original_confirm
 
+            svg_out = root / "svg_out"
+            app._select("to_svg")
+            svg_panel = app._panels["to_svg"]
+            svg_panel._add([first])
+            svg_panel._dry.deselect()
+            svg_panel._out_entry.insert(0, str(svg_out))
+
+            from tools.to_svg import engine as svg_module
+            from tools.to_svg import panel as svg_panel_module
+
+            svg_calls = 0
+            original_vtracer = sys.modules.get("vtracer")
+            original_find_spec = svg_panel_module.importlib.util.find_spec
+            original_svg_confirm = svg_panel_module.messagebox.askyesno
+
+            def fake_vtracer(_source, destination, **_kwargs):
+                nonlocal svg_calls
+                svg_calls += 1
+                Path(destination).write_text(
+                    '<svg xmlns="http://www.w3.org/2000/svg">'
+                    '<path d="M0 0 L1 0 L1 1 Z"/></svg>',
+                    encoding="utf-8",
+                )
+
+            sys.modules["vtracer"] = SimpleNamespace(
+                convert_image_to_svg_py=fake_vtracer
+            )
+            svg_panel_module.importlib.util.find_spec = lambda _name: object()
+            svg_panel_module.messagebox.askyesno = lambda *_args, **_kwargs: True
+            try:
+                svg_job_id = _run_and_wait(app, svg_panel, "To SVG", 1)
+                svg_output = svg_out / "first.svg"
+                assert svg_output.is_file()
+                assert (svg_out / "svg_manifest.csv").is_file()
+                svg_reuse_id = _run_and_wait(app, svg_panel, "To SVG reuse", 1)
+                assert svg_reuse_id == svg_job_id
+                assert app._services.queue.completion(svg_job_id).report.reused
+                assert svg_calls == 1
+                svg_output.write_bytes(b"X" * svg_output.stat().st_size)
+                svg_repair_id = _run_and_wait(app, svg_panel, "To SVG repair", 1)
+                assert svg_repair_id == svg_job_id
+                assert not app._services.queue.completion(svg_job_id).report.reused
+                assert svg_calls == 2
+                assert b"<svg" in svg_output.read_bytes()
+            finally:
+                if original_vtracer is None:
+                    sys.modules.pop("vtracer", None)
+                else:
+                    sys.modules["vtracer"] = original_vtracer
+                svg_panel_module.importlib.util.find_spec = original_find_spec
+                svg_panel_module.messagebox.askyesno = original_svg_confirm
+
             app._select("showcase")
             showcase_panel = app._panels["showcase"]
             showcase_panel._add([first, second])
@@ -346,6 +398,7 @@ def main() -> int:
             assert any(item.job_id == dataset_job_id for item in app._services.queue.history())
             assert any(item.job_id == material_job_id for item in app._services.queue.history())
             assert any(item.job_id == renderer_job_id for item in app._services.queue.history())
+            assert any(item.job_id == svg_job_id for item in app._services.queue.history())
             assert any(item.job_id == showcase_job_id for item in app._services.queue.history())
             assert any(item.job_id == tileset_job_id for item in app._services.queue.history())
             assert any(item.job_id == package_job_id for item in app._services.queue.history())
@@ -360,7 +413,7 @@ def main() -> int:
 
     print("PASS: CustomTkinter submitted Image Rescale, Icon Normalizer, Pixel Art, Alpha Doctor, "
           "Format Converter, Asset Auditor, Dataset Manager, Material Converter, Texture Renderer, "
-          "Showcase, Tileset Checker, Package "
+          "To SVG, Showcase, Tileset Checker, Package "
           "Extractor, Audio Tool, Video Compressor, and Video Chopper through the shell "
           "queue; history UI rendered.")
     return 0

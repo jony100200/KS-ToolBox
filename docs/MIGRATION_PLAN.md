@@ -10,7 +10,7 @@ restore until the full release gate passes.
 - 16 panels inherit `BaseBatchPanel`; Texture Renderer keeps a custom two-tab
   layout while reusing its durable queue lifecycle. Sprite Viewer remains a
   custom interactive viewer.
-- Four panels retain a compatibility `_work` loop; fifteen production workflows
+- Four panels retain a compatibility `_work` loop; sixteen production workflows
   use the shell-owned durable queue.
 - Fifteen panels define a manifest writer; Texture Renderer keeps its
   format-specific manifest in the headless engine.
@@ -572,6 +572,47 @@ and security 5. The 4s are explicit boundaries: cryptographic validation has a
 measured cost, artifact/provenance records consume bounded storage, cache reuse
 is per project rather than a shared stage graph, peak resources remain
 uninstrumented, and the custom adapter necessarily owns mode-specific wiring.
+
+### Slice 3p — safe, durable To SVG
+
+The audit reproduced three concrete failures in the legacy adapter. A stub
+vtracer that wrote a partial file and raised left `a.part.svg` behind. Two
+different source folders containing `same.png`/`same.jpg` planned the same flat
+`same.svg` destination with no collision gate. Invalid settings such as a
+`bogus` color mode and negative speckle were accepted by dry run. The UI also
+claimed Preview + Confirm + Logging while real runs had no confirmation and an
+append-only manifest silently ignored write failures.
+
+To SVG now validates settings and source bounds before all modes, preflights
+batch destinations, confirms every real batch, and submits one image per durable
+queue item. Vtracer still runs lazily and synchronously through its mature Rust
+binding. The candidate SVG is size-bounded, streamed into SHA-256, rejects
+document/entity declarations, and is parsed with bounded element counting
+before atomic publication. Exact artifact validation enables completed-job
+reuse and same-size corruption repair.
+
+| Review item | Evidence |
+|---|---|
+| Current behavior | Private worker loop, boundary-only stop, no persistence/pause/recovery, same-name flat overwrite, invalid dry-run settings, no source/resource bounds, assumed nonempty output, stale `.part` on failure, append-only non-atomic CSV, swallowed manifest errors, and no overwrite confirmation |
+| Proposed behavior | Strict settings/input bounds, collision/source guard, explicit confirmation, durable per-image queue, pause/cancel/recovery/history, failure quarantine, staged cleanup, bounded XML/SHA-256 artifact validation, exact reuse/repair, atomic CSV, and JSON morning report |
+| Architecture and language | Existing CustomTkinter/BaseBatchPanel, headless Python adapter, and lazy official vtracer Rust extension remain. The panel only builds the job/confirmation/report; vectorization, validation, and output safety stay in `engine.py`. No AI or replacement tracer was introduced |
+| Functionality and quality | Color/binary modes, stacked/cutout hierarchy, speckle, color/path precision, beside-source output, flat output, mirrored output, and dry run remain. Output bytes from vtracer are unchanged; new checks prove valid bounded SVG XML and exact content but do not claim perceptual reconstruction quality |
+| Code and dependency impact | To SVG engine/panel/tool 221 → 535 nonblank lines (+314 for strict contracts, cancellation cleanup, XML/hash artifact validation, collision/confirmation, durable adapter, exact reuse, and atomic provenance); zero dependencies, models, binaries, services, or resident workers added |
+| Package-size impact | Source-only change; vtracer remains an optional lazy dependency and no packaged artifact was rebuilt, so no release-size change is claimed |
+| Startup and runtime impact | Five-run ready-to-mainloop median measured 115 → 114 ms with 29 ms discovery in both revisions and no vtracer import. For a 26,829-byte/1,002-element stub SVG, legacy staged write measured 0.47 ms versus 9.56 ms with bounded XML/SHA-256 validation (+9.09 ms); exact reuse validation measured 1.83 ms. Native tracing time is excluded |
+| RAM, VRAM, CPU, disk, and GPU transfer | Input/output cap at 512 MiB, XML at 1,000,000 elements, hash chunks at 1 MiB, and iterparse clears completed elements; one image is the work unit. The Rust tracer's peak native RAM/CPU is not claimed measured; no GPU, VRAM, model, AI, network, or GPU transfer is introduced |
+| Batch, cache, and incremental impact | Sixteen real shell workflows now use the durable queue. Recovery/quarantine/reuse/repair granularity is one source image; job identity includes normalized settings and input metadata; valid SVGs skip vtracer; no cross-job content-addressed trace cache exists |
+| AI and model-loading impact | Zero AI calls/model loads. Exact deterministic vtracer is faster, reproducible, and more appropriate than generative vector reconstruction for this operation |
+| Reliability, security, tests, and benchmarks | Always-on smoke uses a deterministic tracer stub to cover settings, collisions, failed/cancelled cleanup, destination preservation, DTD/entity rejection, artifact metadata, exact validation, and corruption repair; the optional real-vtracer leg skips cleanly when absent. The real CustomTkinter queue check proves first conversion, zero-call reuse, repair, manifest, controls, and history |
+| Risks and rollback | The in-process native vtracer call cannot pause/cancel mid-call and a native crash could still terminate the UI; structural XML/hash checks do not score visual fidelity or path simplicity; the 512 MiB ceiling still allows a heavy trace; vtracer was absent on this machine so the optional real leg skipped. Revert the panel queue adapter, engine validator/artifact fields, and manifest rewrite together; deterministic stub coverage remains usable independently |
+
+Checkpoint cartridge score: functional completeness 5, output quality 4,
+runtime 4, startup 5, memory 4, storage 5, batch 5, cache 4, incremental
+execution 4, AI efficiency 5, reliability 4, maintainability 4, portability 4,
+and security 5. The 4s retain measured validation cost, unmeasured native peak
+resources, structural rather than perceptual quality checks, per-job rather than
+content-addressed reuse, optional wheel availability, and the in-process native
+cancellation/crash boundary.
 
 The third slice also justified one shared `batch_reporting` primitive: all three
 panels now reuse typed completion artifacts and BaseBatchPanel's item-display

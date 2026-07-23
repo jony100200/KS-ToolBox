@@ -9,7 +9,11 @@ $files = Get-ChildItem "$root\tools","$root\toolbox" -Recurse -Filter *.py -File
 
 Write-Host "=== AI / model / network call sites (code, excluding comments) ==="
 $hits = Select-String -Path $files.FullName -Pattern $patterns |
-        Where-Object { $_.Line.Trim() -notmatch '^\s*#' -and $_.Line -notmatch '^\s*(""")|(\*)' }
+        Where-Object {
+          $_.Line.Trim() -notmatch '^\s*#' -and
+          $_.Line -notmatch '^\s*(""")|(\*)' -and
+          $_.Line -notmatch 'http://www\.w3\.org/2000/svg'
+        }
 if ($hits) {
   $hits | ForEach-Object { "{0}:{1}: {2}" -f (Split-Path $_.Path -Leaf), $_.LineNumber, $_.Line.Trim() }
   Write-Host "`nfiles with AI/network references:"
