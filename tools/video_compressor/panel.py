@@ -51,6 +51,11 @@ class VideoCompressorPanel(BaseBatchPanel):
         self._crf.set("20"); self._crf.grid(row=1, column=1, sticky="w", padx=(0, 24), pady=(2, 0))
         ctk.CTkLabel(row, text="Min VMAF", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=2, sticky="w")
         self._vmaf = c.entry(row, width=60); self._vmaf.insert(0, "92"); self._vmaf.grid(row=1, column=2, sticky="w", pady=(2, 0))
+        ctk.CTkLabel(row, text="Output container", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=3, sticky="w", padx=(24, 0))
+        self._container = ctk.CTkOptionMenu(row, values=["MKV", "MP4"], width=90,
+                                            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER,
+                                            button_hover_color=t.NEUTRAL_HOVER)
+        self._container.set("MKV"); self._container.grid(row=1, column=3, sticky="w", padx=(24, 0), pady=(2, 0))
         # output folder
         self._build_output_row(b, "Output folder (blank = ./compressed beside each source)")
         # toggles — safety row + batch row
@@ -99,6 +104,7 @@ class VideoCompressorPanel(BaseBatchPanel):
         except ValueError:
             self._logline("Min VMAF must be a number.", t.STATE["error"][1]); return None
         enc_map = {"AV1 (best quality / size)": "svt_av1", "AV1 NVENC (GPU fast)": "nvenc_av1"}
+        container = "mp4" if self._container.get() == "MP4" else "mkv"
         policy = e.Policy(crf=int(self._crf.get()), encoder=enc_map[self._encoder.get()])
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
@@ -106,7 +112,7 @@ class VideoCompressorPanel(BaseBatchPanel):
         # mirror relative to the common ancestor of every source's folder.
         input_root = self._resolve_input_root() if mirror else None
         return e.ProcessOptions(out_root=out_root, input_root=input_root, mirror=mirror,
-                                policy=policy, vmaf_floor=vmaf_floor,
+                                policy=policy, vmaf_floor=vmaf_floor, container=container,
                                 dry_run=bool(self._dry.get()), delete_original=bool(self._del.get()),
                                 skip_existing=bool(self._skip.get()))
 
@@ -195,6 +201,9 @@ class VideoCompressorPanel(BaseBatchPanel):
             vmaf = f"{res.vmaf:.1f}" if res.vmaf is not None else "unproven"
             extra = f"  {res.before_mb:.1f}→{res.after_mb:.1f} MB  (-{res.saved_pct:.0f}%)  VMAF {vmaf}"
             extra += "  🗑 original removed" if res.original_removed else ""
+        elif res.action == "dry-run":
+            # Honest: the saving shown is the unverified assess() heuristic.
+            extra = f"  — est. -{res.saved_pct:.0f}% (unverified) — {res.reason}"
         else:
             extra = f"  — {res.reason}"
         self._logline(f"  {icon} {name}{extra}", color)

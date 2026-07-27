@@ -27,7 +27,7 @@ from pathlib import Path
 from toolbox.engine_common import (
     VIDEO_EXTS, ok as _ok, err as _err,
     resolve_tool as _tool, run_cmd as _run, tools_status as _tools_status_raw,
-    run_cancellable_cmd as _run_cancellable, CommandCancelled,
+    run_cancellable_cmd as _run_cancellable, CommandCancelled, sha256_file,
 )
 
 # Codecs that are already modern/efficient. If a file already uses one of these
@@ -239,10 +239,15 @@ def _ffmpeg_cmd(ff: str, src: Path, dst: Path, crf: int, encoder: str) -> list[s
         # SVT-AV1 is BSD-2-Clause and is included by the verified LGPL FFmpeg
         # bundle. Preset 6 is a quality/speed balance for unattended batches.
         vcodec = ["-c:v", "libsvtav1", "-preset", "6", "-crf", str(crf)]
-    # -f matroska: the temp file is "<name>.mkv.part", so ffmpeg can't infer the
-    # muxer from the extension — state it. The pipeline always targets MKV.
+    # The temp file is "<name>.<ext>.part", so ffmpeg can't infer the muxer
+    # from the extension — state it explicitly. We support mp4 (device-friendly)
+    # and mkv (default, best AV1-tool compatibility). mp4 gets +faststart so the
+    # moov atom lands at the head for progressive/web playback.
+    fmt = "mp4" if dst.suffix.lower() == ".mp4" else "matroska"
+    mux_extra = ["-movflags", "+faststart"] if fmt == "mp4" else []
     return [ff, "-y", "-i", str(src), *vcodec,
-            "-c:a", "copy", "-c:s", "copy", "-map", "0", "-f", "matroska", str(dst)]
+            "-c:a", "copy", "-c:s", "copy", "-map", "0",
+            "-f", fmt, *mux_extra, str(dst)]
 
 
 # ---------------------------------------------------------------------------
@@ -303,22 +308,25 @@ class ProcessOptions:
     delete_original: bool = False     # only true after user opts in; uses recycle bin when possible
     skip_existing: bool = True        # resumable batches: don't redo a file whose output exists
     dry_run: bool = True              # default safe: report, don't write/delete
-
+    container: str = "mkv"            # output container: "mkv" (default) or "mp4" (device-friendly)
 
 def plan_output(src: Path, opts: ProcessOptions) -> Path:
     """Where this source's compressed file goes. Mirror mode preserves the
-    input subtree under out_root; else flat under out_root; else ./compressed."""
+    input subtree under out_root; else flat under out_root; else ./compressed.
+    Extension follows opts.container ("mkv" or "mp4").
+    """
+    ext = ".mp4" if opts.container == "mp4" else ".mkv"
     src = Path(src)
     if opts.out_root:
         root = Path(opts.out_root)
         if opts.mirror and opts.input_root:
             try:
                 rel = src.relative_to(opts.input_root)
-                return root / rel.parent / (src.stem + ".mkv")
+                return root / rel.parent / (src.stem + ext)
             except ValueError:
                 pass  # source not under input_root — fall back to flat
-        return root / (src.stem + ".mkv")
-    return src.parent / "compressed" / (src.stem + ".mkv")
+        return root / (src.stem + ext)
+    return src.parent / "compressed" / (src.stem + ext)
 
 
 @dataclass
@@ -333,6 +341,8 @@ class Result:
     out_path: str | None = None
     original_removed: bool = False
     detail: str = ""
+    estimated: bool = False           # True when saved_pct is the unverified
+                                      # assess() heuristic, not a measured result
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -354,9 +364,15 @@ def process(path: str | Path, opts: ProcessOptions,
     dst = plan_output(src, opts)
 
     if opts.dry_run:
-        return Result(str(src), "dry-run", f"would compress: {decision.reason}",
-                      before_mb=round(info.megabytes, 1), saved_pct=round(decision.est_saving * 100, 0),
-                      out_path=str(dst))
+        # saved_pct here is the assess() heuristic ONLY — the real encode may
+        # come out larger (see "no-gain" skip) or smaller. Mark it estimated so
+        # any UI/log never presents it as a promised saving. (Issue #1)
+        return Result(str(src), "dry-run",
+                      f"would compress (est. saving, unverified): {decision.reason}",
+                      before_mb=round(info.megabytes, 1),
+                      saved_pct=round(decision.est_saving * 100, 0),
+                      out_path=str(dst), estimated=True,
+                      detail="estimated — real encode is measured per file and may differ")
 
     # Resumable: a finished output means this file is already done.
     if opts.skip_existing and dst.is_file() and dst.stat().st_size > 0:
@@ -414,6 +430,12 @@ def process(path: str | Path, opts: ProcessOptions,
     dst.parent.mkdir(parents=True, exist_ok=True)
     candidate.replace(dst)
 
+    # Proof sidecar: the user's "encode -> compare -> delete OG" workflow needs a
+    # durable, re-auditable record next to each output WITHOUT re-running VMAF.
+    # We write <output>.json with the measured quality + source fingerprint so a
+    # later compare step is instant and provable. (Improvement #3)
+    _write_proof(src, dst, info, after, vmaf, decision, opts)
+
     removed = False
     if opts.delete_original and vmaf is not None and vmaf >= opts.vmaf_floor:
         removed = _safe_remove(src)
@@ -426,6 +448,48 @@ def process(path: str | Path, opts: ProcessOptions,
         detail=("original removed" if removed else "original kept") +
                ("" if vmaf is not None else " (VMAF unproven)"),
     )
+
+
+
+
+def _write_proof(src: Path, dst: Path, info: VideoInfo, after: int,
+                 vmaf: float | None, decision: Decision, opts: ProcessOptions) -> None:
+    """Write a durable proof sidecar next to the output: <dst>.json.
+
+    Contains the measured VMAF, a SHA-256 of the ORIGINAL (so a later compare can
+    prove the output corresponds to a specific source without re-encoding), the
+    before/after sizes, and the exact encode settings. A downstream compare/delete
+    step reads this instead of re-running VMAF on every file. Best-effort: if the
+    source hash can't be read we still write the rest and flag src_sha256=None.
+    """
+    src_p = Path(src)
+    try:
+        src_sha = sha256_file(src_p)
+    except Exception:
+        src_sha = None
+    proof = {
+        "tool": "video_compressor",
+        "version": "compress.v3",
+        "source": str(src_p),
+        "source_sha256": src_sha,
+        "output": str(dst),
+        "output_bytes": dst.stat().st_size,
+        "before_bytes": info.size_bytes,
+        "after_bytes": int(after),
+        "saved_pct": round(100.0 * (1.0 - after / info.size_bytes), 1) if info.size_bytes else 0.0,
+        "vmaf": round(vmaf, 3) if vmaf is not None else None,
+        "vmaf_floor": opts.vmaf_floor,
+        "encoder": opts.policy.encoder,
+        "crf": decision.target_crf,
+        "container": opts.container,
+        "assess_reason": decision.reason,
+        "saved_quality_verified": (vmaf is not None and vmaf >= opts.vmaf_floor),
+    }
+    sidecar = dst.with_suffix(dst.suffix + ".json")
+    try:
+        sidecar.write_text(json.dumps(proof, indent=2), encoding="utf-8")
+    except OSError:
+        pass  # sidecar is a nicety; never fail the encode because of it
 
 
 def validate_result(result: Result) -> bool:
