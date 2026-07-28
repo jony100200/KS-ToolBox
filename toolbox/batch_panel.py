@@ -240,12 +240,31 @@ class BaseBatchPanel(ctk.CTkFrame):
         self._on_queue_snapshot(snapshot)
         if snapshot.state.value in {"completed", "completed_with_warnings", "failed", "cancelled"}:
             completion = self._queue_service.completion(job_id)
-            if completion is not None:
-                self._queue_complete(completion)
-            elif snapshot.state.value == "cancelled":
-                self._queue_cancelled()
-            else:
-                self._batch_failed(snapshot.detail or snapshot.state.value)
+            # GUARANTEED RE-ENABLE. Tk swallows exceptions raised inside an `after()`
+            # callback: it prints to stderr and carries on, so a completion handler that
+            # raises leaves Run disabled with no dialog and no visible cause. The tool then
+            # "works once and greys out", which is exactly what it was reported as.
+            #
+            # The finally clause makes that impossible regardless of which handler misbehaves,
+            # and the except surfaces the reason instead of losing it to a console nobody is
+            # watching.
+            try:
+                if completion is not None:
+                    self._queue_complete(completion)
+                elif snapshot.state.value == "cancelled":
+                    self._queue_cancelled()
+                else:
+                    self._batch_failed(snapshot.detail or snapshot.state.value)
+            except Exception as ex:  # noqa: BLE001 - a stuck UI is worse than a logged error
+                self._status.set_state("FAILED", "error")
+                self._logline(
+                    f"completion handler failed: {type(ex).__name__}: {ex}",
+                    t.STATE["error"][1])
+            finally:
+                # Idempotent: the handlers above already call this on their own paths, and
+                # calling it twice is harmless. What matters is that NO path can skip it.
+                self._set_batch_active(False)
+                self._active_job_id = None
             return
         self.after(100, self._poll_queue_job, job_id)
 
