@@ -25,7 +25,24 @@ _MODELS = _ROOT / "models"
 _REAL_ESRGAN = _MODELS / "realesrgan-ncnn-20220424"
 _U2NETP = _MODELS / "u2netp.onnx"
 _YUNET = _MODELS / "face_detection_yunet_2023mar.onnx"
+# Required for the bundle to count as READY. Kept to the two x4 models so readiness does not
+# start depending on optional extras.
 _ESRGAN_MODELS = ("realesrgan-x4plus", "realesrgan-x4plus-anime")
+
+# SELECTABLE models — a superset. The bundle already ships native x2 and x3 weights that were
+# unreachable because validation checked against the readiness tuple above.
+#
+# WHY THIS MATTERS (measured 2026-07-30): x4plus has no native 2x. Asking the ncnn binary for
+# `-s 2` or `-s 3` with an x4 model makes it tile at a scale the model cannot produce and the
+# tiles DO NOT LINE UP — the output is a visible patchwork of the same scene at mismatched zoom.
+# `realesr-animevideov3-x2` is a genuine 2x: clean, and 0.93s vs 2.63s for the x4 route.
+#
+# So: match the model to the scale you ask for. Never pass a non-native scale.
+_ESRGAN_SELECTABLE = _ESRGAN_MODELS + (
+    "realesr-animevideov3-x2",      # native 2x
+    "realesr-animevideov3-x3",      # native 3x
+    "realesr-animevideov3-x4",
+)
 _SESSIONS: dict[str, object] = {}
 _FACE_DETECTORS: dict[tuple[int, int], object] = {}
 Cancelled = Callable[[], bool] | None
@@ -118,7 +135,7 @@ def _normalised(opts: EnhanceOptions) -> tuple[EnhanceOptions | None, str]:
         return None, "unknown region mode"
     if opts.scale_factor not in (1, 2, 3, 4):
         return None, "AI scale must be 1, 2, 3, or 4"
-    if opts.ai_model not in _ESRGAN_MODELS:
+    if opts.ai_model not in _ESRGAN_SELECTABLE:
         return None, "unknown Real-ESRGAN model"
     values = (opts.brightness, opts.contrast, opts.gamma, opts.hue_degrees, opts.saturation, opts.vibrance,
               opts.temperature, opts.tint, opts.denoise, opts.sharpen, opts.high_pass, opts.edge_boost)
