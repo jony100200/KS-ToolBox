@@ -10,7 +10,7 @@ from toolbox.tool import ToolMeta
 class ImageEnhancerTool:
     meta = ToolMeta(
         id="image_enhancer", title="Image Enhancer", icon=Icons.BOLT,
-        category="images", subtitle="Restore detail, faces, masks, and small alpha defects locally",
+        category="images", subtitle="Smart deterministic, hybrid, or AI restoration — local and batch-safe",
     )
 
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:

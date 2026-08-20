@@ -4,6 +4,35 @@ A standalone, local batch enhancer. It never starts or contacts ComfyUI.
 Every output is a new PNG, with the normal Toolbox queue, report, retry, and
 preview controls.
 
+## Smart Enhance
+
+Select one image or a folder, choose a mode, then press **Enhance Selected**.
+Every item is profiled first and its measured plan is recorded in the batch
+manifest.
+
+- **Deterministic** — no model is loaded. It only performs bounded pixel
+  operations: exposure, colour, contrast, noise reduction, and detail balance.
+  Geometry, text, clothing, composition, and identity are not regenerated.
+- **Hybrid** (default) — starts with the deterministic plan and uses the local
+  Real-ESRGAN worker only when output resolution was requested or the optional
+  auto-router identifies a small source that benefits from a restoration pass.
+- **AI only** — explicitly runs the local restoration model. It is for damaged
+  inputs and may alter fine detail, so it is never hidden behind the default
+  Enhance behaviour.
+
+The advanced **Experimental: decide mode per image** toggle lets the local
+analysis choose among the three modes for each file. Its decision and confidence
+are saved in the completion manifest; turn it off whenever you require one
+fixed production route.
+
+### Colour continuity guard
+
+Before and after every run, Smart Enhance compares a conservative warm-surface
+colour signature from the image itself. It does not classify ethnicity or a
+person. If a model pass materially washes out a warm/brown complexion, the item
+is marked **review** instead of silently reported as completed. The output is
+kept for owner review and the measurements are written to its manifest.
+
 ## Phase 1 — restoration
 
 Choose a preset for gentle restoration, detail, or colour recovery. Each is a

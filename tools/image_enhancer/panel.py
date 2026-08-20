@@ -25,15 +25,20 @@ class ImageEnhancerPanel(BaseBatchPanel):
         super().__init__(parent, queue_service=queue_service)
 
     def _build_options_card(self):
-        card = c.Card(self, "Local enhancement", icon=Icons.BOLT)
+        card = c.Card(self, "Smart Enhance", icon=Icons.BOLT)
         card.grid(row=1, column=0, sticky="nsew", padx=t.PAD_GRID, pady=(t.PAD_GRID, 0))
         body = card.body
         row = ctk.CTkFrame(body, fg_color="transparent"); row.pack(fill="x")
+        ctk.CTkLabel(row, text="Mode", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left")
+        self._mode = ctk.CTkOptionMenu(row, values=["Hybrid", "Deterministic", "AI only"], width=145,
+                                       command=self._mode_changed, fg_color=t.BG_COLOR,
+                                       button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
+        self._mode.pack(side="left", padx=(8, 22)); self._mode.set("Hybrid")
         ctk.CTkLabel(row, text="Restore preset", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left")
         self._preset = ctk.CTkOptionMenu(row, values=list(e.filter_stack.preset_names()), width=160,
                                          fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
         self._preset.pack(side="left", padx=(8, 22)); self._preset.set("gentle_restore")
-        ctk.CTkLabel(row, text="AI scale", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left")
+        ctk.CTkLabel(row, text="Output scale", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left")
         self._scale = ctk.CTkOptionMenu(row, values=["1", "2", "3", "4"], width=72,
                                          fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
         self._scale.pack(side="left", padx=(8, 22)); self._scale.set("1")
@@ -53,8 +58,10 @@ class ImageEnhancerPanel(BaseBatchPanel):
         self._face_detail.pack(side="left", padx=(18, 0))
 
         row3 = ctk.CTkFrame(body, fg_color="transparent"); row3.pack(fill="x", pady=(10, 0))
+        self._auto_mode = ctk.CTkCheckBox(row3, text="Experimental: decide mode per image", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._auto_mode.pack(side="left")
         self._repair = ctk.CTkCheckBox(row3, text="Repair enclosed transparent holes", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._repair.pack(side="left")
+        self._repair.pack(side="left", padx=20)
         self._debug = ctk.CTkCheckBox(row3, text="Save region masks / BBox previews", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._debug.pack(side="left", padx=20)
         self._dry = ctk.CTkCheckBox(row3, text="Preview only (no writes)", font=t.font(11), fg_color=t.ACCENT_BLUE)
@@ -84,6 +91,7 @@ class ImageEnhancerPanel(BaseBatchPanel):
         self._build_output_row(body, "Output folder (blank = ./enhanced beside each source)")
         self._build_run_row(body)
         self._region_changed("none")
+        self._mode_changed("Hybrid")
 
     def _advanced_entry(self, row, label: str, key: str, default: str):
         ctk.CTkLabel(row, text=label, text_color=t.TEXT_MUTED, font=t.font(10)).pack(side="left", padx=(0, 4))
@@ -98,10 +106,22 @@ class ImageEnhancerPanel(BaseBatchPanel):
         if mode != "faces":
             self._face_detail.deselect()
 
+    def _mode_changed(self, mode: str):
+        deterministic = mode == "Deterministic"
+        self._scale.configure(state="disabled" if deterministic else "normal")
+        self._model.configure(state="disabled" if deterministic else "normal")
+        self._face_detail.configure(state="disabled" if deterministic else "normal")
+        if deterministic:
+            self._scale.set("1")
+            self._face_detail.deselect()
+        if hasattr(self, "_status"):
+            self._refresh_status()
+
     def _refresh_status(self):
         state = e.utility_status()
         ready = all(bool(state[key]) for key in ("upscale_ready", "segmentation_ready", "faces_ready", "repair_ready"))
-        self._status.configure(text=str(state["details"]), text_color=t.STATE["done"][1] if ready else t.STATE["waiting"][1])
+        contract = "Natural: pixels only" if self._mode.get() == "Deterministic" else "Hybrid: models only when required" if self._mode.get() == "Hybrid" else "AI-only: model restoration may alter detail"
+        self._status.configure(text=f"{contract} · {state['details']}", text_color=t.STATE["done"][1] if ready else t.STATE["waiting"][1])
 
     def _collect_options(self):
         region = self._region.get()
@@ -123,7 +143,9 @@ class ImageEnhancerPanel(BaseBatchPanel):
         except ValueError:
             self._logline("Stack controls must be valid numbers.", t.STATE["error"][1]); return None
         state = e.utility_status()
-        if scale > 1 and not state["upscale_ready"]:
+        chosen_mode = {"Deterministic": "deterministic", "Hybrid": "hybrid", "AI only": "ai"}[self._mode.get()]
+        may_use_model = chosen_mode == "ai" or (chosen_mode == "hybrid" and (scale > 1 or self._auto_mode.get()))
+        if may_use_model and not state["upscale_ready"]:
             self._logline("AI upscale is not ready: " + str(state["details"]), t.STATE["error"][1]); return None
         if region == "subject_mask" and not state["segmentation_ready"]:
             self._logline("Subject segmentation is not ready: " + str(state["details"]), t.STATE["error"][1]); return None
@@ -135,6 +157,8 @@ class ImageEnhancerPanel(BaseBatchPanel):
         return e.EnhanceOptions(
             out_root=Path(out) if out else None, input_root=self._resolve_input_root() if self._mirror.get() else None,
             mirror=bool(self._mirror.get()), preset=self._preset.get(), scale_factor=scale, ai_model=self._model.get(),
+            mode=chosen_mode,
+            auto_select_mode=bool(self._auto_mode.get()),
             region_mode=region, manual_box=box, face_detail=bool(self._face_detail.get()),
             repair_alpha_holes=bool(self._repair.get()), debug_outputs=bool(self._debug.get()), dry_run=bool(self._dry.get()),
             **advanced,
@@ -142,18 +166,19 @@ class ImageEnhancerPanel(BaseBatchPanel):
 
     def _build_submission(self, files: list[Path], opts: e.EnhanceOptions) -> QueueSubmission:
         dependencies = []
-        if opts.scale_factor > 1 or opts.face_detail:
+        if opts.mode == "ai" or opts.auto_select_mode or opts.scale_factor > 1 or opts.face_detail:
             dependencies.extend([e._REAL_ESRGAN / "realesrgan-ncnn-vulkan.exe", e._REAL_ESRGAN / "models" / f"{opts.ai_model}.bin", e._REAL_ESRGAN / "models" / f"{opts.ai_model}.param"])
         if opts.region_mode == "subject_mask": dependencies.append(e._U2NETP)
         if opts.region_mode == "faces" or opts.face_detail: dependencies.append(e._YUNET)
-        definition = JobDefinition.create(tool_id="image_enhancer", tool_version="1", workflow_version="enhance.v1",
+        definition = JobDefinition.create(tool_id="image_enhancer", tool_version="2", workflow_version="smart-enhance.v2",
                                           inputs=files, settings=asdict(opts), identity_dependencies=dependencies)
         def classify(result: e.Result) -> ItemOutcome:
             if result.action == "enhanced": return ItemOutcome.completed(result.to_dict(), result.reason)
+            if result.action == "needs-review": return ItemOutcome.warning(result.to_dict(), result.reason)
             if result.action == "dry-run": return ItemOutcome.skipped(result.to_dict(), result.reason)
             return ItemOutcome.failed(result.reason, data=result.to_dict())
         return QueueSubmission(
-            definition=definition, label=f"Image Enhancer · {len(files)} file(s)",
+            definition=definition, label=f"Smart Enhance · {len(files)} file(s)",
             execute=lambda path, token: e.process(path, opts, cancelled=lambda: token.is_cancelled), classify=classify,
             validate_stored=lambda item: e.validate_result(self._result_from_record(item)),
             finalize=lambda report: self._prepare_queue_completion(report, opts, tool_id="image_enhancer"),
@@ -168,7 +193,9 @@ class ImageEnhancerPanel(BaseBatchPanel):
         payload = self._consume_queue_completion(completion)
         if payload is None: return
         results = payload.results; completed = sum(item.action == "enhanced" for item in results)
+        review = sum(item.action == "needs-review" for item in results)
         skipped = sum(item.action == "dry-run" for item in results); failed = len(results) - completed - skipped
-        self._finish_queue_ui(f"enhanced {completed} · previewed {skipped} · failed {failed}",
+        failed -= review
+        self._finish_queue_ui(f"enhanced {completed} · review {review} · previewed {skipped} · failed {failed}",
                               job_state=self._queue_completion_state(completion), recovered=completion.report.recovered,
                               reused=completion.report.reused, manifest=payload.manifest, report_path=payload.report_path)
