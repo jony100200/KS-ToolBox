@@ -161,7 +161,19 @@ MODEL_CATALOG: dict[str, ModelSpec] = {
         format="torch",
         docs_url="https://github.com/sczhou/CodeFormer",
     ),
-    # 8. Local Detection & Segmentation (Pre-bundled / standard)
+    # 6. Anime & Stylized AI Expert (8.2 MB ONNX)
+    "animegan_v2": ModelSpec(
+        id="animegan_v2",
+        category="ANIME_STYLE",
+        name="AnimeGANv2 (Shinkai / Anime Style Transfer)",
+        size_mb=8.2,
+        description="Lightweight neural style transfer converting photos and illustrations into cinematic anime art.",
+        download_url="https://github.com/bryandlee/animegan2-pytorch/releases/download/v0.1/face_paint_512_v2.onnx",
+        filename="animegan2_shinkai.onnx",
+        format="onnx",
+        docs_url="https://github.com/bryandlee/animegan2-pytorch",
+    ),
+    # 7. Local Detection & Segmentation (Pre-bundled / standard)
     "yunet_face": ModelSpec(
         id="yunet_face",
         category="DETECTION",

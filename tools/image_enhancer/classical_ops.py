@@ -579,3 +579,64 @@ def vector_cel_shade(image: Image.Image,
         # Pure Pillow fallback posterization
         return image.convert("P", palette=Image.Palette.ADAPTIVE, colors=max(2, num_levels)).convert("RGB")
 
+
+# ==============================================================================
+# 15. Anime Cel-Shader & Manga Inking Pass
+# ==============================================================================
+
+def anime_cel_shader(image: Image.Image,
+                     smooth_passes: int = 2,
+                     line_strength: float = 0.35,
+                     color_boost: float = 1.18,
+                     shinkai_glow: float = 0.20) -> Image.Image:
+    """Deterministic Anime & Manga Cel-Shader.
+
+    1. Multi-pass Bilateral surface smoothing (flattens skin/clothing textures).
+    2. Difference of Gaussians (DoG) for tapered manga ink lines.
+    3. Anime color grading (vibrant saturation + warm skin retention).
+    4. Highlight bloom diffusion (cinematic Shinkai anime lighting).
+    """
+    try:
+        import cv2
+        arr = np.asarray(image.convert("RGB"))
+
+        # 1. Multi-pass smoothing
+        smoothed = arr.copy()
+        for _ in range(max(1, smooth_passes)):
+            smoothed = cv2.bilateralFilter(smoothed, d=7, sigmaColor=60, sigmaSpace=60)
+
+        # 2. Difference of Gaussians (DoG) line extraction
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        g1 = cv2.GaussianBlur(gray, (0, 0), sigmaX=0.8)
+        g2 = cv2.GaussianBlur(gray, (0, 0), sigmaX=1.6)
+        dog = g1 - 0.98 * g2
+        lines = np.where(dog < 1.5, 0.0, 1.0).astype(np.float32)
+
+        # 3. Color Grading
+        hsv = cv2.cvtColor(smoothed, cv2.COLOR_RGB2HSV).astype(np.float32)
+        hsv[..., 1] = np.clip(hsv[..., 1] * color_boost, 0, 255)
+        graded = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB).astype(np.float32)
+
+        # 4. Inking
+        line_mask = (1.0 - lines[:, :, None]) * line_strength
+        inked = np.clip(graded * (1.0 - line_mask), 0, 255).astype(np.uint8)
+
+        # 5. Shinkai Bloom
+        if shinkai_glow > 0.0:
+            luma = cv2.cvtColor(inked, cv2.COLOR_RGB2GRAY)
+            bloom_src = np.where(luma[:, :, None] > 180, inked, 0).astype(np.uint8)
+            bloom = cv2.GaussianBlur(bloom_src, (0, 0), sigmaX=12.0).astype(np.float32)
+            a = inked.astype(np.float32) / 255.0
+            b = (bloom / 255.0) * shinkai_glow
+            out = (1.0 - (1.0 - a) * (1.0 - b)) * 255.0
+            return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGB")
+
+        return Image.fromarray(inked, "RGB")
+    except Exception:
+        # Fallback soft anime filter using Pillow
+        smoothed = image.filter(ImageFilter.SMOOTH_MORE).filter(ImageFilter.SMOOTH_MORE)
+        edges = image.convert("L").filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(0.75))
+        edges_inv = Image.eval(edges, lambda p: 255 - int(p * line_strength))
+        return Image.composite(smoothed, Image.new("RGB", image.size, (0, 0, 0)), edges_inv)
+
+
