@@ -112,6 +112,9 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
         FilterPass("contrast", {"factor": 1.04}),
         FilterPass("saturation", {"factor": 1.05}),
     ),
+    "red_eye_fix": (
+        FilterPass("red_eye", {"strength": 1.0, "threshold": 1.6}),
+    ),
     "retinex_dehaze": (
         FilterPass("retinex", {"dynamic": 2.2}),
         FilterPass("contrast", {"factor": 1.05}),
@@ -329,6 +332,12 @@ def _apply(image: Image.Image, item: FilterPass,
             line_strength=p.get("line_strength", 0.35),
             color_boost=p.get("color_boost", 1.18),
             shinkai_glow=p.get("shinkai_glow", 0.20)
+        )
+    if op in {"red_eye", "fix_red_eye"}:
+        return classical_ops.fix_red_eye(
+            image,
+            strength=p.get("strength", 1.0),
+            threshold=p.get("threshold", 1.6)
         )
     if op == "selective_blur":
         return classical_ops.selective_gaussian_blur(image, radius=p.get("radius", 2.5), max_delta=p.get("max_delta", 18.0))

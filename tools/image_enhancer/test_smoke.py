@@ -74,6 +74,8 @@ def main() -> int:
         assert vec_img.size == image.size
         anime_img = classical_ops.anime_cel_shader(image)
         assert anime_img.size == image.size
+        red_img = classical_ops.fix_red_eye(image)
+        assert red_img.size == image.size
 
         # (e) Privacy & Censor Blurs
         priv_blur = classical_ops.privacy_blur(image, radius=24.0)
@@ -111,6 +113,9 @@ def main() -> int:
 
         anime_res = e.process(rgb, e.EnhanceOptions(out_root=root / "anime", preset="anime_style", mode="deterministic"))
         assert anime_res.action in valid_output_actions and e.validate_result(anime_res), anime_res
+
+        red_res = e.process(rgb, e.EnhanceOptions(out_root=root / "redeye", preset="red_eye_fix", mode="deterministic"))
+        assert red_res.action in valid_output_actions and e.validate_result(red_res), red_res
 
         teal_res = e.process(rgb, e.EnhanceOptions(out_root=root / "teal", preset="cinematic_teal", mode="deterministic"))
         assert teal_res.action in valid_output_actions and e.validate_result(teal_res), teal_res

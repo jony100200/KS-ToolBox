@@ -640,3 +640,31 @@ def anime_cel_shader(image: Image.Image,
         return Image.composite(smoothed, Image.new("RGB", image.size, (0, 0, 0)), edges_inv)
 
 
+# ==============================================================================
+# 16. Red-Eye & Flash Glare Pupil Neutralizer
+# ==============================================================================
+
+def fix_red_eye(image: Image.Image,
+                strength: float = 1.0,
+                threshold: float = 1.6) -> Image.Image:
+    """Detects and neutralizes unnatural flash red-eye and specular red pupil reflections."""
+    if strength <= 0.0:
+        return image
+    arr = np.asarray(image.convert("RGB"), dtype=np.float32)
+    r, g, b = arr[..., 0], arr[..., 1], arr[..., 2]
+
+    gb_max = np.maximum(g, b) + 1e-5
+    red_ratio = r / gb_max
+
+    # Red-eye pupil mask (high red-to-green/blue ratio in dark-to-mid tones)
+    mask = (red_ratio > threshold) & (r > 50.0) & (gb_max < 160.0)
+
+    # Replace excessive red with neutral green/blue average
+    neutral = (g + b) * 0.5
+    fixed_r = r * (1.0 - mask * strength) + neutral * (mask * strength)
+
+    out = np.dstack([fixed_r, g, b])
+    return Image.fromarray(np.clip(out, 0.0, 255.0).astype(np.uint8), "RGB")
+
+
+
