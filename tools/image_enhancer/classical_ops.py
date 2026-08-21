@@ -546,3 +546,36 @@ def dark_channel_dehaze(image: Image.Image,
     # 4. Radiance Recovery
     recovered = (img - A) / t_refined + A
     return Image.fromarray(np.clip(recovered * 255.0, 0.0, 255.0).astype(np.uint8), "RGB")
+
+
+# ==============================================================================
+# 14. Vector / Cel-Shaded Toon Stylizer
+# ==============================================================================
+
+def vector_cel_shade(image: Image.Image,
+                     smooth_radius: float = 3.0,
+                     num_levels: int = 10,
+                     edge_strength: float = 0.25) -> Image.Image:
+    """Vector / Cel-Shaded stylizer with edge-preserving smoothing and posterized tones."""
+    try:
+        import cv2
+        arr = np.asarray(image.convert("RGB"))
+        d = int(max(3, round(smooth_radius * 2 + 1)))
+        smoothed = cv2.bilateralFilter(arr, d=d, sigmaColor=75, sigmaSpace=75)
+
+        step = 256.0 / max(2, num_levels)
+        quantized = (np.floor(smoothed / step) * step + (step / 2.0)).clip(0, 255).astype(np.uint8)
+
+        if edge_strength > 0:
+            gray = cv2.cvtColor(smoothed, cv2.COLOR_RGB2GRAY)
+            edges = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 7, 2)
+            edges_inv = (255 - edges).astype(np.float32) / 255.0
+            edge_mask = edges_inv[:, :, None] * edge_strength
+            result = np.clip(quantized.astype(np.float32) * (1.0 - edge_mask), 0, 255).astype(np.uint8)
+        else:
+            result = quantized
+        return Image.fromarray(result, "RGB")
+    except Exception:
+        # Pure Pillow fallback posterization
+        return image.convert("P", palette=Image.Palette.ADAPTIVE, colors=max(2, num_levels)).convert("RGB")
+

@@ -102,6 +102,11 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
         FilterPass("contrast", {"factor": 1.05}),
         FilterPass("saturation", {"factor": 1.05}),
     ),
+    "vector_cel": (
+        FilterPass("vector_cel", {"smooth_radius": 3.5, "num_levels": 10.0, "edge_strength": 0.25}),
+        FilterPass("saturation", {"factor": 1.08}),
+        FilterPass("contrast", {"factor": 1.04}),
+    ),
     "retinex_dehaze": (
         FilterPass("retinex", {"dynamic": 2.2}),
         FilterPass("contrast", {"factor": 1.05}),
@@ -305,6 +310,13 @@ def _apply(image: Image.Image, item: FilterPass,
         return classical_ops.dark_channel_dehaze(image, strength=p.get("strength", 0.75))
     if op == "retinex":
         return classical_ops.retinex_mscr(image, dynamic=p.get("dynamic", 2.0))
+    if op == "vector_cel":
+        return classical_ops.vector_cel_shade(
+            image,
+            smooth_radius=p.get("smooth_radius", 3.0),
+            num_levels=int(p.get("num_levels", 10)),
+            edge_strength=p.get("edge_strength", 0.25)
+        )
     if op == "selective_blur":
         return classical_ops.selective_gaussian_blur(image, radius=p.get("radius", 2.5), max_delta=p.get("max_delta", 18.0))
     if op == "shadows_highlights":
