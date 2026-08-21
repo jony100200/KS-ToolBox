@@ -32,7 +32,7 @@ def main() -> int:
         ImageDraw.Draw(image).rectangle((16, 12, 48, 36), fill=(200, 90, 50))
         image.save(rgb)
 
-        # 1. Spatial & Wavelet Operations Test
+        # 1. Spatial, Wavelet, Creative, CLAHE, & Privacy Operations Test
         # (a) Wavelet Decompose exact mathematical identity test
         bands, residual = classical_ops.wavelet_decompose(image, scales=5)
         assert len(bands) == 5
@@ -45,23 +45,74 @@ def main() -> int:
         retinex_img = classical_ops.retinex_mscr(image)
         assert retinex_img.size == image.size
 
-        # (c) Shadows / Highlights and Thresholded Unsharp Mask
+        # (c) Shadows / Highlights, Unsharp Mask, Soft Glow, Clarity, Vignette, Film Grain, Split Tone
         sh_img = classical_ops.shadows_highlights(image)
         assert sh_img.size == image.size
         unsharp_img = classical_ops.unsharp_mask_threshold(image)
         assert unsharp_img.size == image.size
+        glow_img = classical_ops.soft_glow_orton(image)
+        assert glow_img.size == image.size
+        clarity_img = classical_ops.clarity(image)
+        assert clarity_img.size == image.size
+        vig_img = classical_ops.vignette(image)
+        assert vig_img.size == image.size
+        grain_img = classical_ops.film_grain(image)
+        assert grain_img.size == image.size
+        split_img = classical_ops.split_tone(image)
+        assert split_img.size == image.size
+
+        # (d) CLAHE, Auto White-Balance, Despeckle, DCP Dehaze
+        clahe_img = classical_ops.clahe_local_contrast(image)
+        assert clahe_img.size == image.size
+        awb_img = classical_ops.auto_white_balance(image)
+        assert awb_img.size == image.size
+        despeckle_img = classical_ops.adaptive_despeckle(image)
+        assert despeckle_img.size == image.size
+        dcp_img = classical_ops.dark_channel_dehaze(image)
+        assert dcp_img.size == image.size
+
+        # (e) Privacy & Censor Blurs
+        priv_blur = classical_ops.privacy_blur(image, radius=24.0)
+        assert priv_blur.size == image.size
+        pix_blur = classical_ops.privacy_blur(image, pixelate_block=8)
+        assert pix_blur.size == image.size
+        focus_blur = classical_ops.radial_focus_blur(image, focus_radius=0.3)
+        assert focus_blur.size == image.size
+        box_blur = classical_ops.box_censor_blur(image, boxes=((10, 10, 30, 30),))
+        assert box_blur.size == image.size
 
         # 2. One-Button Auto Enhance test
         auto_res = e.process(rgb, e.EnhanceOptions(out_root=root / "auto", preset="auto", mode="deterministic"))
         assert auto_res.action in valid_output_actions and e.validate_result(auto_res), auto_res
         assert "smart_profile" in auto_res.metadata and "smart_plan" in auto_res.metadata
 
-        # 3. Dedicated Retinex and Shadow-Highlight presets in Engine
-        ret_res = e.process(rgb, e.EnhanceOptions(out_root=root / "retinex", preset="retinex_dehaze", mode="deterministic"))
-        assert ret_res.action in valid_output_actions and e.validate_result(ret_res), ret_res
+        # 3. Creative, CLAHE, & Privacy Presets in Engine
+        vivid_res = e.process(rgb, e.EnhanceOptions(out_root=root / "vivid", preset="vivid_pop", mode="deterministic"))
+        assert vivid_res.action in valid_output_actions and e.validate_result(vivid_res), vivid_res
 
-        sh_res = e.process(rgb, e.EnhanceOptions(out_root=root / "sh", preset="shadows_highlights", mode="deterministic"))
-        assert sh_res.action in valid_output_actions and e.validate_result(sh_res), sh_res
+        clahe_res = e.process(rgb, e.EnhanceOptions(out_root=root / "clahe", preset="clahe_texture", mode="deterministic"))
+        assert clahe_res.action in valid_output_actions and e.validate_result(clahe_res), clahe_res
+
+        awb_res = e.process(rgb, e.EnhanceOptions(out_root=root / "awb", preset="auto_white_balance", mode="deterministic"))
+        assert awb_res.action in valid_output_actions and e.validate_result(awb_res), awb_res
+
+        desp_res = e.process(rgb, e.EnhanceOptions(out_root=root / "desp", preset="despeckle_clean", mode="deterministic"))
+        assert desp_res.action in valid_output_actions and e.validate_result(desp_res), desp_res
+
+        dcp_res = e.process(rgb, e.EnhanceOptions(out_root=root / "dcp", preset="dcp_dehaze", mode="deterministic"))
+        assert dcp_res.action in valid_output_actions and e.validate_result(dcp_res), dcp_res
+
+        teal_res = e.process(rgb, e.EnhanceOptions(out_root=root / "teal", preset="cinematic_teal", mode="deterministic"))
+        assert teal_res.action in valid_output_actions and e.validate_result(teal_res), teal_res
+
+        glamour_res = e.process(rgb, e.EnhanceOptions(out_root=root / "glamour", preset="soft_glamour", mode="deterministic"))
+        assert glamour_res.action in valid_output_actions and e.validate_result(glamour_res), glamour_res
+
+        priv_res = e.process(rgb, e.EnhanceOptions(out_root=root / "privacy", preset="privacy_censor", mode="deterministic"))
+        assert priv_res.action in valid_output_actions and e.validate_result(priv_res), priv_res
+
+        pix_res = e.process(rgb, e.EnhanceOptions(out_root=root / "pixelate", preset="pixelate_censor", mode="deterministic"))
+        assert pix_res.action in valid_output_actions and e.validate_result(pix_res), pix_res
 
         # 4. De-Gloss / Natural Skin test
         degloss_res = e.process(rgb, e.EnhanceOptions(out_root=root / "degloss", preset="natural_skin", mode="deterministic"))
@@ -135,7 +186,7 @@ def main() -> int:
         assert rack_status["total"] >= 8
         assert all(s.download_url.startswith("http") for s in specs)
 
-    print("PASS: Image Enhancer Auto-Enhance, Classical Wavelet/MSRCR Ops, De-Gloss, Model Rack, Phases 1-3, Real-ESRGAN, and Headless CLI.")
+    print("PASS: Image Enhancer Auto-Enhance, CLAHE, Auto-WB, Despeckle, Privacy Censor & Blur, Creative Studio Ops, Wavelet De-Gloss, Model Rack, Phases 1-3, Real-ESRGAN, and Headless CLI.")
     return 0
 
 

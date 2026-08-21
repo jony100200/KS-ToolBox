@@ -57,6 +57,17 @@ class EnhanceOptions:
     edge_boost: float = 0.0
     de_gloss_strength: float = 0.0
     micro_texture_amount: float = 0.0
+    soft_glow: float = 0.0
+    clarity: float = 0.0
+    vignette: float = 0.0
+    film_grain: float = 0.0
+    split_tone: float = 0.0
+    privacy_blur: float = 0.0
+    pixelate_block: float = 0.0
+    radial_focus: float = 0.0
+    clahe_strength: float = 0.0
+    auto_wb_strength: float = 0.0
+    despeckle_strength: float = 0.0
     mode: str = "hybrid"              # deterministic | hybrid | ai
     auto_select_mode: bool = False    # per-item automatic flaw detection & planning
     scale_factor: int = 1
@@ -137,7 +148,10 @@ def _normalised(opts: EnhanceOptions) -> tuple[EnhanceOptions | None, str]:
 
     values = (opts.brightness, opts.contrast, opts.gamma, opts.hue_degrees, opts.saturation, opts.vibrance,
               opts.temperature, opts.tint, opts.denoise, opts.sharpen, opts.high_pass, opts.edge_boost,
-              opts.de_gloss_strength, opts.micro_texture_amount)
+              opts.de_gloss_strength, opts.micro_texture_amount,
+              opts.soft_glow, opts.clarity, opts.vignette, opts.film_grain, opts.split_tone,
+              opts.privacy_blur, opts.pixelate_block, opts.radial_focus,
+              opts.clahe_strength, opts.auto_wb_strength, opts.despeckle_strength)
     try:
         values = tuple(float(value) for value in values)
     except (TypeError, ValueError):
@@ -166,6 +180,9 @@ def _normalised(opts: EnhanceOptions) -> tuple[EnhanceOptions | None, str]:
         brightness=values[0], contrast=values[1], gamma=values[2], hue_degrees=values[3], saturation=values[4],
         vibrance=values[5], temperature=values[6], tint=values[7], denoise=values[8], sharpen=values[9],
         high_pass=values[10], edge_boost=values[11], de_gloss_strength=values[12], micro_texture_amount=values[13],
+        soft_glow=values[14], clarity=values[15], vignette=values[16], film_grain=values[17], split_tone=values[18],
+        privacy_blur=values[19], pixelate_block=values[20], radial_focus=values[21],
+        clahe_strength=values[22], auto_wb_strength=values[23], despeckle_strength=values[24],
         mode=opts.mode, auto_select_mode=bool(opts.auto_select_mode),
         scale_factor=int(opts.scale_factor), ai_model=opts.ai_model, region_mode=opts.region_mode,
         manual_box=box, face_detail=bool(opts.face_detail), repair_alpha_holes=bool(opts.repair_alpha_holes),
@@ -190,6 +207,13 @@ def _apply_stack(image, opts: EnhanceOptions, boxes: tuple[tuple[int, int, int, 
         temperature=opts.temperature, tint=opts.tint, denoise=opts.denoise, sharpen=opts.sharpen,
         high_pass=opts.high_pass, edge_boost=opts.edge_boost,
         de_gloss=opts.de_gloss_strength, micro_texture=opts.micro_texture_amount,
+        soft_glow=opts.soft_glow, clarity=opts.clarity, vignette=opts.vignette,
+        film_grain=opts.film_grain, split_tone=opts.split_tone,
+        privacy_blur=opts.privacy_blur, pixelate_block=opts.pixelate_block,
+        radial_focus=opts.radial_focus,
+        clahe_strength=opts.clahe_strength,
+        auto_wb_strength=opts.auto_wb_strength,
+        despeckle_strength=opts.despeckle_strength,
     )
     return filter_stack.apply(image, stack, boxes=boxes)
 

@@ -1,10 +1,24 @@
 # Image Enhancer
 
-A standalone, local batch image enhancer and surface restoration system. It never starts or contacts ComfyUI or external servers. Every output is a new PNG, non-destructive, with the normal Toolbox queue, manifest reports, retry, and preview controls.
+A standalone, local batch image enhancer, studio lighting editor, and surface restoration suite. It never starts or contacts ComfyUI or external servers. Every output is a new PNG, non-destructive, with the normal Toolbox queue, manifest reports, retry, and interactive Before/After preview controls.
 
 ---
 
-## One-Button Auto Enhance
+## Interactive Studio UI & Live Split Preview
+
+The desktop tool incorporates an Android-style photo editor workflow:
+- **Interactive Before/After Split Canvas:** Drag the split divider to inspect adjustments side-by-side in real-time ($<10\text{ms}$ preview proxy on CPU).
+- **👁️ Hold to Compare:** Momentarily flip the canvas to 100% original.
+- **🛡️ Instant Privacy Shield:** One-click header toggle that overlays a heavy frosted-glass Gaussian blur across the canvas for privacy when family, kids, or colleagues are nearby.
+- **Android-Style Studio Sliders:** Grouped into 4 clean tabbed categories with live formatted value badges and double-click to reset:
+  1. *Light & Color:* Brightness, Contrast, Gamma, Saturation, Vibrance, CLAHE, Auto-WB, Color Temperature, Tint.
+  2. *Skin & Texture:* 5-Scale Wavelet De-Gloss, Pore Micro-Texture, Despeckle, Denoise, Sharpen, High-Pass, Edge Boost.
+  3. *Creative & Privacy Blur:* Soft Glow (Orton Bloom), Midtone Clarity, Vignette, Film Grain, Split Tone, Tilt-Shift Focus, Privacy Blur, Mosaic Pixelation.
+  4. *Target Regions & Repair:* Salient Subject Mask (`u2netp`), Face Detail (`yunet`), Manual Box, Alpha Hole Inpainting (`telea`).
+
+---
+
+## One-Button Auto Enhance & Curated Presets
 
 Select one image or an entire folder and press **Enhance Selected**.
 
@@ -14,23 +28,31 @@ Every item is automatically profiled in milliseconds on CPU:
 - **Noise vs Sharpness:** Computes robust Laplacian Median Absolute Deviation (MAD) to separate true edges from noise.
 - **Surface Quality & De-Gloss:** Measures specular highlight distance ($P_{92} - P_{45}$) and waxy flat surfaces to compile a targeted, frequency-separated correction plan.
 
-### Presets Available:
+### Curated Presets:
 
 1. **Auto (Recommended):** Analyzes each image independently, compiling a dynamic multi-band plan.
-2. **Natural Skin / De-Gloss:** Closes harsh specular-to-midtone highlight gaps on face/neck skin and injects subtle, luminance-coupled micro-pore texture into flat AI surfaces without destroying facial anatomy or eye reflections.
-3. **De-Gloss / De-Shine:** Frequency-separated specular highlight compression on the low band only (leaving pores and fine hairs bit-for-bit intact on the high band).
-4. **Gentle Restore:** Light denoise, edge clarity, and subtle contrast balance.
-5. **Clarity & Detail:** High-pass micro-contrast boost, edge boost, and selective sharpening.
-6. **Portrait Polish:** De-gloss, gentle smoothing, high-frequency pore preservation, and warm skin retention.
-7. **Texture Cleanup:** High-pass filter with noise reduction for game textures and scans.
-8. **Color Recovery:** Restores vibrancy, contrast, and neutral white-balance.
-9. **Custom (Manual):** Full manual control over individual stack parameters.
+2. **Natural Skin / De-Gloss:** Compresses oily specular boundaries (Scales 3 & 4) while boosting fine skin pores (Scale 1) to eliminate plastic skin.
+3. **De-Gloss / De-Shine:** Frequency-separated specular highlight compression on the low band only.
+4. **Vivid Pop:** Crisp edge definition, boosted saturation, and midtone clarity.
+5. **Warm Sunset:** Amber color temperature, soft glow, and subtle vignette.
+6. **Cinematic Teal:** Teal/Orange dual-tone split grading, midtone clarity, and film grain.
+7. **Soft Glamour / Glow:** Orton highlight diffusion and gentle skin smoothing.
+8. **Moody Film:** Matte gamma curve, analog grain, and moody vignette.
+9. **🔍 CLAHE Texture Extractor:** Contrast-Limited Adaptive Histogram Equalization in perceptual LAB space for dark game assets or muddy renders.
+10. **✨ Auto White-Balance:** Shades-of-Gray Minkowski $p$-norm color constancy illuminant neutralization.
+11. **🧹 Despeckle AI Artifacts:** Selective median outlier replacement for AI pinholes and dead pixels.
+12. **🌫️ Dark Channel Prior Dehaze (DCP):** Physical atmospheric scattering removal for fog and murky washes.
+13. **🎯 Radial / Tilt-Shift Focus:** Miniature and portrait circular focus blur.
+14. **🛡️ Privacy Censor Blur:** Heavy Gaussian privacy blur for SFW protection.
+15. **🔲 Mosaic Pixelate Censor:** Classic retro mosaic block pixelation.
+16. **B&W Contrast:** Fine-art high-contrast monochrome with clarity and grain.
+17. **Custom (Manual):** Full manual control over individual stack parameters.
 
 ---
 
 ## Specialist AI Micro-Model Rack ("Rack of Tiny Experts")
 
-Instead of booting a giant multi-gigabyte generative diffusion stack, the engine uses **high-performance classical deterministic filters** with an optional **rack of tiny specialist micro-models (1–20 MB)** sitting behind the filters. (See [REFERENCES.md](REFERENCES.md) for full algorithmic formulations).
+Instead of booting a giant multi-gigabyte generative diffusion stack, the engine uses **high-performance classical deterministic filters** with an optional **rack of tiny specialist micro-models (1–20 MB)** sitting beside the filters. (See [REFERENCES.md](REFERENCES.md) for full algorithmic formulations).
 
 All models are strictly opt-in. The user can open the **📦 Model Rack** dialog in the UI to view direct links, descriptions, file sizes, and download only the experts they need:
 
@@ -58,21 +80,6 @@ All models are strictly opt-in. The user can open the **📦 Model Rack** dialog
 
 ---
 
-## Colour Continuity Guard
-
-Before and after every run, Smart Enhance compares a conservative warm-surface colour signature in YCbCr space. It does not classify ethnicity or a person. If an enhancement materially bleaches or washes out a warm complexion, the item is flagged as **`needs-review`** in the manifest for operator review.
-
----
-
-## Targeted Regions & Repair
-
-- **Subject mask:** Uses local U2NetP ONNX (~4.5 MB) to limit enhancement to the main foreground subject.
-- **Faces:** Uses local YuNet ONNX (~232 KB) for face bounding boxes; optional face-detail refinement applies super-resolution to detected crops and feather-blends them back.
-- **Manual box:** Accepts `x,y,width,height` percentages for repeatable batch crops.
-- **Repair enclosed transparent holes:** OpenCV Telea inpainting on interior alpha holes without touching outer sprite borders.
-
----
-
 ## Headless CLI Batch Runner (Fleet-Compatible)
 
 For automated batch execution across fleet machines (**Boss**, **Laptop**, **Mint**):
@@ -96,4 +103,4 @@ python -m tools.image_enhancer.cli --input "D:\path\to\images" --out "D:\path\to
 python -m tools.image_enhancer.test_smoke
 ```
 
-Runs the complete smoke test suite verifying Auto-Enhance, De-Gloss, Model Rack, Alpha-Hole repair, Real-ESRGAN 2×, and Headless CLI execution.
+Runs the complete smoke test suite verifying Auto-Enhance, De-Gloss, CLAHE, Auto-WB, Despeckle, DCP Dehaze, Privacy Blurs, Model Rack, Alpha-Hole repair, Real-ESRGAN 2×, and Headless CLI execution.

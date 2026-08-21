@@ -22,16 +22,85 @@ class FilterPass:
 
 _PRESETS: dict[str, tuple[FilterPass, ...]] = {
     "auto": (),  # Dynamically compiled from image profile in smart.py
-    "de_gloss": (
-        FilterPass("wavelet_degloss", {"strength": 0.85, "pore_boost": 1.15}),
-        FilterPass("contrast", {"factor": 1.03}),
-        FilterPass("saturation", {"factor": 1.02}),
-    ),
     "natural_skin": (
         FilterPass("wavelet_degloss", {"strength": 0.75, "pore_boost": 1.20}),
         FilterPass("micro_texture", {"amount": 0.035, "scale": 2.2}),
         FilterPass("denoise", {"radius": 0.20}),
         FilterPass("contrast", {"factor": 1.04}),
+    ),
+    "de_gloss": (
+        FilterPass("wavelet_degloss", {"strength": 0.85, "pore_boost": 1.15}),
+        FilterPass("contrast", {"factor": 1.03}),
+        FilterPass("saturation", {"factor": 1.02}),
+    ),
+    "vivid_pop": (
+        FilterPass("contrast", {"factor": 1.10}),
+        FilterPass("saturation", {"factor": 1.18}),
+        FilterPass("vibrance", {"amount": 0.15}),
+        FilterPass("clarity", {"amount": 0.25}),
+        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 1.25, "threshold": 3.0}),
+    ),
+    "warm_sunset": (
+        FilterPass("temperature", {"amount": 0.22}),
+        FilterPass("tint", {"amount": -0.05}),
+        FilterPass("contrast", {"factor": 1.06}),
+        FilterPass("saturation", {"factor": 1.08}),
+        FilterPass("soft_glow", {"opacity": 0.18, "radius": 14.0}),
+        FilterPass("vignette", {"amount": 0.25, "radius": 0.9}),
+    ),
+    "cinematic_teal": (
+        FilterPass("contrast", {"factor": 1.08}),
+        FilterPass("split_tone", {"amount": 0.35}),
+        FilterPass("clarity", {"amount": 0.20}),
+        FilterPass("vignette", {"amount": 0.30, "radius": 0.85}),
+        FilterPass("film_grain", {"amount": 0.025, "scale": 1.5}),
+    ),
+    "soft_glamour": (
+        FilterPass("wavelet_degloss", {"strength": 0.65, "pore_boost": 1.10}),
+        FilterPass("soft_glow", {"opacity": 0.28, "radius": 18.0}),
+        FilterPass("selective_blur", {"radius": 2.0, "max_delta": 14.0}),
+        FilterPass("contrast", {"factor": 1.04}),
+        FilterPass("vignette", {"amount": 0.20, "radius": 0.95}),
+    ),
+    "moody_film": (
+        FilterPass("contrast", {"factor": 1.05}),
+        FilterPass("gamma", {"value": 0.95}),
+        FilterPass("saturation", {"factor": 0.92}),
+        FilterPass("film_grain", {"amount": 0.045, "scale": 1.8}),
+        FilterPass("vignette", {"amount": 0.40, "radius": 0.80}),
+    ),
+    "clahe_texture": (
+        FilterPass("clahe", {"clip_limit": 2.2}),
+        FilterPass("clarity", {"amount": 0.25}),
+        FilterPass("contrast", {"factor": 1.04}),
+        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 1.20, "threshold": 3.0}),
+    ),
+    "auto_white_balance": (
+        FilterPass("auto_wb", {"p_norm": 6.0}),
+        FilterPass("contrast", {"factor": 1.05}),
+        FilterPass("saturation", {"factor": 1.04}),
+    ),
+    "despeckle_clean": (
+        FilterPass("despeckle", {"radius": 2.0, "threshold": 22.0}),
+        FilterPass("denoise", {"radius": 0.25}),
+        FilterPass("high_pass", {"radius": 1.2, "opacity": 0.20}),
+        FilterPass("contrast", {"factor": 1.04}),
+    ),
+    "radial_focus": (
+        FilterPass("radial_focus", {"focus_radius": 0.35, "blur_radius": 24.0}),
+        FilterPass("contrast", {"factor": 1.05}),
+        FilterPass("vignette", {"amount": 0.25, "radius": 0.90}),
+    ),
+    "privacy_censor": (
+        FilterPass("privacy_blur", {"radius": 32.0, "pixelate_block": 0.0}),
+    ),
+    "pixelate_censor": (
+        FilterPass("privacy_blur", {"radius": 0.0, "pixelate_block": 20.0}),
+    ),
+    "dcp_dehaze": (
+        FilterPass("dcp_dehaze", {"strength": 0.80}),
+        FilterPass("contrast", {"factor": 1.05}),
+        FilterPass("saturation", {"factor": 1.05}),
     ),
     "retinex_dehaze": (
         FilterPass("retinex", {"dynamic": 2.2}),
@@ -53,8 +122,8 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
         FilterPass("denoise", {"radius": 0.2}),
         FilterPass("high_pass", {"radius": 1.2, "opacity": 0.18}),
         FilterPass("unsharp_threshold", {"radius": 1.5, "amount": 1.35, "threshold": 2.5}),
+        FilterPass("clarity", {"amount": 0.25}),
         FilterPass("contrast", {"factor": 1.04}),
-        FilterPass("edge_boost", {"amount": 0.12}),
     ),
     "colour_restore": (
         FilterPass("denoise", {"radius": 0.3}),
@@ -75,16 +144,12 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
         FilterPass("sharpen", {"factor": 1.25}),
         FilterPass("contrast", {"factor": 1.08}),
     ),
-    "sharp_abstract": (
-        FilterPass("denoise", {"radius": 0.45}),
-        FilterPass("high_pass", {"radius": 1.75, "opacity": 0.35}),
-        FilterPass("edge_boost", {"amount": 0.30}),
-        FilterPass("contrast", {"factor": 1.10}),
-    ),
-    "smooth_bilateral": (
-        FilterPass("selective_blur", {"radius": 3.0, "max_delta": 20.0}),
-        FilterPass("contrast", {"factor": 1.08}),
-        FilterPass("saturation", {"factor": 1.04}),
+    "bw_contrast": (
+        FilterPass("saturation", {"factor": 0.0}),
+        FilterPass("contrast", {"factor": 1.25}),
+        FilterPass("clarity", {"amount": 0.35}),
+        FilterPass("film_grain", {"amount": 0.035, "scale": 1.6}),
+        FilterPass("vignette", {"amount": 0.35, "radius": 0.85}),
     ),
     "custom": (),
 }
@@ -102,7 +167,9 @@ def compact_stack(passes: list[FilterPass]) -> list[FilterPass]:
             continue
         if current.op in {"brightness", "contrast", "saturation", "sharpen"} and current.params.get("factor", 1.0) == 1.0:
             continue
-        if current.op in {"hue", "vibrance", "temperature", "tint", "edge_boost", "high_pass", "denoise", "de_gloss", "micro_texture"} and not any(current.params.values()):
+        if current.op in {"hue", "vibrance", "temperature", "tint", "edge_boost", "high_pass", "denoise",
+                          "de_gloss", "micro_texture", "soft_glow", "clarity", "vignette", "film_grain",
+                          "split_tone", "privacy_blur", "radial_focus", "clahe", "auto_wb", "despeckle"} and not any(current.params.values()):
             continue
         if merged and current.op == merged[-1].op and current.op in {"brightness", "contrast", "saturation", "sharpen"}:
             previous = merged.pop()
@@ -115,14 +182,29 @@ def compact_stack(passes: list[FilterPass]) -> list[FilterPass]:
 def build_stack(*, preset: str, brightness: float, contrast: float, gamma: float, hue_degrees: float,
                 saturation: float, vibrance: float, temperature: float, tint: float, denoise: float,
                 sharpen: float, high_pass: float, edge_boost: float,
-                de_gloss: float = 0.0, micro_texture: float = 0.0) -> list[FilterPass]:
+                de_gloss: float = 0.0, micro_texture: float = 0.0,
+                soft_glow: float = 0.0, clarity: float = 0.0, vignette: float = 0.0,
+                film_grain: float = 0.0, split_tone: float = 0.0,
+                privacy_blur: float = 0.0, pixelate_block: float = 0.0,
+                radial_focus: float = 0.0,
+                clahe_strength: float = 0.0,
+                auto_wb_strength: float = 0.0,
+                despeckle_strength: float = 0.0) -> list[FilterPass]:
     if preset not in _PRESETS:
         raise ValueError(f"unknown enhancement preset: {preset}")
     passes = list(_PRESETS[preset])
+    if auto_wb_strength > 0.0:
+        passes.append(FilterPass("auto_wb", {"p_norm": 6.0}))
+    if despeckle_strength > 0.0:
+        passes.append(FilterPass("despeckle", {"radius": 2.0, "threshold": 25.0}))
+    if clahe_strength > 0.0:
+        passes.append(FilterPass("clahe", {"clip_limit": clahe_strength * 3.0}))
+
     passes.extend((
         FilterPass("denoise", {"radius": denoise}),
         FilterPass("wavelet_degloss", {"strength": de_gloss, "pore_boost": 1.15}),
         FilterPass("micro_texture", {"amount": micro_texture, "scale": 2.2}),
+        FilterPass("clarity", {"amount": clarity}),
         FilterPass("brightness", {"factor": brightness}),
         FilterPass("contrast", {"factor": contrast}),
         FilterPass("gamma", {"value": gamma}),
@@ -131,6 +213,12 @@ def build_stack(*, preset: str, brightness: float, contrast: float, gamma: float
         FilterPass("hue", {"degrees": hue_degrees}),
         FilterPass("saturation", {"factor": saturation}),
         FilterPass("vibrance", {"amount": vibrance}),
+        FilterPass("split_tone", {"amount": split_tone}),
+        FilterPass("soft_glow", {"opacity": soft_glow, "radius": 16.0}),
+        FilterPass("vignette", {"amount": vignette, "radius": 0.85}),
+        FilterPass("film_grain", {"amount": film_grain, "scale": 1.6}),
+        FilterPass("radial_focus", {"focus_radius": 0.35, "blur_radius": radial_focus * 30.0}),
+        FilterPass("privacy_blur", {"radius": privacy_blur * 40.0, "pixelate_block": pixelate_block}),
         FilterPass("high_pass", {"radius": 1.25, "opacity": high_pass}),
         FilterPass("edge_boost", {"amount": edge_boost}),
         FilterPass("sharpen", {"factor": sharpen}),
@@ -193,6 +281,28 @@ def _apply(image: Image.Image, item: FilterPass,
         )
     if op == "micro_texture":
         return _micro_texture_pass(image, amount=p.get("amount", 0.0), scale=p.get("scale", 2.2))
+    if op == "soft_glow":
+        return classical_ops.soft_glow_orton(image, radius=p.get("radius", 16.0), opacity=p.get("opacity", 0.25))
+    if op == "clarity":
+        return classical_ops.clarity(image, amount=p.get("amount", 0.30), radius=p.get("radius", 24.0))
+    if op == "vignette":
+        return classical_ops.vignette(image, amount=p.get("amount", 0.35), radius=p.get("radius", 0.85))
+    if op == "film_grain":
+        return classical_ops.film_grain(image, amount=p.get("amount", 0.035), scale=p.get("scale", 1.6))
+    if op == "split_tone":
+        return classical_ops.split_tone(image, amount=p.get("amount", 0.35))
+    if op == "privacy_blur":
+        return classical_ops.privacy_blur(image, radius=p.get("radius", 28.0), pixelate_block=int(p.get("pixelate_block", 0)))
+    if op == "radial_focus":
+        return classical_ops.radial_focus_blur(image, focus_radius=p.get("focus_radius", 0.35), blur_radius=p.get("blur_radius", 24.0))
+    if op == "clahe":
+        return classical_ops.clahe_local_contrast(image, clip_limit=p.get("clip_limit", 2.0))
+    if op == "auto_wb":
+        return classical_ops.auto_white_balance(image, p_norm=p.get("p_norm", 6.0))
+    if op == "despeckle":
+        return classical_ops.adaptive_despeckle(image, radius=int(p.get("radius", 2)), threshold=p.get("threshold", 25.0))
+    if op == "dcp_dehaze":
+        return classical_ops.dark_channel_dehaze(image, strength=p.get("strength", 0.75))
     if op == "retinex":
         return classical_ops.retinex_mscr(image, dynamic=p.get("dynamic", 2.0))
     if op == "selective_blur":
@@ -272,7 +382,6 @@ def _micro_texture_pass(image: Image.Image, amount: float = 0.035, scale: float 
     sd = band.std() or 1.0
     normalized_band = (band / sd)[..., None]
 
-    # Couple to midtone luminance: strongest in midtones (4*x*(1-x)), zero at black & white
     lum = (rgb.mean(axis=2, keepdims=True)) / 255.0
     coupling = np.clip(4.0 * lum * (1.0 - lum), 0.0, 1.0)
 

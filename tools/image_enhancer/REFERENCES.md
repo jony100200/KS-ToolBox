@@ -45,8 +45,37 @@ This document records the foundational research, algorithms, and references stud
 ### D. Thresholded High-Pass Unsharp Masking
 * **Foundational Papers:**
   * Polesel, A., Ramponi, G., & Mathews, V. J. (2000). *Image enhancement via adaptive unsharp masking.* IEEE Transactions on Image Processing, 9(3), 505-510.
-* **Open Source Reference Implementations:**
-  * GEGL `unsharp-mask` operation.
+### E. Creative & Aesthetic Image Filters
+* **Soft Glow / Orton Bloom Effect:**
+  * Orton, M. (1987). *Photographing with the Orton Effect.*
+  * Screen-blended Gaussian bloom over highlight thresholds:
+    $$\text{Bloom}(x,y) = \text{Blur}(\text{Threshold}(\text{Luma}(I), T), \sigma)$$
+    $$I_{\text{glow}} = 1 - (1 - I) \cdot (1 - \text{Bloom})$$
+* **Midtone Clarity & Micro-Contrast:**
+  * Paris, S., Hasinoff, S. W., & Kautz, J. (2011). *Local Laplacian filters: Edge-aware image processing with a Laplacian pyramid.* ACM Transactions on Graphics (TOG).
+  * Bell-curve modulated local frequency boost:
+    $$I_{\text{clarity}} = I + (I - \text{Blur}(I, r)) \cdot 4 \cdot L \cdot (1 - L) \cdot \text{amount}$$
+* **Radial Lens Vignette:**
+  * Smooth cosine falloff from normalized center coordinates:
+    $$\text{dist} = \sqrt{\left(\frac{x - c_x}{c_x}\right)^2 + \left(\frac{y - c_y}{c_y}\right)^2}$$
+    $$\text{falloff} = \frac{1 - \cos(\text{clamp}(\frac{\text{dist} - r_{\text{inner}}}{r_{\text{outer}} - r_{\text{inner}}}, 0, 1) \cdot \pi)}{2}$$
+* **Dual-Tone Split Color Grading:**
+  * Independent shadow chromatic bias ($1 - 2L$) vs highlight chromatic bias ($2L - 1$).
+
+---
+
+### F. Adaptive Color Constancy & Local Equalization
+* **Contrast-Limited Adaptive Histogram Equalization (CLAHE):**
+  * Pizer, S. M., et al. (1987). *Adaptive histogram equalization and its variations.* Computer Vision, Graphics, and Image Processing.
+  * Zuiderveld, K. (1994). *Contrast limited adaptive histogram equalization.* Graphics Gems IV, 474-485.
+* **Shades of Gray / Minkowski Illuminant Estimation (Auto White-Balance):**
+  * Finlayson, G. D., & Trezzi, E. (2004). *Shades of gray and colour constancy.* Color and Imaging Conference.
+  * Illuminant chromaticity vector estimated via $p$-norm:
+    $$e_p = \left( \frac{1}{N} \sum_{x,y} I_c(x,y)^p \right)^{1/p}$$
+* **Selective Adaptive Median Despeckle:**
+  * Hwang, H., & Haddad, R. A. (1995). *Adaptive median filters: new algorithms and results.* IEEE Transactions on Image Processing, 4(4), 499-502.
+* **Single Image Haze Removal Using Dark Channel Prior (DCP):**
+  * He, K., Sun, J., & Tang, X. (2009). *Single image haze removal using dark channel prior.* IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI), 33(12), 2341-2353.
 
 ---
 
