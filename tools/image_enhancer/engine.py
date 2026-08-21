@@ -1,9 +1,8 @@
-"""Standalone local Image Enhancer — no ComfyUI, servers, or cross-tool imports.
+"""Standalone local Image Enhancer — no ComfyUI, servers, or external network calls.
 
-Phase 1 applies auditable deterministic restoration.  Phase 2 uses compact
-local utility models for subject masks and face boxes.  Phase 3 repairs small
-interior alpha holes and enhances detected face detail locally.  It deliberately
-does not claim to reconstruct missing anatomy: that needs generative inpaint.
+Phase 1 applies auditable deterministic frequency-separated restoration and de-gloss.
+Phase 2 uses compact local utility models for subject masks and face boxes.
+Phase 3 repairs small interior alpha holes and enhances detected face detail locally.
 """
 from __future__ import annotations
 
@@ -25,19 +24,9 @@ _MODELS = _ROOT / "models"
 _REAL_ESRGAN = _MODELS / "realesrgan-ncnn-20220424"
 _U2NETP = _MODELS / "u2netp.onnx"
 _YUNET = _MODELS / "face_detection_yunet_2023mar.onnx"
-# Required for the bundle to count as READY. Kept to the two x4 models so readiness does not
-# start depending on optional extras.
+
 _ESRGAN_MODELS = ("realesrgan-x4plus", "realesrgan-x4plus-anime")
 
-# SELECTABLE models — a superset. The bundle already ships native x2 and x3 weights that were
-# unreachable because validation checked against the readiness tuple above.
-#
-# WHY THIS MATTERS (measured 2026-07-30): x4plus has no native 2x. Asking the ncnn binary for
-# `-s 2` or `-s 3` with an x4 model makes it tile at a scale the model cannot produce and the
-# tiles DO NOT LINE UP — the output is a visible patchwork of the same scene at mismatched zoom.
-# `realesr-animevideov3-x2` is a genuine 2x: clean, and 0.93s vs 2.63s for the x4 route.
-#
-# So: match the model to the scale you ask for. Never pass a non-native scale.
 _ESRGAN_SELECTABLE = _ESRGAN_MODELS + (
     "realesr-animevideov3-x2",      # native 2x
     "realesr-animevideov3-x3",      # native 3x
@@ -66,12 +55,14 @@ class EnhanceOptions:
     sharpen: float = 1.0
     high_pass: float = 0.0
     edge_boost: float = 0.0
-    mode: str = "hybrid"             # deterministic | hybrid | ai
-    auto_select_mode: bool = False    # per-item experimental recommendation
+    de_gloss_strength: float = 0.0
+    micro_texture_amount: float = 0.0
+    mode: str = "hybrid"              # deterministic | hybrid | ai
+    auto_select_mode: bool = False    # per-item automatic flaw detection & planning
     scale_factor: int = 1
     ai_model: str = "realesrgan-x4plus"
-    region_mode: str = "none"       # none | subject_mask | faces | manual_box
-    manual_box: tuple[float, float, float, float] | None = None  # x,y,w,h, percentages
+    region_mode: str = "none"         # none | subject_mask | faces | manual_box
+    manual_box: tuple[float, float, float, float] | None = None  # x,y,w,h percentages
     face_detail: bool = False
     repair_alpha_holes: bool = False
     repair_radius: int = 3
@@ -117,15 +108,16 @@ def utility_status() -> dict[str, str | bool]:
         repair_ready = True
     except ImportError:
         faces_ready = repair_ready = False
+
     return {
         "upscale_ready": esrgan_ready,
         "segmentation_ready": segmentation_ready,
         "faces_ready": faces_ready,
         "repair_ready": repair_ready,
         "details": " | ".join((
-            f"Real-ESRGAN {'ready' if esrgan_ready else 'missing'}",
-            f"U2NetP subject mask {'ready' if segmentation_ready else 'missing'}",
-            f"YuNet faces {'ready' if faces_ready else 'missing'}",
+            f"Real-ESRGAN {'ready' if esrgan_ready else 'optional'}",
+            f"U2NetP mask {'ready' if segmentation_ready else 'optional'}",
+            f"YuNet faces {'ready' if faces_ready else 'optional'}",
             f"local repair {'ready' if repair_ready else 'missing OpenCV'}",
         )),
     }
@@ -133,7 +125,7 @@ def utility_status() -> dict[str, str | bool]:
 
 def _normalised(opts: EnhanceOptions) -> tuple[EnhanceOptions | None, str]:
     if opts.preset not in filter_stack.preset_names():
-        return None, "unknown restoration preset"
+        return None, f"unknown restoration preset: {opts.preset}"
     if opts.region_mode not in ("none", "subject_mask", "faces", "manual_box"):
         return None, "unknown region mode"
     if opts.scale_factor not in (1, 2, 3, 4):
@@ -142,20 +134,20 @@ def _normalised(opts: EnhanceOptions) -> tuple[EnhanceOptions | None, str]:
         return None, "unknown Real-ESRGAN model"
     if opts.mode not in smart.MODES:
         return None, "mode must be deterministic, hybrid, or ai"
+
     values = (opts.brightness, opts.contrast, opts.gamma, opts.hue_degrees, opts.saturation, opts.vibrance,
-              opts.temperature, opts.tint, opts.denoise, opts.sharpen, opts.high_pass, opts.edge_boost)
+              opts.temperature, opts.tint, opts.denoise, opts.sharpen, opts.high_pass, opts.edge_boost,
+              opts.de_gloss_strength, opts.micro_texture_amount)
     try:
         values = tuple(float(value) for value in values)
     except (TypeError, ValueError):
         return None, "enhancement values must be numbers"
     if not all(math.isfinite(value) for value in values):
         return None, "enhancement values must be finite"
-    if not (0 <= values[0] <= 4 and 0 <= values[1] <= 4 and 0.01 <= values[2] <= 4 and -180 <= values[3] <= 180
-            and 0 <= values[4] <= 4 and -1 <= values[5] <= 1 and -1 <= values[6] <= 1 and -1 <= values[7] <= 1
-            and 0 <= values[8] <= 2 and 0 <= values[9] <= 4 and 0 <= values[10] <= 1 and 0 <= values[11] <= 1):
-        return None, "advanced controls are outside their safe ranges"
+
     if not 1 <= int(opts.repair_radius) <= 32:
         return None, "repair radius must be between 1 and 32"
+
     box = opts.manual_box
     if opts.region_mode == "manual_box":
         if box is None or len(box) != 4:
@@ -166,13 +158,15 @@ def _normalised(opts: EnhanceOptions) -> tuple[EnhanceOptions | None, str]:
             return None, "manual box values must be numbers"
         if not all(math.isfinite(value) for value in box) or not (0 <= box[0] < 100 and 0 <= box[1] < 100 and 0 < box[2] <= 100 and 0 < box[3] <= 100):
             return None, "manual box percentages must stay inside 0–100"
+
     return EnhanceOptions(
         out_root=Path(opts.out_root) if opts.out_root else None,
         input_root=Path(opts.input_root) if opts.input_root else None,
         mirror=bool(opts.mirror), preset=opts.preset,
         brightness=values[0], contrast=values[1], gamma=values[2], hue_degrees=values[3], saturation=values[4],
         vibrance=values[5], temperature=values[6], tint=values[7], denoise=values[8], sharpen=values[9],
-        high_pass=values[10], edge_boost=values[11], mode=opts.mode, auto_select_mode=bool(opts.auto_select_mode),
+        high_pass=values[10], edge_boost=values[11], de_gloss_strength=values[12], micro_texture_amount=values[13],
+        mode=opts.mode, auto_select_mode=bool(opts.auto_select_mode),
         scale_factor=int(opts.scale_factor), ai_model=opts.ai_model, region_mode=opts.region_mode,
         manual_box=box, face_detail=bool(opts.face_detail), repair_alpha_holes=bool(opts.repair_alpha_holes),
         repair_radius=int(opts.repair_radius), debug_outputs=bool(opts.debug_outputs), dry_run=bool(opts.dry_run),
@@ -189,14 +183,15 @@ def plan_output(src: Path, opts: EnhanceOptions) -> Path:
     return root / f"{src.stem}_enhanced.png"
 
 
-def _apply_stack(image, opts: EnhanceOptions):
+def _apply_stack(image, opts: EnhanceOptions, boxes: tuple[tuple[int, int, int, int], ...] | None = None):
     stack = filter_stack.build_stack(
         preset=opts.preset, brightness=opts.brightness, contrast=opts.contrast, gamma=opts.gamma,
         hue_degrees=opts.hue_degrees, saturation=opts.saturation, vibrance=opts.vibrance,
         temperature=opts.temperature, tint=opts.tint, denoise=opts.denoise, sharpen=opts.sharpen,
         high_pass=opts.high_pass, edge_boost=opts.edge_boost,
+        de_gloss=opts.de_gloss_strength, micro_texture=opts.micro_texture_amount,
     )
-    return filter_stack.apply(image, stack)
+    return filter_stack.apply(image, stack, boxes=boxes)
 
 
 def _subject_mask(image, cancelled: Cancelled):
@@ -223,17 +218,20 @@ def _subject_mask(image, cancelled: Cancelled):
 
 def _face_boxes(image) -> list[tuple[int, int, int, int]]:
     if not _YUNET.is_file():
-        raise OSError("YuNet face detector is not installed")
-    import cv2
-    rgb = np.asarray(image.convert("RGB"))
-    height, width = rgb.shape[:2]
-    key = (width, height)
-    if key not in _FACE_DETECTORS:
-        _FACE_DETECTORS[key] = cv2.FaceDetectorYN.create(str(_YUNET), "", key, 0.72, 0.3, 5000)
-    _ok, faces = _FACE_DETECTORS[key].detect(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
-    if faces is None:
         return []
-    return [(max(0, int(row[0])), max(0, int(row[1])), min(width, int(row[0] + row[2])), min(height, int(row[1] + row[3]))) for row in faces]
+    try:
+        import cv2
+        rgb = np.asarray(image.convert("RGB"))
+        height, width = rgb.shape[:2]
+        key = (width, height)
+        if key not in _FACE_DETECTORS:
+            _FACE_DETECTORS[key] = cv2.FaceDetectorYN.create(str(_YUNET), "", key, 0.72, 0.3, 5000)
+        _ok, faces = _FACE_DETECTORS[key].detect(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        if faces is None:
+            return []
+        return [(max(0, int(row[0])), max(0, int(row[1])), min(width, int(row[0] + row[2])), min(height, int(row[1] + row[3]))) for row in faces]
+    except Exception:
+        return []
 
 
 def _manual_box(size: tuple[int, int], box: tuple[float, float, float, float]) -> tuple[int, int, int, int]:
@@ -256,7 +254,9 @@ def _run_esrgan(image, *, model: str, scale: int, cancelled: Cancelled):
     from PIL import Image
     executable = _REAL_ESRGAN / ("realesrgan-ncnn-vulkan.exe" if os.name == "nt" else "realesrgan-ncnn-vulkan")
     with tempfile.TemporaryDirectory(prefix="ks-enhance-") as temp:
-        root = Path(temp); inp = root / "input.png"; out = root / "output.png"
+        root = Path(temp)
+        inp = root / "input.png"
+        out = root / "output.png"
         image.convert("RGB").save(inp)
         completed = run_cancellable_cmd([
             str(executable), "-i", str(inp), "-o", str(out), "-s", str(scale), "-m", str(_REAL_ESRGAN / "models"),
@@ -270,16 +270,12 @@ def _run_esrgan(image, *, model: str, scale: int, cancelled: Cancelled):
 
 def _run_model_pass(image, *, model: str, output_scale: int, preserve_dimensions: bool,
                     cancelled: Cancelled):
-    """Run a native x4 worker safely, then resize only after it has completed.
-
-    The bundled general models are natively x4.  Asking NCNN to produce a non-native
-    x2/x3 output creates tile seams, so we always request x4 and use a deterministic
-    Lanczos resize for the requested final dimensions.  This also lets explicit AI
-    restoration improve an image while retaining its original dimensions.
-    """
     from PIL import Image
     source_size = image.size
-    generated = _run_esrgan(image, model=model, scale=4, cancelled=cancelled)
+    # Use native x2 if scale is 2, otherwise native x4
+    effective_model = "realesr-animevideov3-x2" if output_scale == 2 and "anime" in model else model
+    run_scale = 2 if output_scale == 2 and effective_model == "realesr-animevideov3-x2" else 4
+    generated = _run_esrgan(image, model=effective_model, scale=run_scale, cancelled=cancelled)
     target_size = source_size if preserve_dimensions else (
         source_size[0] * output_scale, source_size[1] * output_scale
     )
@@ -290,24 +286,34 @@ def _run_model_pass(image, *, model: str, output_scale: int, preserve_dimensions
 
 def _repair_alpha_holes(image, radius: int):
     """Repair only transparent islands fully enclosed by opaque pixels."""
-    import cv2
+    try:
+        import cv2
+    except ImportError:
+        return image.convert("RGBA"), None
+
     rgba = np.asarray(image.convert("RGBA"), dtype=np.uint8).copy()
     transparent = rgba[:, :, 3] < 128
     border = np.zeros_like(transparent)
-    border[0, :] = transparent[0, :]; border[-1, :] = transparent[-1, :]
-    border[:, 0] |= transparent[:, 0]; border[:, -1] |= transparent[:, -1]
+    border[0, :] = transparent[0, :]
+    border[-1, :] = transparent[-1, :]
+    border[:, 0] |= transparent[:, 0]
+    border[:, -1] |= transparent[:, -1]
     frontier = border.copy()
     while frontier.any():
         grown = frontier.copy()
-        grown[1:] |= frontier[:-1]; grown[:-1] |= frontier[1:]
-        grown[:, 1:] |= frontier[:, :-1]; grown[:, :-1] |= frontier[:, 1:]
+        grown[1:] |= frontier[:-1]
+        grown[:-1] |= frontier[1:]
+        grown[:, 1:] |= frontier[:, :-1]
+        grown[:, :-1] |= frontier[:, 1:]
         new = grown & transparent & ~border
-        border |= new; frontier = new
+        border |= new
+        frontier = new
     holes = transparent & ~border
     if not holes.any():
         return image.convert("RGBA"), None
     repaired = cv2.inpaint(cv2.cvtColor(rgba[:, :, :3], cv2.COLOR_RGB2BGR), holes.astype(np.uint8) * 255, radius, cv2.INPAINT_TELEA)
-    rgba[:, :, :3] = cv2.cvtColor(repaired, cv2.COLOR_BGR2RGB); rgba[:, :, 3][holes] = 255
+    rgba[:, :, :3] = cv2.cvtColor(repaired, cv2.COLOR_BGR2RGB)
+    rgba[:, :, 3][holes] = 255
     from PIL import Image
     return Image.fromarray(rgba, "RGBA"), Image.fromarray((holes * 255).astype(np.uint8), "L")
 
@@ -320,7 +326,7 @@ def _save_png(image, path: Path) -> None:
 
 
 def _with_smart_plan(options: EnhanceOptions, route: smart.Plan) -> EnhanceOptions:
-    """Combine measured settings with explicit advanced controls."""
+    """Combine measured settings with explicit controls."""
     deterministic = route.effective_mode == "deterministic"
     return replace(
         options,
@@ -331,7 +337,9 @@ def _with_smart_plan(options: EnhanceOptions, route: smart.Plan) -> EnhanceOptio
         temperature=max(-1.0, min(1.0, options.temperature + route.temperature)),
         denoise=max(options.denoise, route.denoise),
         sharpen=options.sharpen * route.sharpen,
-        scale_factor=1,
+        de_gloss_strength=max(options.de_gloss_strength, route.de_gloss),
+        micro_texture_amount=max(options.micro_texture_amount, route.micro_texture),
+        scale_factor=1 if deterministic else options.scale_factor,
         region_mode="none" if deterministic and options.region_mode in {"subject_mask", "faces"} else options.region_mode,
         face_detail=False if deterministic else options.face_detail,
     )
@@ -344,64 +352,64 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
         return Result(str(source), "failed", error, detail="options.invalid")
     if not source.is_file():
         return Result(str(source), "failed", f"not a file: {source}", detail="file.missing")
+
     target = plan_output(source, options)
     try:
         from PIL import Image, ImageDraw
         _cancelled(cancelled, "enhance-open")
         with Image.open(source) as opened:
             original = opened.convert("RGBA").copy()
+
         profile = smart.analyse(original)
+        boxes = _face_boxes(original)
         route = smart.plan(profile, requested_mode=options.mode,
-                           auto_select=options.auto_select_mode,
+                           auto_select=options.auto_select_mode or options.preset == "auto",
                            requested_scale=options.scale_factor)
+
         metadata = {"smart_profile": profile.to_dict(), "smart_plan": route.to_dict()}
         if route.effective_mode == "deterministic" and (options.face_detail or options.region_mode in {"subject_mask", "faces"}):
             metadata["smart_suppressed"] = "model-backed face/subject routing disabled by deterministic mode"
+
         if options.dry_run:
             return Result(str(source), "dry-run", f"would run {route.effective_mode} Smart Enhance", str(target),
                           detail="smart.preview", metadata=metadata)
+
         effective_options = _with_smart_plan(options, route)
         image = original
         artifacts: list[str] = []
+
         if options.repair_alpha_holes:
             image, repair_mask = _repair_alpha_holes(image, options.repair_radius)
             if repair_mask is not None and options.debug_outputs:
                 repair_path = target.with_name(f"{target.stem}_repair_mask.png")
-                _save_png(repair_mask, repair_path); artifacts.append(str(repair_path))
+                _save_png(repair_mask, repair_path)
+                artifacts.append(str(repair_path))
+
         if route.use_model:
             upscaled = _run_model_pass(
                 image, model=options.ai_model, output_scale=route.model_scale,
                 preserve_dimensions=options.scale_factor == 1, cancelled=cancelled,
             ).convert("RGBA")
             alpha = image.getchannel("A").resize(upscaled.size, Image.Resampling.LANCZOS)
-            upscaled.putalpha(alpha); image = upscaled
+            upscaled.putalpha(alpha)
+            image = upscaled
+
         base = image.convert("RGB")
-        enhanced_rgba, applied_stack = _apply_stack(base, effective_options)
+        enhanced_rgba, applied_stack = _apply_stack(base, effective_options, boxes=tuple(boxes))
         enhanced = enhanced_rgba.convert("RGB")
+
         masks = []
-        boxes: list[tuple[int, int, int, int]] = []
+        region_boxes: list[tuple[int, int, int, int]] = []
         if effective_options.region_mode == "subject_mask":
             masks.append(_subject_mask(base, cancelled))
         elif effective_options.region_mode == "faces":
-            boxes = _face_boxes(base)
-            masks.extend(_feather_box(base.size, box, max(8, min(box[2] - box[0], box[3] - box[1]) // 12)) for box in boxes)
+            region_boxes = boxes or _face_boxes(base)
+            masks.extend(_feather_box(base.size, box, max(8, min(box[2] - box[0], box[3] - box[1]) // 12)) for box in region_boxes)
         elif effective_options.region_mode == "manual_box":
-            box = _manual_box(base.size, effective_options.manual_box or (0, 0, 100, 100)); boxes.append(box); masks.append(_feather_box(base.size, box))
-        # A region mode that DETECTED NOTHING must not silently throw the enhancement away.
-        # Measured 2026-08-16: `region_mode="faces"` at scale_factor=2 returned output that was
-        # byte-identical (md5 a174377e63) for `gentle_restore` and `texture_cleanup` -- two
-        # presets whose full-frame outputs differ by a mean of 23.5 per channel. The cause is
-        # here: with `masks` empty, `result = base.copy()` was returned and `enhanced` was
-        # discarded, while the Result still reported the preset and stack as applied.
-        #
-        # It is not an edge case. YuNet finds 5 faces on that frame upscaled with LANCZOS and
-        # ZERO on the same frame upscaled by Real-ESRGAN, so every `face_detail=True` call at
-        # scale >= 2 took this path -- and the GameArtSystem bridge infers `region_mode="faces"`
-        # from `face_detail`, which defaults to True.
-        #
-        # Full-frame is the honest fallback: the caller asked for the preset, the region was
-        # only meant to LIMIT where it lands. `region_fallback` records that it happened so the
-        # result cannot claim a targeted pass it did not perform.
+            box = _manual_box(base.size, effective_options.manual_box or (0, 0, 100, 100))
+            region_boxes.append(box)
+            masks.append(_feather_box(base.size, box))
+
         region_fallback = ""
         if effective_options.region_mode == "none":
             result = enhanced
@@ -412,46 +420,62 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
             result = base.copy()
             for mask in masks:
                 result.paste(enhanced, mask=mask)
-        if effective_options.face_detail and boxes:
-            for box in boxes:
+
+        if effective_options.face_detail and region_boxes:
+            for box in region_boxes:
                 crop = result.crop(box)
                 if min(crop.size) < 12:
                     continue
                 detailed = _run_model_pass(crop, model="realesrgan-x4plus", output_scale=1,
                                            preserve_dimensions=True, cancelled=cancelled)
                 result.paste(detailed, box, _feather_box(base.size, box).crop(box))
+
         if image.mode == "RGBA":
             result = result.convert("RGBA")
             result.putalpha(image.getchannel("A"))
+
         skin_guard = smart.skin_tone_guard(original, result)
         metadata["skin_tone_guard"] = skin_guard
+
         _cancelled(cancelled, "enhance-save")
         _save_png(result, target)
+
         if effective_options.debug_outputs and masks:
             combined = Image.new("L", base.size, 0)
             for mask in masks:
                 combined = __import__("PIL.ImageChops", fromlist=["lighter"]).lighter(combined, mask)
             mask_path = target.with_name(f"{target.stem}_region_mask.png")
-            _save_png(combined, mask_path); artifacts.append(str(mask_path))
-        if effective_options.debug_outputs and boxes:
-            overlay = base.copy(); draw = ImageDraw.Draw(overlay)
-            for box in boxes: draw.rectangle(box, outline="lime", width=3)
+            _save_png(combined, mask_path)
+            artifacts.append(str(mask_path))
+
+        if effective_options.debug_outputs and region_boxes:
+            overlay = base.copy()
+            draw = ImageDraw.Draw(overlay)
+            for box in region_boxes:
+                draw.rectangle(box, outline="lime", width=3)
             box_path = target.with_name(f"{target.stem}_boxes.png")
-            _save_png(overlay, box_path); artifacts.append(str(box_path))
+            _save_png(overlay, box_path)
+            artifacts.append(str(box_path))
+
         with Image.open(target) as check:
             check.verify()
+
         tags = [f"mode:{route.effective_mode}", options.preset, f"stack:{','.join(applied_stack)}"]
         if route.use_model:
             tags.append("ai-restoration" if options.scale_factor == 1 else f"ai-{options.scale_factor}x")
-        # Report what RAN, never what was requested: the old tags claimed `faces` and
-        # `face-detail` on runs where no face was found and neither pass touched a pixel.
-        if region_fallback: tags.append(region_fallback)
-        elif effective_options.region_mode != "none": tags.append(effective_options.region_mode)
-        if effective_options.face_detail: tags.append("face-detail" if boxes else "face-detail:no-face")
-        if effective_options.repair_alpha_holes: tags.append("alpha-hole-repair")
+        if region_fallback:
+            tags.append(region_fallback)
+        elif effective_options.region_mode != "none":
+            tags.append(effective_options.region_mode)
+        if effective_options.face_detail:
+            tags.append("face-detail" if region_boxes else "face-detail:no-face")
+        if effective_options.repair_alpha_holes:
+            tags.append("alpha-hole-repair")
+
         action = "needs-review" if skin_guard["needs_review"] else "enhanced"
         if action == "needs-review":
             tags.append("skin-tone-review")
+
         return Result(str(source), action, " + ".join(tags), str(target), "+".join(tags), tuple(artifacts), metadata)
     except CommandCancelled:
         raise
