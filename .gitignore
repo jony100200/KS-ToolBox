@@ -14,13 +14,16 @@ dist/
 
 # Generated smoke-test / run outputs (regenerable — never track)
 _test_out/
+_enhance_test/
 scratch_out/
-
-# Bundled external binaries — HUGE (ffmpeg/ffprobe ~460 MB) and separately
-# licensed. Never commit; ship them with the release build, not the repo.
-bin/
-
-# Atomic-write temp files
+test_output/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+*.tga
+*.mp4
 *.part
 *.part.*
 
