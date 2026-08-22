@@ -40,3 +40,5 @@ models/
 Thumbs.db
 desktop.ini
 tools/image_enhancer/engine.py.bak_pre_x2
+bin/ffmpeg.exe
+bin/ffprobe.exe
