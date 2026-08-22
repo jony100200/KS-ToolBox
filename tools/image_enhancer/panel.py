@@ -34,6 +34,10 @@ _PRESET_MAP = {
     "🔍 CLAHE Texture Extractor": "clahe_texture",
     "✨ Auto White-Balance": "auto_white_balance",
     "🧹 Despeckle AI Artifacts": "despeckle_clean",
+    "🌫️ Dark Channel Prior Dehaze (DCP)": "dcp_dehaze",
+    "🌸 Anime / Manga Cel-Shader": "anime_style",
+    "🎨 Vector / Cel-Shade Toon": "vector_cel",
+    "👁️ Red-Eye & Flash Glare Fix": "red_eye_fix",
     "🎯 Radial / Tilt-Shift Focus": "radial_focus",
     "🛡️ Privacy Censor Blur": "privacy_censor",
     "🔲 Mosaic Pixelate Censor": "pixelate_censor",
@@ -622,6 +626,18 @@ class ImageEnhancerPanel(BaseBatchPanel):
             self._set_val("contrast", 1.25)
             self._set_val("clarity", 0.35)
             self._set_val("vignette", 0.35)
+        elif preset_key == "dcp_dehaze":
+            self._set_val("contrast", 1.05)
+            self._set_val("saturation", 1.05)
+        elif preset_key == "anime_style":
+            self._set_val("contrast", 1.04)
+            self._set_val("saturation", 1.08)
+            self._set_val("soft_glow", 0.20)
+        elif preset_key == "vector_cel":
+            self._set_val("contrast", 1.04)
+            self._set_val("saturation", 1.08)
+        elif preset_key == "red_eye_fix":
+            pass
         elif preset_key == "auto":
             pass
         self._schedule_preview()
