@@ -35,7 +35,7 @@ class ToolCatalogTests(unittest.TestCase):
     def test_every_discovered_tool_has_one_known_nonempty_category(self) -> None:
         tools = discover().all()
         validate_catalog(tools)
-        self.assertEqual(len(tools), 17)
+        self.assertEqual(len(tools), 19)
         grouped_ids = [
             tool.meta.id
             for category in CATEGORIES

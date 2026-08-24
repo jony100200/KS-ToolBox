@@ -2,7 +2,7 @@
   <img src="assets/KS_ToolBox_GitHub_Banner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
 </p>
 
-<p align="center"><b>One window, 17 batch tools and one custom sprite viewer.</b><br>
+<p align="center"><b>One window, 19 batch tools and one custom sprite viewer.</b><br>
 A fast, portable, cross-platform desktop app that brings a suite of practical
 file / image / video / audio / asset batch utilities under a single UI —
 free, offline, no credits, no cloud.</p>
@@ -12,7 +12,7 @@ free, offline, no credits, no cloud.</p>
 KS ToolBox is a **plugin toolbox**: one CustomTkinter shell that auto-discovers
 self-contained tools and presents them through four focused work areas instead
 of a wall of tool names. Home, live search, recent tools, and category pages
-keep the interface calm as the catalog grows. Its **17 batch workflows** share
+keep the interface calm as the catalog grows. Its **19 batch workflows** share
 preview, safe output, durable queue/recovery, validation, manifests, and
 completion reports. Sprite Viewer keeps a purpose-built interactive screen.
 The app is **deterministic-first**: optional local utility models are lazy and
@@ -39,13 +39,14 @@ always explicit and confirmed.
 | [**Video Compressor**](tools/video_compressor/README.md) | Shrink videos without visible quality loss — decides if a file is even worth re-encoding, then proves the result with a VMAF quality gate before touching the original. |
 | [**Video Chopper**](tools/video_chopper/README.md) | Split a video into clips at black-frame gaps (scene/take boundaries). Lossless stream-copy or frame-accurate re-encode. |
 | [**Audio Tool**](tools/audio_tool/README.md) | Batch convert / trim / fade / loudness-normalize audio via the bundled FFmpeg. |
+| [**Format Converter**](tools/format_converter/README.md) | Convert images, audio/video, and documents through verified local adapters. |
 
 ### 🖼️ Images
 | Tool | What it does |
 |---|---|
+| [**Image Enhancer**](tools/image_enhancer/README.md) | Local batch restoration, CLAHE, Wavelet de-gloss, skin-tone QA, creative grades, and optional micro-model rack (SPAN, SAFMN, RAMiT, SCUNet, NAFNet, DehazeFormer, CodeFormer, AnimeGANv2) — no ComfyUI or cloud. |
 | [**Image Rescale**](tools/image_rescale/README.md) | Batch-resize four ways (longest-side, megapixels, scale factor, fit-inside), with snap-to-grid, safe upscale gating, and optional local Real-ESRGAN AI upscale. |
-| [**Image Enhancer**](tools/image_enhancer/README.md) | Local batch restoration, subject/face-targeted detail, and small alpha-hole repair — no ComfyUI or cloud. |
-| [**Format Converter**](tools/format_converter/README.md) | Convert images, audio/video, and documents through verified local adapters. |
+| [**Metadata Scrubber**](tools/metadata_scrubber/README.md) | Batch remove EXIF, GPS coordinates, camera serials, and AI generation parameters/prompts from PNG, JPEG, and WebP. |
 | [**Pixel Art Converter**](tools/pixel_art/README.md) | Turn images into clean pixel art — chunky pixels, reduced palette, sharp alpha. |
 | [**To SVG**](tools/to_svg/README.md) | Vectorize raster images to SVG (vtracer). |
 | [**Icon Normalizer**](tools/icon_normalizer/README.md) | Trim, square-pad, and resize icons/sprites to a uniform canvas. |
@@ -85,7 +86,11 @@ bundled. Copy the folder anywhere; it's self-contained.
 ```
 KS ToolBox intentionally uses its dedicated `.venv`. The portable release
 already includes FFmpeg/ffprobe; source users may instead provide compatible
-binaries on `PATH`.
+## Optional AI Micro-Models
+
+While all 19 tools run 100% deterministically without neural models, KS ToolBox supports optional micro-models (1 MB – 48 MB) for AI super-resolution, background segmentation, face repair, and anime style transfer.
+
+See [**`MODELS.md`**](MODELS.md) for the complete list of supported models, direct download links, and one-click setup scripts.
 
 ## Build a portable release
 

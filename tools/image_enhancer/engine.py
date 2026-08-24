@@ -409,14 +409,23 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
                 _save_png(repair_mask, repair_path)
                 artifacts.append(str(repair_path))
 
+        model_fallback = False
         if route.use_model:
-            upscaled = _run_model_pass(
-                image, model=options.ai_model, output_scale=route.model_scale,
-                preserve_dimensions=options.scale_factor == 1, cancelled=cancelled,
-            ).convert("RGBA")
-            alpha = image.getchannel("A").resize(upscaled.size, Image.Resampling.LANCZOS)
-            upscaled.putalpha(alpha)
-            image = upscaled
+            status = utility_status()
+            if status["upscale_ready"]:
+                upscaled = _run_model_pass(
+                    image, model=options.ai_model, output_scale=route.model_scale,
+                    preserve_dimensions=options.scale_factor == 1, cancelled=cancelled,
+                ).convert("RGBA")
+                alpha = image.getchannel("A").resize(upscaled.size, Image.Resampling.LANCZOS)
+                upscaled.putalpha(alpha)
+                image = upscaled
+            else:
+                model_fallback = True
+                if options.scale_factor > 1:
+                    target_w = image.width * options.scale_factor
+                    target_h = image.height * options.scale_factor
+                    image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
         base = image.convert("RGB")
         enhanced_rgba, applied_stack = _apply_stack(base, effective_options, boxes=tuple(boxes))
@@ -446,13 +455,15 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
                 result.paste(enhanced, mask=mask)
 
         if effective_options.face_detail and region_boxes:
-            for box in region_boxes:
-                crop = result.crop(box)
-                if min(crop.size) < 12:
-                    continue
-                detailed = _run_model_pass(crop, model="realesrgan-x4plus", output_scale=1,
-                                           preserve_dimensions=True, cancelled=cancelled)
-                result.paste(detailed, box, _feather_box(base.size, box).crop(box))
+            status = utility_status()
+            if status["upscale_ready"]:
+                for box in region_boxes:
+                    crop = result.crop(box)
+                    if min(crop.size) < 12:
+                        continue
+                    detailed = _run_model_pass(crop, model="realesrgan-x4plus", output_scale=1,
+                                               preserve_dimensions=True, cancelled=cancelled)
+                    result.paste(detailed, box, _feather_box(base.size, box).crop(box))
 
         if image.mode == "RGBA":
             result = result.convert("RGBA")

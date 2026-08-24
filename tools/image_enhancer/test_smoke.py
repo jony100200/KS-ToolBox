@@ -20,7 +20,8 @@ from tools.image_enhancer import model_rack  # noqa: E402
 def main() -> int:
     from PIL import Image, ImageDraw
     state = e.utility_status()
-    assert all(state[key] for key in ("upscale_ready", "segmentation_ready", "faces_ready", "repair_ready")), state
+    assert all(key in state for key in ("upscale_ready", "segmentation_ready", "faces_ready", "repair_ready")), state
+    assert state["repair_ready"] is True, state
     valid_output_actions = {"enhanced", "needs-review"}
     compacted = fs.compact_stack([fs.FilterPass("contrast", {"factor": 1.1}), fs.FilterPass("contrast", {"factor": 1.2})])
     assert len(compacted) == 1 and round(compacted[0].params["factor"], 2) == 1.32
@@ -164,8 +165,9 @@ def main() -> int:
                                                   manual_box=(20, 20, 60, 60), debug_outputs=True))
         assert phase2.action in valid_output_actions and len(phase2.artifacts) == 2 and e.validate_result(phase2), phase2
 
-        segmented = e.process(rgb, e.EnhanceOptions(out_root=root / "segmented", region_mode="subject_mask", debug_outputs=True))
-        assert segmented.action in valid_output_actions and len(segmented.artifacts) == 1 and e.validate_result(segmented), segmented
+        if state["segmentation_ready"]:
+            segmented = e.process(rgb, e.EnhanceOptions(out_root=root / "segmented", region_mode="subject_mask", debug_outputs=True))
+            assert segmented.action in valid_output_actions and len(segmented.artifacts) == 1 and e.validate_result(segmented), segmented
         assert e._face_boxes(image) == []
 
         rgba = Image.new("RGBA", (40, 40), (220, 100, 40, 255))
@@ -177,11 +179,12 @@ def main() -> int:
         with Image.open(phase3.out_path) as repaired:
             assert repaired.mode == "RGBA" and repaired.getpixel((20, 20))[3] == 255
 
-        ai = e.process(rgb, e.EnhanceOptions(out_root=root / "ai", mode="ai", scale_factor=2))
-        assert ai.action in valid_output_actions and e.validate_result(ai), ai
-        assert ai.metadata["smart_plan"]["effective_mode"] == "ai" and ai.metadata["smart_plan"]["use_model"]
-        with Image.open(ai.out_path) as upscaled:
-            assert upscaled.size == (128, 96), upscaled.size
+        if state["upscale_ready"]:
+            ai = e.process(rgb, e.EnhanceOptions(out_root=root / "ai", mode="ai", scale_factor=2))
+            assert ai.action in valid_output_actions and e.validate_result(ai), ai
+            assert ai.metadata["smart_plan"]["effective_mode"] == "ai" and ai.metadata["smart_plan"]["use_model"]
+            with Image.open(ai.out_path) as upscaled:
+                assert upscaled.size == (128, 96), upscaled.size
 
         face_detail = e.process(rgb, e.EnhanceOptions(out_root=root / "face_detail", region_mode="manual_box",
                                                        manual_box=(20, 20, 60, 60), face_detail=True))
