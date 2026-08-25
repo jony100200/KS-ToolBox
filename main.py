@@ -30,6 +30,11 @@ def _set_stdlib_dll_directory() -> None:
 
 _set_stdlib_dll_directory()
 
+try:
+    import sqlite3  # noqa: F401  # Preload stdlib SQLite extension before plugins/UI modify process DLL state
+except Exception:
+    pass
+
 from toolbox.discovery import discover      # noqa: E402
 from toolbox.shell import ToolBoxShell       # noqa: E402
 
