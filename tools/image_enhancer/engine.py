@@ -16,11 +16,10 @@ from typing import Any, Callable
 
 import numpy as np
 
-from toolbox.engine_common import CommandCancelled, IMAGE_EXTS, run_cancellable_cmd
+from toolbox.engine_common import CommandCancelled, IMAGE_EXTS, bundled_models_dir, run_cancellable_cmd
 from . import filter_stack, smart
 
-_ROOT = Path(__file__).resolve().parents[2]
-_MODELS = _ROOT / "models"
+_MODELS = bundled_models_dir()
 _REAL_ESRGAN = _MODELS / "realesrgan-ncnn-20220424"
 _U2NETP = _MODELS / "u2netp.onnx"
 _YUNET = _MODELS / "face_detection_yunet_2023mar.onnx"

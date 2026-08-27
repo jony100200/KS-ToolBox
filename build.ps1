@@ -34,6 +34,30 @@ if (Test-Path $exe) {
     Copy-Item -LiteralPath $source -Destination (Join-Path $releaseBin $name) -Force
   }
 
+  Write-Host "`n=== bundling optional Real-ESRGAN NCNN AI-upscale runtime (if present) ==="
+  $esrganSrc = Join-Path $root "models\realesrgan-ncnn-20220424"
+  $esrganExe = Join-Path $esrganSrc "realesrgan-ncnn-vulkan.exe"
+  if (Test-Path $esrganExe) {
+    # Exe-adjacent, mirroring bin/ -- matches bundled_models_dir() in toolbox/engine_common.py,
+    # NOT the PyInstaller _internal/ staging dir (a frozen module's __file__ lives one level
+    # deeper than the exe, so models/ must sit beside "KS ToolBox.exe", not inside _internal/).
+    $esrganDest = Join-Path $root "dist\KS ToolBox\models\realesrgan-ncnn-20220424"
+    New-Item -ItemType Directory -Force -Path (Join-Path $esrganDest "models") | Out-Null
+    Copy-Item -LiteralPath $esrganExe -Destination $esrganDest -Force
+    foreach ($dll in @("vcomp140.dll", "vcomp140d.dll")) {
+      $dllSrc = Join-Path $esrganSrc $dll
+      if (Test-Path $dllSrc) { Copy-Item -LiteralPath $dllSrc -Destination $esrganDest -Force }
+    }
+    Copy-Item -Path (Join-Path $esrganSrc "models\*.bin") -Destination (Join-Path $esrganDest "models") -Force
+    Copy-Item -Path (Join-Path $esrganSrc "models\*.param") -Destination (Join-Path $esrganDest "models") -Force
+    New-Item -ItemType Directory -Force -Path (Join-Path $root "dist\KS ToolBox\licenses") | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root "licenses\RealESRGAN-NCNN-BSD-3-Clause.txt") `
+      -Destination (Join-Path $root "dist\KS ToolBox\licenses\RealESRGAN-NCNN-BSD-3-Clause.txt") -Force
+    Write-Host "Bundled Real-ESRGAN NCNN AI upscale runtime (models/realesrgan-ncnn-20220424)."
+  } else {
+    Write-Host "No models/realesrgan-ncnn-20220424 found in the source tree -- shipping without AI upscale (deterministic tools still work)."
+  }
+
   Write-Host "`n=== generating notices, dependency manifest, and SPDX SBOM ==="
   $previousPythonPath = $env:PYTHONPATH
   try {

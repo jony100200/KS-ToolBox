@@ -30,7 +30,9 @@ notices.
 | Segmentation model weights | Alpha Doctor optional AI path | Not shipped with the default portable build |
 | vtracer | To SVG | MIT |
 | markdown | Format Converter (docs) | BSD-3-Clause |
-| xhtml2pdf (+ reportlab, pypdf, html5lib) | Format Converter (→PDF) | Apache-2.0 |
+| xhtml2pdf (+ reportlab, pypdf, html5lib, pyHanko) | Format Converter (→PDF) | Apache-2.0 |
+| svglib | Format Converter (→PDF, via xhtml2pdf) | **LGPL-3.0-or-later** |
+| python-bidi | Format Converter (→PDF, via xhtml2pdf) | **LGPL** |
 | mammoth | Format Converter (DOCX) | BSD-2-Clause |
 | pypdfium2 (PDFium) | Format Converter (PDF) | Apache-2.0 / BSD-3-Clause |
 

@@ -197,11 +197,13 @@ def main() -> int:
         assert (cli_out / f"{rgb.stem}_enhanced.png").is_file()
         assert (cli_out / "_enhance_manifest.json").is_file()
 
-        # 6. Model Rack Catalog & Status test
+        # 6. Model Rack Catalog & Status test — only models engine.py actually
+        # loads belong here (yunet_face, u2netp_mask); see model_rack.py header.
         specs = model_rack.list_models()
-        assert len(specs) >= 8
+        assert len(specs) == 2
+        assert {s.id for s in specs} == {"yunet_face", "u2netp_mask"}
         rack_status = model_rack.get_rack_status()
-        assert rack_status["total"] >= 8
+        assert rack_status["total"] == 2
         assert all(s.download_url.startswith("http") for s in specs)
 
     print("PASS: Image Enhancer Auto-Enhance, CLAHE, Auto-WB, Despeckle, Privacy Censor & Blur, Creative Studio Ops, Wavelet De-Gloss, Model Rack, Phases 1-3, Real-ESRGAN, and Headless CLI.")

@@ -27,7 +27,7 @@ import warnings
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from toolbox.engine_common import CommandCancelled, IMAGE_EXTS, run_cancellable_cmd
+from toolbox.engine_common import CommandCancelled, IMAGE_EXTS, bundled_models_dir, run_cancellable_cmd
 MODES = ("longest_side", "max_mp", "scale_factor", "fit_inside")
 
 _AI_MODELS = {
@@ -101,7 +101,7 @@ def ai_runtime_status() -> dict[str, str | bool]:
     under the ignored ``models/`` cache, so this tool does not add PyTorch or a
     background model service to Toolbox startup.
     """
-    root = Path(__file__).resolve().parents[2] / "models" / _AI_BUNDLE_DIRNAME
+    root = bundled_models_dir() / _AI_BUNDLE_DIRNAME
     executable_name = "realesrgan-ncnn-vulkan.exe" if os.name == "nt" else "realesrgan-ncnn-vulkan"
     executable = root / executable_name
     models_dir = root / "models"

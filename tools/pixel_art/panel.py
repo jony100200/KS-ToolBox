@@ -1,6 +1,7 @@
 """Pixel Art Studio presentation layer with live Before/After split preview canvas and palette swatches."""
 from __future__ import annotations
 
+import csv
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -373,3 +374,44 @@ class PixelArtPanel(BaseBatchPanel):
         if item.data and {"src", "action", "reason"}.issubset(item.data):
             return e.Result(**item.data)
         return e.Result(item.input_path, "failed", item.details or "item quarantined")
+
+    def _write_manifest(self, opts: e.PixelOptions, results: list) -> str | None:
+        if opts.dry_run or not results or not opts.out_root:
+            return None
+        root = Path(opts.out_root)
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / "pixel_art_manifest.csv"
+        new = not path.exists()
+        with open(path, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["src", "action", "out_path", "detail", "reason"])
+            for r in results:
+                w.writerow([r.src, r.action, r.out_path, r.detail, r.reason])
+        return str(path)
+
+    def _show(self, res: e.Result, i: int, total: int):
+        self._progress.set(i / total)
+        icon = {"converted": "✓", "dry-run": "?", "failed": "✗"}.get(res.action, "•")
+        color = {"converted": t.STATE["done"][1], "failed": t.STATE["error"][1]}.get(res.action, t.TEXT_MUTED)
+        name = Path(res.src).name
+        extra = f"  → {res.out_path}" if res.out_path else f"  — {res.reason}"
+        self._logline(f"  {icon} {name}{extra}", color)
+
+    def _queue_complete(self, completion: QueueCompletion) -> None:
+        payload = self._consume_queue_completion(completion)
+        if payload is None:
+            return
+        results = payload.results
+        converted = sum(item.action == "converted" for item in results)
+        skipped = sum(item.action == "dry-run" for item in results)
+        failed = len(results) - converted - skipped
+
+        self._finish_queue_ui(
+            f"converted {converted} · previewed {skipped} · failed {failed}",
+            job_state=self._queue_completion_state(completion),
+            recovered=completion.report.recovered,
+            reused=completion.report.reused,
+            manifest=payload.manifest,
+            report_path=payload.report_path,
+        )

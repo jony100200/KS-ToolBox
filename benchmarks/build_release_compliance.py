@@ -452,10 +452,35 @@ def generate_release_compliance(
     elif require_ffmpeg:
         raise FileNotFoundError("portable release requires bundled ffmpeg and ffprobe")
 
+    # Real-ESRGAN NCNN — optional AI-upscale runtime. Unlike ffmpeg it is never
+    # required (deterministic tools work without it), so its absence is not an
+    # error; presence must still be audited and hashed like every other binary.
+    realesrgan_dir = dist / "models" / "realesrgan-ncnn-20220424"
+    realesrgan_exe = realesrgan_dir / (
+        "realesrgan-ncnn-vulkan.exe" if os.name == "nt" else "realesrgan-ncnn-vulkan"
+    )
+    realesrgan_bundled = realesrgan_exe.is_file()
+    if realesrgan_bundled:
+        realesrgan_license = ROOT / "licenses" / "RealESRGAN-NCNN-BSD-3-Clause.txt"
+        if not realesrgan_license.is_file():
+            raise FileNotFoundError(f"Real-ESRGAN NCNN license notice missing: {realesrgan_license}")
+        _atomic_copy(realesrgan_license, licenses_dir / "RealESRGAN-NCNN-BSD-3-Clause.txt")
+        components.append(
+            _component(
+                "Real-ESRGAN NCNN Vulkan (AI upscale runtime, optional)",
+                "20220424",
+                "BSD-3-Clause",
+                source_required=True,
+                download="https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0",
+            )
+        )
+
     files = []
     evidence_files = [app_binary]
     if ffmpeg.is_file():
         evidence_files.extend((ffmpeg, ffprobe))
+    if realesrgan_bundled:
+        evidence_files.append(realesrgan_exe)
     font = next(
         iter((dist / "_internal" / "assets").rglob("fa-solid-900.ttf")),
         None,

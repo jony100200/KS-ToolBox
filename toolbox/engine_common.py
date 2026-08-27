@@ -122,6 +122,17 @@ def bundled_bin_dir() -> Path | None:
     return next((c for c in candidates if c.is_dir()), None)
 
 
+def bundled_models_dir() -> Path:
+    """The `models/` folder shipped/placed beside the app (NCNN binaries, ONNX
+    weights). Same exe-adjacent convention as bundled_bin_dir() — frozen builds
+    must not resolve this via Path(__file__).parents[N], since a frozen module's
+    __file__ lives under _internal/, one level below the exe's own folder."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "models"
+    # toolbox/engine_common.py -> parent.parent = repo root
+    return Path(__file__).resolve().parent.parent / "models"
+
+
 def resolve_tool(name: str) -> str | None:
     """Resolve an external binary: bundled bin/ first (portable), then PATH.
     None if absent (caller degrades)."""
