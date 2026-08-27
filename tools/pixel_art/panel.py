@@ -106,12 +106,13 @@ class PixelArtPanel(BaseBatchPanel):
         self._split_slider.pack(side="right", padx=(0, 8))
 
         self._canvas_width = 720
-        self._canvas_height = 200
+        self._canvas_height = 460
         self._canvas = ctk.CTkCanvas(
             preview_frame, width=self._canvas_width, height=self._canvas_height,
             bg=t.BG_COLOR, highlightthickness=0
         )
         self._canvas.pack(fill="x", padx=10, pady=(2, 8))
+        self._canvas.bind("<Configure>", self._on_canvas_resized)
         self._draw_placeholder()
 
         # Row 3: Studio Sliders & Controls
@@ -212,6 +213,15 @@ class PixelArtPanel(BaseBatchPanel):
             text="📷 Drop or select an image from the queue to view live Pixel Art split preview",
             fill=t.TEXT_MUTED, font=t.font(11)
         )
+
+    def _on_canvas_resized(self, event):
+        if abs(event.width - self._canvas_width) < 4:
+            return
+        self._canvas_width = event.width
+        if self._preview_image_thumb is None:
+            self._draw_placeholder()
+        else:
+            self._render_split_preview()
 
     def _on_split_changed(self, val):
         self._split_pos = float(val)
@@ -332,9 +342,21 @@ class PixelArtPanel(BaseBatchPanel):
             dry_run=bool(self._dry.get())
         )
 
-    def _on_files_dropped_or_selected(self, files: list[Path]):
-        if files:
-            self.set_active_preview_image(files[0])
+    def _add(self, paths: list[Path]):
+        """Populate the live preview from the first added file immediately, so
+        there's something to look at before Convert Selected is ever clicked —
+        previously it only appeared as a side effect of actually running a job."""
+        super()._add(paths)
+        if self._files and self._preview_image_thumb is None:
+            self.set_active_preview_image(self._files[0])
+
+    def _clear(self):
+        super()._clear()
+        self._preview_image_orig = None
+        self._preview_image_thumb = None
+        if hasattr(self, "_preview_pixelized_thumb"):
+            del self._preview_pixelized_thumb
+        self._draw_placeholder()
 
     def _build_submission(self, files: list[Path], opts: e.PixelOptions) -> QueueSubmission:
         if files and self._preview_image_orig is None:

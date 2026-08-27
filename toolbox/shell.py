@@ -5,6 +5,7 @@ does not know how any tool processes files.
 """
 from __future__ import annotations
 
+import importlib
 import sys
 import os
 import subprocess
@@ -196,6 +197,10 @@ class ToolBoxShell(ctk.CTk):
         c.secondary_button(
             bar, "Restart ToolBox", self._restart, width=196
         ).pack(side="bottom", padx=12, pady=(0, 10))
+        self._free_models_btn = c.ghost_button(
+            bar, "Free AI Models (RAM)", self._free_models, width=196
+        )
+        self._free_models_btn.pack(side="bottom", padx=12, pady=(0, 4))
 
     def _add_nav(
         self, view_id: str, label: str, command
@@ -454,6 +459,21 @@ class ToolBoxShell(ctk.CTk):
         suffix = f"  ·  {active}" if active else ""
         self._queue_button.configure(text=f"Queue{suffix}")
         self._queue_poll = self.after(250, self._poll_queue_button)
+
+    def _free_models(self) -> None:
+        """Drop cached in-process AI sessions (onnxruntime/YuNet) so their RAM
+        goes back to the OS. Real-ESRGAN runs as its own subprocess per call and
+        holds nothing resident here, so there is nothing to free for it."""
+        freed = 0
+        for module_name in ("tools.image_enhancer.engine", "tools.alpha_doctor.engine"):
+            try:
+                module = importlib.import_module(module_name)
+                freed += module.unload_models()
+            except Exception:  # noqa: BLE001 - a missing/broken engine module must not crash the shell
+                pass
+        original = "Free AI Models (RAM)"
+        self._free_models_btn.configure(text=f"Freed {freed} model(s)" if freed else "Nothing loaded")
+        self.after(1800, lambda: self._free_models_btn.configure(text=original))
 
     def _restart(self) -> None:
         active = sum(

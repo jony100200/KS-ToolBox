@@ -22,6 +22,7 @@ class QueuePanel(ctk.CTkFrame):
     def __init__(self, parent, queue: JobQueue):
         super().__init__(parent, fg_color=t.BG_COLOR)
         self._queue = queue
+        self._last_fingerprint: tuple | None = None
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._build_header()
@@ -38,6 +39,7 @@ class QueuePanel(ctk.CTkFrame):
                                      font=t.font(12, bold=True))
         self._summary.pack(side="left")
         c.secondary_button(row, "Refresh history", self.refresh, width=130).pack(side="right")
+        c.ghost_button(row, "Clear finished", self._clear_finished, width=110).pack(side="right", padx=(0, 8))
         self._hint = ctk.CTkLabel(card.body,
                                   text="Jobs run one at a time to protect responsiveness and external-tool throughput.",
                                   text_color=t.TEXT_MUTED, font=t.font(10))
@@ -51,22 +53,37 @@ class QueuePanel(ctk.CTkFrame):
             )
         except Exception as ex:  # noqa: BLE001 - visible degraded history
             self._hint.configure(text=f"History unavailable: {type(ex).__name__}: {ex}")
-        self._render()
+        self._render(force=True)
         if not getattr(self, "_poll_started", False):
             self._poll_started = True
             self._poll_job = self.after(250, self._poll)
+
+    def _clear_finished(self) -> None:
+        self._queue.clear_finished()
+        self._render(force=True)
 
     def _poll(self) -> None:
         if self.winfo_exists():
             self._render()
             self._poll_job = self.after(250, self._poll)
 
-    def _render(self) -> None:
+    def _fingerprint(self, history: list[QueueSnapshot]) -> tuple:
+        return tuple(
+            (s.job_id, s.state, s.completed_items, s.total_items, s.detail)
+            for s in history[:100]
+        )
+
+    def _render(self, *, force: bool = False) -> None:
         if not self.winfo_exists():
             return
+        history = self._queue.history()
+        fingerprint = self._fingerprint(history)
+        if not force and fingerprint == self._last_fingerprint:
+            return  # nothing actually changed — rebuilding every 250ms just makes the list blink
+        self._last_fingerprint = fingerprint
+
         for child in self._list.winfo_children():
             child.destroy()
-        history = self._queue.history()
         active = sum(item.state in _ACTIVE for item in history)
         completed = sum(item.state in {JobState.COMPLETED, JobState.COMPLETED_WITH_WARNINGS} for item in history)
         failed = sum(item.state is JobState.FAILED for item in history)

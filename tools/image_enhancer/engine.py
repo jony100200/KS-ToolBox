@@ -36,6 +36,17 @@ _FACE_DETECTORS: dict[tuple[int, int], object] = {}
 Cancelled = Callable[[], bool] | None
 
 
+def unload_models() -> int:
+    """Drop cached onnxruntime/YuNet sessions so the process can free their
+    memory. Real-ESRGAN runs as its own subprocess per call and is never
+    resident here, so there is nothing to release for it. Returns how many
+    cached sessions were dropped."""
+    n = len(_SESSIONS) + len(_FACE_DETECTORS)
+    _SESSIONS.clear()
+    _FACE_DETECTORS.clear()
+    return n
+
+
 @dataclass
 class EnhanceOptions:
     out_root: Path | None = None

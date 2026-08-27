@@ -193,6 +193,25 @@ class JobQueue:
         with self._lock:
             return self._completions.get(job_id)
 
+    def clear_finished(self) -> int:
+        """Drop terminal entries from the visible history — never active work.
+        This only clears the in-memory view for this session; the durable
+        completion reports on disk are untouched, so a later explicit
+        `load_persisted_history()` (what "Refresh history" does) can still
+        pull them back. That's refresh doing what it says, not this undoing
+        itself."""
+        terminal = {
+            JobState.COMPLETED, JobState.COMPLETED_WITH_WARNINGS,
+            JobState.FAILED, JobState.CANCELLED, JobState.RECOVERED,
+        }
+        with self._lock:
+            done_ids = [jid for jid, snap in self._snapshots.items() if snap.state in terminal]
+            for jid in done_ids:
+                self._snapshots.pop(jid, None)
+                self._completions.pop(jid, None)
+                self._tokens.pop(jid, None)
+            return len(done_ids)
+
     def load_persisted_history(self, limit: int = 100) -> list[QueueSnapshot]:
         """Load database history on demand; startup never opens SQLite."""
         with self._store_factory() as store:

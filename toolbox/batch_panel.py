@@ -7,6 +7,8 @@ only as a rollback seam. Current production batch tools submit to the shell queu
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import threading
 from typing import TYPE_CHECKING
 from pathlib import Path
@@ -126,6 +128,7 @@ class BaseBatchPanel(ctk.CTkFrame):
         pick = ctk.CTkFrame(outrow, fg_color="transparent"); pick.pack(fill="x", pady=(2, 0))
         self._out_entry = c.entry(pick); self._out_entry.pack(side="left", fill="x", expand=True)
         c.secondary_button(pick, "Browse", self._pick_output, width=90).pack(side="left", padx=(8, 0))
+        c.secondary_button(pick, "Open", self._open_output_folder, width=70).pack(side="left", padx=(8, 0))
 
     # --- results card ---------------------------------------------------------
 
@@ -390,6 +393,28 @@ class BaseBatchPanel(ctk.CTkFrame):
         d = filedialog.askdirectory(title="Choose output folder")
         if d:
             self._out_entry.delete(0, "end"); self._out_entry.insert(0, d)
+
+    def _open_output_folder(self):
+        """Jump to the output in Explorer/Finder. An explicit output folder wins;
+        otherwise (blank = beside each source) the best available stand-in is the
+        common source folder, since that's where a beside-source subfolder lands."""
+        target = self._out_entry.get().strip()
+        path = Path(target) if target else self._resolve_input_root()
+        if path is None:
+            self._logline("No output folder yet — add files or set an output folder first.", t.TEXT_MUTED)
+            return
+        if not path.is_dir():
+            self._logline(f"Folder doesn't exist yet: {path}", t.TEXT_MUTED)
+            return
+        try:
+            if os.name == "nt":
+                os.startfile(str(path))  # noqa: S606 - user-initiated folder open
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(path)], check=False)
+            else:
+                subprocess.run(["xdg-open", str(path)], check=False)
+        except OSError as ex:
+            self._logline(f"couldn't open folder: {ex}", t.STATE["error"][1])
 
     def _resolve_input_root(self) -> Path | None:
         """Common ancestor of all source folders for mirror mode."""

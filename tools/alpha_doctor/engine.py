@@ -63,6 +63,14 @@ _MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 _SESSIONS: dict[str, Any] = {}
 _VERIFIED_MODELS: dict[str, tuple[int, int, str]] = {}
+
+
+def unload_models() -> int:
+    """Drop cached onnxruntime sessions (the optional u2net AI method) so the
+    process can free their memory. Returns how many were dropped."""
+    n = len(_SESSIONS)
+    _SESSIONS.clear()
+    return n
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _MAX_COLOR_DISTANCE = math.sqrt(3 * 255 * 255)
 _MAX_MODEL_BYTES = 512 * 1024 * 1024
