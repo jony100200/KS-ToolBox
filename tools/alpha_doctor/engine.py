@@ -41,6 +41,7 @@ import numpy as np
 from toolbox.engine_common import (
     IMAGE_EXTS,
     CommandCancelled,
+    bundled_models_dir,
     find_output_collisions as _find_output_collisions,
     sha256_file,
     ok as _ok,
@@ -152,14 +153,7 @@ def matte(
 # --- optional AI matte --------------------------------------------------------
 
 def _model_dirs() -> list[Path]:
-    dirs: list[Path] = []
-    if getattr(sys, "frozen", False):
-        dirs.append(Path(sys.executable).parent / "models")
-    else:
-        # Keep source-worktree models off the system drive.  A bundled app uses
-        # the executable-adjacent directory above; a normal installed app still
-        # falls back to its user cache below.
-        dirs.append(Path(__file__).resolve().parents[2] / "models")
+    dirs: list[Path] = [bundled_models_dir()]
     dirs.append(Path.home() / ".u2net")
     dirs.append(Path.home() / ".cache" / "kstoolbox" / "models")
     return dirs
@@ -177,9 +171,9 @@ def cached_model_path(model: str) -> Path | None:
 
 
 def _download_model_path(model: str) -> Path:
-    if not getattr(sys, "frozen", False):
-        return Path(__file__).resolve().parents[2] / "models" / f"{model}.onnx"
-    return Path.home() / ".u2net" / f"{model}.onnx"
+    target = bundled_models_dir() / f"{model}.onnx"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 def _md5(path: Path, cancelled: Cancelled = None) -> str:

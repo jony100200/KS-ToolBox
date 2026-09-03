@@ -90,24 +90,32 @@ class Card(ctk.CTkFrame):
 
 
 def primary_button(parent, text: str, command: Callable, **kw) -> ctk.CTkButton:
+    height = kw.pop("height", 32)
+    font = kw.pop("font", t.font(12, bold=True))
     return ctk.CTkButton(parent, text=text, command=command, fg_color=t.ACCENT_BLUE,
-                         hover_color=t.ACCENT_HOVER, height=32, font=t.font(12, bold=True), **kw)
+                         hover_color=t.ACCENT_HOVER, height=height, font=font, **kw)
 
 
 def secondary_button(parent, text: str, command: Callable, **kw) -> ctk.CTkButton:
+    height = kw.pop("height", 32)
+    font = kw.pop("font", t.font(12))
     return ctk.CTkButton(parent, text=text, command=command, fg_color=t.CARD_BORDER,
-                         hover_color=t.NEUTRAL_HOVER, height=32, font=t.font(12), **kw)
+                         hover_color=t.NEUTRAL_HOVER, height=height, font=font, **kw)
 
 
 def ghost_button(parent, text: str, command: Callable, **kw) -> ctk.CTkButton:
+    height = kw.pop("height", 32)
+    font = kw.pop("font", t.font(12))
     return ctk.CTkButton(parent, text=text, command=command, fg_color="transparent",
                          border_color=t.CARD_BORDER, border_width=1, hover_color=t.NEUTRAL_HOVER,
-                         height=32, font=t.font(12), **kw)
+                         height=height, font=font, **kw)
 
 
 def danger_button(parent, text: str, command: Callable, **kw) -> ctk.CTkButton:
+    height = kw.pop("height", 32)
+    font = kw.pop("font", t.font(12, bold=True))
     return ctk.CTkButton(parent, text=text, command=command, fg_color=t.DANGER,
-                         hover_color=t.DANGER_HOVER, height=32, font=t.font(12, bold=True), **kw)
+                         hover_color=t.DANGER_HOVER, height=height, font=font, **kw)
 
 
 class Pill(ctk.CTkLabel):

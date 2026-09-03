@@ -3,8 +3,10 @@
 > **Deterministic-First Principle:**
 > KS ToolBox runs **100% offline out-of-the-box**. All 20 tools work without any neural models using high-performance mathematical filters, Pillow, NumPy, and bundled FFmpeg.
 >
-> **1-Click In-App Download:**
-> You can download the recommended micro-models (`face_detection_yunet_2023mar.onnx` and `u2netp.onnx`, ~4.8 MB total) directly in KS ToolBox with one click: click the **Download AI Models** button in the sidebar (directly above *Free AI Models (RAM)*).
+> **1-Click In-App Download & Auto-Organization:**
+> You can download and organize the optional micro-models directly in KS ToolBox with one click: click the **Download AI Models** button in the sidebar (directly above *Free AI Models (RAM)*).
+> 
+> KS ToolBox automatically detects its root installation directory—whether you run it from `C:`, `D:`, `E:`, or an external drive—creates the `models/` folder at the root if needed, downloads the weights directly into it, and organizes them automatically.
 >
 > The neural models listed below are **optional micro-cartridges** that provide AI-assisted super-resolution, background segmentation, and face detection. Only models actually wired into a tool's processing code are listed here — see "Verifying Model Readiness" below for how to check.
 
@@ -12,11 +14,13 @@
 
 ## Quick Setup: Where to Place Models
 
-Place downloaded model weights directly into the `models/` directory in the root of KS ToolBox (next to `main.py` when running from source; next to `KS ToolBox.exe` in a portable install):
+When using the in-app **Download AI Models** dialog, models are downloaded and organized automatically into `models/` at the root of your KS ToolBox installation.
+
+If downloading manually, place the model weights directly into the `models/` directory in the root of KS ToolBox (next to `main.py` when running from source; next to `KS ToolBox.exe` in a portable install on any drive):
 
 ```text
-KS-ToolBox/
-├── main.py
+KS-ToolBox/                              <--- Your KS ToolBox folder (C:, D:, E:, etc.)
+├── main.py (or KS ToolBox.exe)
 ├── models/                              <--- Put .onnx files and the NCNN bundle here
 │   ├── face_detection_yunet_2023mar.onnx
 │   ├── u2netp.onnx
