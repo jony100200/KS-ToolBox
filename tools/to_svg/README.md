@@ -56,7 +56,7 @@ existing valid destination.
 Run the smoke test in an ephemeral uv overlay (does not touch the app venv):
 
 ```
-$env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; uv run --no-project --python 3.12 --with vtracer --with pillow python -m tools.to_svg.test_smoke
+$env:PYTHONPATH="."; uv run --no-project --python 3.12 --with vtracer --with pillow python -m tools.to_svg.test_smoke
 ```
 
 Deterministic stub checks always run: strict options, collision detection,

@@ -6,9 +6,11 @@ does not know how any tool processes files.
 from __future__ import annotations
 
 import importlib
-import sys
 import os
 import subprocess
+import sys
+import threading
+import urllib.request
 from pathlib import Path
 from tkinter import messagebox
 
@@ -28,6 +30,7 @@ from toolbox.catalog import (
 )
 from toolbox.catalog_panel import CategoryPanel, DashboardPanel, SearchResultsPanel
 from toolbox.tool import Tool, ToolRegistry
+from toolbox.engine_common import bundled_models_dir
 
 
 def _asset(name: str) -> Path:
@@ -201,6 +204,10 @@ class ToolBoxShell(ctk.CTk):
             bar, "Free AI Models (RAM)", self._free_models, width=196
         )
         self._free_models_btn.pack(side="bottom", padx=12, pady=(0, 4))
+        self._download_models_btn = c.secondary_button(
+            bar, "Download AI Models", self._download_models, width=196
+        )
+        self._download_models_btn.pack(side="bottom", padx=12, pady=(0, 4))
 
     def _add_nav(
         self, view_id: str, label: str, command
@@ -474,6 +481,108 @@ class ToolBoxShell(ctk.CTk):
         original = "Free AI Models (RAM)"
         self._free_models_btn.configure(text=f"Freed {freed} model(s)" if freed else "Nothing loaded")
         self.after(1800, lambda: self._free_models_btn.configure(text=original))
+
+    def _download_models(self) -> None:
+        """One-click download for recommended AI micro-models (YuNet + U2NetP)."""
+        models_dir = bundled_models_dir()
+        models_dir.mkdir(parents=True, exist_ok=True)
+
+        specs = [
+            (
+                "face_detection_yunet_2023mar.onnx",
+                "https://github.com/opencv/opencv_zoo/raw/master/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+                "YuNet Face Detector (232 KB)",
+            ),
+            (
+                "u2netp.onnx",
+                "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx",
+                "U2NetP Subject Mask (4.57 MB)",
+            ),
+        ]
+
+        missing = [
+            (fname, url, desc)
+            for fname, url, desc in specs
+            if not (models_dir / fname).is_file()
+        ]
+
+        if not missing:
+            installed_list = "\n".join(
+                f"• {desc} - Installed" for _, _, desc in specs
+            )
+            messagebox.showinfo(
+                "AI Models Ready",
+                f"All recommended AI micro-models are already installed in:\n{models_dir}\n\n"
+                f"{installed_list}\n\n"
+                "Image Enhancer and Alpha Doctor can use these models immediately.",
+                parent=self,
+            )
+            return
+
+        missing_list = "\n".join(f"• {desc}" for _, _, desc in missing)
+        prompt = (
+            f"Download recommended AI micro-models (~4.8 MB total)?\n\n"
+            f"{missing_list}\n\n"
+            f"Target directory: {models_dir}\n\n"
+            "This enables smart face detection & portrait repair (Image Enhancer) "
+            "and AI background segmentation (Alpha Doctor)."
+        )
+        if not messagebox.askyesno("Download AI Models (1-Click)", prompt, parent=self):
+            return
+
+        self._download_models_btn.configure(state="disabled", text="Connecting...")
+
+        def _worker() -> None:
+            block_size = 64 * 1024
+            errors = []
+            for fname, url, desc in missing:
+                dest = models_dir / fname
+                temp_dest = models_dir / f"{fname}.part"
+                short_name = desc.split()[0]
+                self.after(0, lambda sn=short_name: self._download_models_btn.configure(text=f"Downloading {sn}..."))
+                try:
+                    req = urllib.request.Request(
+                        url,
+                        headers={"User-Agent": "KS-ToolBox/1.0"}
+                    )
+                    with urllib.request.urlopen(req, timeout=30) as resp, open(temp_dest, "wb") as f:
+                        while True:
+                            chunk = resp.read(block_size)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                    temp_dest.replace(dest)
+                except Exception as ex:
+                    temp_dest.unlink(missing_ok=True)
+                    errors.append(f"{fname}: {ex}")
+
+            if errors:
+                self.after(0, self._on_download_models_failed, "\n".join(errors))
+            else:
+                self.after(0, self._on_download_models_success, models_dir)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_download_models_success(self, models_dir: Path) -> None:
+        self._download_models_btn.configure(state="normal", text="Models Ready!")
+        self.after(2500, lambda: self._download_models_btn.configure(text="Download AI Models"))
+        messagebox.showinfo(
+            "Download Complete",
+            f"All recommended AI micro-models were successfully installed into:\n{models_dir}\n\n"
+            "• YuNet Face Detector: Ready\n"
+            "• U2NetP Subject Mask: Ready\n\n"
+            "Face detection and AI background segmentation are now active.",
+            parent=self,
+        )
+
+    def _on_download_models_failed(self, err_msg: str) -> None:
+        self._download_models_btn.configure(state="normal", text="Download Failed")
+        self.after(2500, lambda: self._download_models_btn.configure(text="Download AI Models"))
+        messagebox.showerror(
+            "Download Failed",
+            f"Failed to download micro-models:\n\n{err_msg}\n\nPlease check your internet connection.",
+            parent=self,
+        )
 
     def _restart(self) -> None:
         active = sum(

@@ -85,7 +85,7 @@ defined ceiling.
 ## Verify
 
 ```
-$env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; H:\Apps\scoop\shims\uv.exe run --no-project --python 3.12 --with customtkinter --with pillow python -m tools.dataset_manager.test_smoke
+$env:PYTHONPATH="."; uv run --no-project --python 3.12 --with customtkinter --with pillow python -m tools.dataset_manager.test_smoke
 ```
 
 The smoke test proves pairing/bucketing/split/replace math, then runs a real

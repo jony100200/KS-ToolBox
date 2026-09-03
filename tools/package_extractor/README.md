@@ -76,7 +76,7 @@ changed, or corrupt outputs are never accepted as a completed extraction.
 ## Verify
 
 ```powershell
-$env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; H:\Apps\scoop\shims\uv.exe run --no-project --python 3.12 --with customtkinter python -m tools.package_extractor.test_smoke
+$env:PYTHONPATH="."; uv run --no-project --python 3.12 --with customtkinter python -m tools.package_extractor.test_smoke
 ```
 
 The smoke test builds a real zip with a `../evil.txt` traversal entry, a minimal

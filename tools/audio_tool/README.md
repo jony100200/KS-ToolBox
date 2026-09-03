@@ -56,7 +56,7 @@ card shows a missing-tools hint) rather than failing silently.
 ## Verify
 
 ```
-$env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; uv run --no-project --python 3.12 --with customtkinter python -m tools.audio_tool.test_smoke
+$env:PYTHONPATH="."; uv run --no-project --python 3.12 --with customtkinter python -m tools.audio_tool.test_smoke
 ```
 
 The pure leg always runs (filter-chain + codec/muxer maps). The ffmpeg leg

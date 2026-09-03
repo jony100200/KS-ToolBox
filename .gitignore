@@ -44,3 +44,20 @@ tools/image_enhancer/engine.py.bak_pre_x2
 bin/ffmpeg.exe
 bin/ffprobe.exe
 /_reports
+
+# Internal process, agent charters, and engineering standards
+AGENTS.md
+KS_ENGINEERING_STANDARD.md
+OptimizePrompt.txt
+
+# Internal research, architecture, and developer-only documentation
+docs/
+tools/*/REFERENCES.md
+
+# Tests and benchmarks (developer-only)
+tests/
+benchmarks/
+test_smoke.py
+tools/*/test_smoke.py
+run_compress_courses.py
+

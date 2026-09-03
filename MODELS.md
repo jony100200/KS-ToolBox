@@ -1,7 +1,10 @@
 # KS ToolBox — Micro-Model Directory & Weights Guide
 
 > **Deterministic-First Principle:**
-> KS ToolBox runs **100% offline out-of-the-box**. All 19 tools work without any neural models using high-performance mathematical filters, Pillow, NumPy, and bundled FFmpeg.
+> KS ToolBox runs **100% offline out-of-the-box**. All 20 tools work without any neural models using high-performance mathematical filters, Pillow, NumPy, and bundled FFmpeg.
+>
+> **1-Click In-App Download:**
+> You can download the recommended micro-models (`face_detection_yunet_2023mar.onnx` and `u2netp.onnx`, ~4.8 MB total) directly in KS ToolBox with one click: click the **Download AI Models** button in the sidebar (directly above *Free AI Models (RAM)*).
 >
 > The neural models listed below are **optional micro-cartridges** that provide AI-assisted super-resolution, background segmentation, and face detection. Only models actually wired into a tool's processing code are listed here — see "Verifying Model Readiness" below for how to check.
 

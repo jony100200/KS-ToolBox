@@ -5,7 +5,7 @@ Maker** (`.ptex`) projects by driving their external command-line tools. A KS
 ToolBox plugin.
 
 Ported from the standalone *Universal Texture Batch Renderer*
-(`M:\KS Apps\UniversalBatchRenderer`) — behavior preserved, engine made pure and
+(UniversalBatchRenderer) — behavior preserved, engine made pure and
 cross-platform, anti-patterns fixed (see below).
 
 ## What it does
@@ -97,7 +97,7 @@ cache.
 ## Verify
 
 ```powershell
-$env:PYTHONPATH="D:\KSAppDev\KS-ToolBox"; H:\Apps\scoop\shims\uv.exe run --no-project --python 3.12 --with customtkinter --with pillow python -m tools.texture_renderer.test_smoke
+$env:PYTHONPATH="."; uv run --no-project --python 3.12 --with customtkinter --with pillow python -m tools.texture_renderer.test_smoke
 ```
 
 The smoke test covers discovery, resolution mapping, argv building, engine

@@ -16,9 +16,7 @@ keep the interface calm as the catalog grows. Its **19 batch workflows** share
 preview, safe output, durable queue/recovery, validation, manifests, and
 completion reports. Sprite Viewer keeps a purpose-built interactive screen.
 The app is **deterministic-first**: optional local utility models are lazy and
-never load at startup. The latest recorded warm-start evidence is in
-[`docs/PERFORMANCE_BUDGETS.md`](docs/PERFORMANCE_BUDGETS.md); it is a regression
-baseline, not a hardware guarantee.
+never load at startup.
 
 ## Start here
 
@@ -84,13 +82,15 @@ bundled. Copy the folder anywhere; it's self-contained.
 .\.venv\Scripts\python.exe -m pip install -r requirements-optional.txt # optional tool features
 .\.venv\Scripts\python.exe main.py
 ```
-KS ToolBox intentionally uses its dedicated `.venv`. The portable release
-already includes FFmpeg/ffprobe; source users may instead provide compatible
+KS ToolBox uses its dedicated `.venv`. The portable release bundles FFmpeg/ffprobe; source users can provide binaries on PATH or in `bin/`.
+
 ## Optional AI Micro-Models
 
-While all 19 tools run 100% deterministically without neural models, KS ToolBox supports optional micro-models (1 MB – 48 MB) for AI super-resolution, background segmentation, face repair, and anime style transfer.
+While all tools run 100% deterministically without neural models, KS ToolBox supports optional micro-models for AI super-resolution, background segmentation, and face detection.
 
-See [**`MODELS.md`**](MODELS.md) for the complete list of supported models, direct download links, and one-click setup scripts.
+**1-Click In-App Download:** You can download the recommended micro-models (~4.8 MB total: YuNet Face Detector + U2NetP Subject Mask) directly inside the app with a single click using the **Download AI Models** button in the sidebar (located directly above the *Free AI Models (RAM)* button).
+
+See [**`MODELS.md`**](MODELS.md) for the complete list of supported models, direct download links, and manual setup instructions.
 
 ## Build a portable release
 
@@ -113,9 +113,8 @@ licence texts, binary hashes, and FFmpeg build/source evidence.
 - **Lazy & portable.** A tool's heavy dependency loads only when you open it; a
   missing one is announced in-panel, never a startup failure.
 
-See the [documentation map](docs/README.md) for operator, contributor, runtime,
-recovery, and historical-reference material. Reproducible checks (including
-`run_all_smoke.py`) live in [`benchmarks/`](benchmarks/).
+See each tool's guide in [**Tools**](#tools) above for specific options,
+supported formats, and settings.
 
 ## Add a tool
 

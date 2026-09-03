@@ -4,8 +4,6 @@ KS ToolBox is **one UI shell, many single-purpose batch tools**. Each tool is a
 self-contained, auto-discovered plugin folder. Adding a tool means **dropping a
 folder in `tools/`** — no edits to the shell, `main.py`, or any other tool.
 
-If you're an AI coding agent, read `AGENTS.md` first — it's the authoritative
-contract. This file is the human-friendly summary.
 
 ## The architecture in one breath
 
@@ -46,8 +44,8 @@ tools/<name>/      one tool, end to end
 6. **No tool ships unverified.** `test_smoke.py` must boot the tool with default
    config and produce a valid output on a real sample. If it needs an uninstalled
    dep, it **skips cleanly** (prints SKIP, returns 0) — it never fails for a
-   missing optional dependency. Update the tool README and any affected current
-   document in `docs/` in the same change; historical records stay dated.
+    missing optional dependency. Update the tool's README.md with supported
+    formats, controls, and options.
 
 ## Writing a file-batch tool the easy way
 
