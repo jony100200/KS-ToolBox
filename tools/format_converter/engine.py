@@ -590,6 +590,92 @@ def _pdf_to_text(src: Path, dst: Path, opts: ConvertOptions, cancelled=None) -> 
     return ok()
 
 
+_SECTION_RE = re.compile(
+    r"^(?:(\d+(?:\.\d+)*)\s+)?(Abstract|Introduction|Related Work|Background|Method|Methodology|Overview|Architecture|Framework|Experiments|Results|Ablation Studies|Discussion|Conclusion|Limitations|Future Work|Broader Impact|Ethics Statement|References|Appendix)\b",
+    re.IGNORECASE,
+)
+
+
+def _pdf_to_md(src: Path, dst: Path, opts: ConvertOptions, cancelled=None) -> dict:
+    """Extract PDF pages to clean, structured GitHub Flavored Markdown."""
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return err("dep.missing", "PDF→markdown needs 'pypdfium2' — pip install pypdfium2")
+    pdf = None
+    tmp = _tmp_for(dst)
+    try:
+        _cancelled(cancelled, "pdf-open", src)
+        pdf = pdfium.PdfDocument(str(src))
+        total_pages = len(pdf)
+        if total_pages > _MAX_PDF_PAGES:
+            return err(
+                "resource.limit",
+                f"PDF has {total_pages} pages; maximum supported per job is {_MAX_PDF_PAGES}",
+            )
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        filename_clean = src.stem
+        title_match = re.match(r"^\d+_(.+)$", filename_clean)
+        paper_title = title_match.group(1).replace("_", " ") if title_match else filename_clean.replace("_", " ")
+
+        with tmp.open("w", encoding="utf-8", newline="\n") as output:
+            output.write(f"# {paper_title}\n\n")
+            output.write(f"> **Source File**: `{src.name}`  \n")
+            output.write(f"> **Total Pages**: {total_pages}  \n")
+            output.write(f"> **Extracted via**: KS ToolBox Format Converter (pypdfium2)\n\n---\n")
+
+            for i in range(total_pages):
+                _cancelled(cancelled, "pdf-md", src)
+                page = pdf[i]
+                textpage = None
+                try:
+                    textpage = page.get_textpage()
+                    page_text = textpage.get_text_range()
+                finally:
+                    if textpage is not None:
+                        textpage.close()
+                    page.close()
+
+                page_text = page_text.replace("\x00", "").replace("\ufffe", "")
+                page_text = re.sub(r"(\b[a-zA-Z]{2,})-\n([a-zA-Z]{2,}\b)", r"\1\2", page_text)
+
+                output.write(f"\n<!-- Page {i + 1} -->\n*Page {i + 1}*\n\n")
+                for line in page_text.splitlines():
+                    trimmed = line.strip()
+                    if not trimmed:
+                        output.write("\n")
+                        continue
+                    m = _SECTION_RE.match(trimmed)
+                    if m and len(trimmed) < 80:
+                        num = m.group(1)
+                        if num:
+                            level = min(2 + num.count("."), 5)
+                            output.write(f"\n{'#' * level} {trimmed}\n\n")
+                        else:
+                            output.write(f"\n## {trimmed}\n\n")
+                    else:
+                        output.write(f"{line}\n")
+                output.write("\n\n---\n")
+
+        _cancelled(cancelled, "pdf-md-commit", dst)
+        tmp.replace(dst)
+    except CommandCancelled as ex:
+        cleanup_error = _remove_candidate(tmp)
+        if cleanup_error:
+            raise OSError(cleanup_error) from ex
+        raise
+    except Exception as ex:
+        cleanup_error = _remove_candidate(tmp)
+        details = f"{src.name}: {ex}"
+        if cleanup_error:
+            details += f"; {cleanup_error}"
+        return err("pdf.failed", details)
+    finally:
+        if pdf is not None:
+            pdf.close()
+    return ok({"pages": total_pages})
+
+
 # --- dispatch -----------------------------------------------------------------
 
 DISPATCH: dict[
@@ -619,6 +705,7 @@ DISPATCH[("docx", "pdf")] = _docx_to_pdf
 DISPATCH[("pdf", "png")] = _pdf_to_images
 DISPATCH[("pdf", "jpg")] = _pdf_to_images
 DISPATCH[("pdf", "txt")] = _pdf_to_text
+DISPATCH[("pdf", "md")] = _pdf_to_md
 
 # targets that produce a directory of files rather than a single file
 _DIR_OUTPUT = {("pdf", "png"), ("pdf", "jpg")}

@@ -52,6 +52,22 @@ class ShowcasePanel(BaseBatchPanel):
         self._build_contact_frame()
         self._build_hero_frame()
         self._build_ba_frame()
+        self._build_spritesheet_frame()
+
+        library_row = ctk.CTkFrame(b, fg_color="transparent")
+        library_row.pack(fill="x", pady=(12, 0))
+        c.secondary_button(
+            library_row,
+            "Load presentation library",
+            self._load_presentation_library,
+            width=190,
+        ).pack(side="left")
+        ctk.CTkLabel(
+            library_row,
+            text="Loads Hero Renders and prepares paginated 2×2 sheets.",
+            text_color=t.TEXT_MUTED,
+            font=t.font(11),
+        ).pack(side="left", padx=10)
 
         self._build_output_row(b, "Output folder (blank = ./showcase beside sources)")
 
@@ -106,20 +122,131 @@ class ShowcasePanel(BaseBatchPanel):
         c.secondary_button(pick, "Browse", self._pick_ba, width=90).pack(side="left", padx=(8, 0))
         self._ba_frame = f
 
+    def _build_spritesheet_frame(self):
+        f = ctk.CTkFrame(self._mode_box, fg_color="transparent")
+
+        # Row 1: Grid preset + Dimensions
+        row1 = ctk.CTkFrame(f, fg_color="transparent"); row1.pack(fill="x")
+        ctk.CTkLabel(row1, text="Grid preset", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=0, sticky="w")
+        self._grid_preset = ctk.CTkOptionMenu(
+            row1, values=list(e.GRID_PRESETS), width=130, command=self._on_grid_preset_change,
+            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER
+        )
+        self._grid_preset.set("4x4")
+        self._grid_preset.grid(row=1, column=0, sticky="w", padx=(0, 20), pady=(2, 0))
+
+        ctk.CTkLabel(row1, text="Columns", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=1, sticky="w")
+        self._sheet_cols = c.entry(row1, width=65); self._sheet_cols.insert(0, "4")
+        self._sheet_cols.grid(row=1, column=1, sticky="w", padx=(0, 16), pady=(2, 0))
+
+        ctk.CTkLabel(row1, text="Rows", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=2, sticky="w")
+        self._sheet_rows = c.entry(row1, width=65); self._sheet_rows.insert(0, "4")
+        self._sheet_rows.grid(row=1, column=2, sticky="w", padx=(0, 16), pady=(2, 0))
+
+        # Row 2: Backdrop style + Color + Sheet Backdrop
+        row2 = ctk.CTkFrame(f, fg_color="transparent"); row2.pack(fill="x", pady=(8, 0))
+        ctk.CTkLabel(row2, text="Icon backdrop", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=0, sticky="w")
+        self._icon_bg_style = ctk.CTkOptionMenu(
+            row2, values=list(e.BG_STYLES), width=130,
+            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER
+        )
+        self._icon_bg_style.set("solid"); self._icon_bg_style.grid(row=1, column=0, sticky="w", padx=(0, 20), pady=(2, 0))
+
+        ctk.CTkLabel(row2, text="Backdrop colour (hex)", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=1, sticky="w")
+        self._icon_bg_color = c.entry(row2, width=110); self._icon_bg_color.insert(0, "#111827")
+        self._icon_bg_color.grid(row=1, column=1, sticky="w", padx=(0, 20), pady=(2, 0))
+
+        ctk.CTkLabel(row2, text="Sheet backdrop", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=2, sticky="w")
+        self._sheet_bg_style = ctk.CTkOptionMenu(
+            row2, values=list(e.SHEET_BG_STYLES), width=130,
+            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER
+        )
+        self._sheet_bg_style.set("transparent"); self._sheet_bg_style.grid(row=1, column=2, sticky="w", pady=(2, 0))
+
+        # Row 3: Shadow & Repeat toggles
+        row3 = ctk.CTkFrame(f, fg_color="transparent"); row3.pack(fill="x", pady=(8, 0))
+        self._sheet_shadow = ctk.CTkCheckBox(row3, text="Drop shadow on icon", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._sheet_shadow.select(); self._sheet_shadow.pack(side="left")
+
+        self._sheet_repeat = ctk.CTkCheckBox(row3, text="Tile single input across grid", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._sheet_repeat.select(); self._sheet_repeat.pack(side="left", padx=20)
+
+        self._paginate_sheet = ctk.CTkCheckBox(
+            row3,
+            text="Paginate all inputs",
+            font=t.font(11),
+            fg_color=t.ACCENT_BLUE,
+        )
+        self._paginate_sheet.pack(side="left")
+
+        # Output Selection Box: User can export ONE or BOTH
+        out_box = ctk.CTkFrame(f, fg_color=t.BG_COLOR, corner_radius=6); out_box.pack(fill="x", pady=(10, 0))
+        out_pad = ctk.CTkFrame(out_box, fg_color="transparent"); out_pad.pack(fill="x", padx=10, pady=8)
+        ctk.CTkLabel(out_pad, text="Outputs (choose one or both):", text_color=t.TEXT_MUTED, font=t.font(11)).pack(anchor="w")
+
+        out_checks = ctk.CTkFrame(out_pad, fg_color="transparent"); out_checks.pack(fill="x", pady=(4, 0))
+        self._export_sheet = ctk.CTkCheckBox(out_checks, text="Spritesheet / Grid presentation sheet (PNG)", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._export_sheet.select(); self._export_sheet.pack(side="left")
+
+        self._export_icons = ctk.CTkCheckBox(out_checks, text="Individual framed icons (PNG)", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._export_icons.select(); self._export_icons.pack(side="left", padx=20)
+
+        self._spritesheet_frame = f
+
+    def _on_grid_preset_change(self, preset: str):
+        if preset == "4x4":
+            self._sheet_cols.delete(0, "end"); self._sheet_cols.insert(0, "4")
+            self._sheet_rows.delete(0, "end"); self._sheet_rows.insert(0, "4")
+        elif preset == "3x3":
+            self._sheet_cols.delete(0, "end"); self._sheet_cols.insert(0, "3")
+            self._sheet_rows.delete(0, "end"); self._sheet_rows.insert(0, "3")
+        elif preset == "2x2":
+            self._sheet_cols.delete(0, "end"); self._sheet_cols.insert(0, "2")
+            self._sheet_rows.delete(0, "end"); self._sheet_rows.insert(0, "2")
+
     def _pick_ba(self):
         d = filedialog.askdirectory(title="Choose the counterpart (after) folder")
         if d:
             self._ba_entry.delete(0, "end"); self._ba_entry.insert(0, d)
 
+    def _load_presentation_library(self):
+        selected = filedialog.askdirectory(title="Choose a volume presentation library")
+        if not selected:
+            return
+        try:
+            library = e.discover_presentation_library(selected)
+        except ValueError as error:
+            self._logline(str(error), t.STATE["error"][1])
+            return
+        self._clear()
+        self._add(list(library["heroes"]))
+        self._mode.set("spritesheet")
+        self._on_mode_change("spritesheet")
+        self._grid_preset.set("2x2")
+        self._on_grid_preset_change("2x2")
+        self._cell.delete(0, "end"); self._cell.insert(0, "512")
+        self._export_sheet.select()
+        self._export_icons.deselect()
+        self._paginate_sheet.select()
+        self._out_entry.delete(0, "end")
+        self._out_entry.insert(0, str(library["sheets_dir"]))
+        self._logline(
+            f"Loaded {library['hero_count']} hero renders · "
+            f"{library['gif_count']} GIF · {library['mp4_count']} MP4",
+            t.STATE["done"][1],
+        )
+
     def _on_mode_change(self, mode: str):
         """Show only the active mode's sub-options; contact ignores the shared cell
         as a per-thumbnail box, hero/ba use cell as the canvas/panel size."""
-        for frame in (self._contact_frame, self._hero_frame, self._ba_frame):
+        for frame in (self._contact_frame, self._hero_frame, self._ba_frame, self._spritesheet_frame):
             frame.pack_forget()
         if mode == "hero":
             self._hero_frame.pack(fill="x")
         elif mode == "before_after":
             self._ba_frame.pack(fill="x")
+        elif mode == "spritesheet":
+            self._spritesheet_frame.pack(fill="x")
         else:
             self._contact_frame.pack(fill="x")
 
@@ -142,16 +269,51 @@ class ShowcasePanel(BaseBatchPanel):
                 self._logline("Before/After needs a second folder of counterparts.", t.STATE["error"][1]); return None
             ba_folder = Path(ba)
 
+        rows = cols
+        grid_preset = "4x4"
+        export_sheet = True
+        export_icons = True
+        sheet_bg_style = "transparent"
+        repeat_single = True
+        paginate_sheet = False
+        bg_style = self._bg_style.get()
+        shadow = bool(self._shadow.get())
+
+        if mode == "spritesheet":
+            grid_preset = self._grid_preset.get()
+            try:
+                cols = max(1, int(float(self._sheet_cols.get() or "4")))
+                rows = max(1, int(float(self._sheet_rows.get() or "4")))
+            except ValueError:
+                self._logline("Spritesheet columns and rows must be integers.", t.STATE["error"][1]); return None
+            bg_style = self._icon_bg_style.get()
+            icon_hex = self._parse_hex(self._icon_bg_color.get())
+            if icon_hex is None:
+                self._logline("Icon backdrop colour must be a hex like #111827.", t.STATE["error"][1]); return None
+            bg_color = icon_hex
+            sheet_bg_style = self._sheet_bg_style.get()
+            shadow = bool(self._sheet_shadow.get())
+            repeat_single = bool(self._sheet_repeat.get())
+            paginate_sheet = bool(self._paginate_sheet.get())
+            export_sheet = bool(self._export_sheet.get())
+            export_icons = bool(self._export_icons.get())
+            if not export_sheet and not export_icons:
+                self._logline("Select at least one deliverable: Spritesheet or Individual Icons.", t.STATE["error"][1]); return None
+
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
         mirror = bool(self._mirror.get())
         input_root = self._resolve_input_root() if mirror else None
         return e.ShowcaseOptions(
-            mode=mode, cols=cols, cell_size=cell, padding=padding,
-            bg_style=self._bg_style.get(), bg_color=bg_color,
+            mode=mode, cols=cols, rows=rows, grid_preset=grid_preset,
+            cell_size=cell, padding=padding,
+            bg_style=bg_style, bg_color=bg_color,
             caption=self._caption.get().strip(), watermark=bool(self._watermark.get()),
-            shadow=bool(self._shadow.get()), labels=bool(self._labels.get()),
+            shadow=shadow, labels=bool(self._labels.get()),
             title=self._title.get().strip(), ba_folder=ba_folder,
+            export_sheet=export_sheet, export_icons=export_icons,
+            sheet_bg_style=sheet_bg_style, repeat_single=repeat_single,
+            paginate_sheet=paginate_sheet,
             out_root=out_root, input_root=input_root, mirror=mirror,
             dry_run=bool(self._dry.get()))
 
@@ -170,7 +332,12 @@ class ShowcasePanel(BaseBatchPanel):
     # -- queue submission (mode-specific work-unit granularity) ----------------
 
     def _build_submission(self, files: list[Path], opts: e.ShowcaseOptions) -> QueueSubmission:
-        if opts.mode == "contact":
+        if opts.mode == "spritesheet":
+            anchors = [files[0]]
+            identity_dependencies = files
+            execute = lambda anchor, token: e.build_spritesheet(files, opts)
+            label = f"Showcase Spritesheet ({opts.cols}x{opts.rows}) · {len(files)} image(s)"
+        elif opts.mode == "contact":
             anchors = [files[0]]
             identity_dependencies = files
             execute = lambda anchor, token: e.build_contact_sheet(files, opts)

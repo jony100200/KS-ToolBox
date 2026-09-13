@@ -33,8 +33,16 @@ from pathlib import Path
 
 from toolbox.engine_common import IMAGE_EXTS, sha256_file
 
-MODES = ("contact", "hero", "before_after")
+MODES = ("contact", "hero", "before_after", "spritesheet")
 BG_STYLES = ("solid", "gradient", "checker", "none")
+GRID_PRESETS = ("4x4", "3x3", "2x2", "custom")
+SHEET_BG_STYLES = ("transparent", "match", "checker", "solid")
+PRESENTATION_LIBRARY_FOLDERS = {
+    "heroes": "Hero Renders",
+    "animations": "Animations",
+    "combined": "Combined Videos",
+    "sheets": "Presentation Sheets",
+}
 
 _LABEL_H = 18          # label band under each contact-sheet thumbnail
 _HEADER_H = 44         # contact-sheet title header
@@ -274,12 +282,67 @@ def before_after(a, b, labels=("Before", "After"), *, cell: int = 512, pad: int 
     return canvas
 
 
+def spritesheet_grid(images, cols: int = 4, rows: int = 4, cell_size: int = 256, pad: int = 16,
+                     bg_style: str = "transparent", bg_color: tuple = (17, 24, 39),
+                     repeat_single: bool = True):
+    """Assemble `images` into a `cols` x `rows` grid of `cell_size` x `cell_size` icons.
+
+    pad            : gutter/margin between cells and outer border (in px).
+    bg_style       : "transparent" (RGBA alpha 0), "match" (uses bg_color), "solid", "checker", "gradient".
+    repeat_single  : if only 1 image is provided, tile it across all cols*rows cells.
+
+    Returns PIL.Image (RGBA).
+    """
+    from PIL import Image
+
+    cols = max(1, int(cols))
+    rows = max(1, int(rows))
+    cell_size = max(16, int(cell_size))
+    pad = max(0, int(pad))
+
+    sheet_w = pad + cols * (cell_size + pad)
+    sheet_h = pad + rows * (cell_size + pad)
+
+    if bg_style == "transparent" or bg_style == "none":
+        canvas = Image.new("RGBA", (sheet_w, sheet_h), (0, 0, 0, 0))
+    elif bg_style == "checker":
+        canvas = checkerboard((sheet_w, sheet_h), cell=max(8, cell_size // 16))
+    elif bg_style == "gradient":
+        canvas = vertical_gradient((sheet_w, sheet_h), bg_color, _shade(bg_color, 0.55)).convert("RGBA")
+    else:  # solid or match
+        canvas = Image.new("RGBA", (sheet_w, sheet_h), (*bg_color[:3], 255))
+
+    total_cells = cols * rows
+    for idx in range(total_cells):
+        if idx < len(images):
+            icon = images[idx]
+        elif repeat_single and len(images) == 1:
+            icon = images[0]
+        else:
+            break
+
+        c = idx % cols
+        r = idx // cols
+        x = pad + c * (cell_size + pad)
+        y = pad + r * (cell_size + pad)
+
+        icon_rgba = icon.convert("RGBA")
+        if icon_rgba.size != (cell_size, cell_size):
+            icon_rgba = thumbnail_fit(icon_rgba, (cell_size, cell_size))
+
+        canvas.paste(icon_rgba, (x, y), icon_rgba)
+
+    return canvas
+
+
 # --- options + result ---------------------------------------------------------
 
 @dataclass
 class ShowcaseOptions:
-    mode: str = "contact"                    # contact | hero | before_after
+    mode: str = "contact"                    # contact | hero | before_after | spritesheet
     cols: int = 4
+    rows: int = 4
+    grid_preset: str = "4x4"                 # 4x4 | 3x3 | 2x2 | custom
     cell_size: int = 256
     padding: int = 16
     bg_style: str = "solid"                  # solid | gradient | checker | none
@@ -290,6 +353,11 @@ class ShowcaseOptions:
     labels: bool = True                      # filename labels on the contact sheet
     title: str = ""                          # optional contact-sheet header
     ba_folder: Path | None = None            # before_after counterpart folder
+    export_sheet: bool = True                # Export Spritesheet / Grid Presentation PNG
+    export_icons: bool = True                # Export Individual Framed Icon PNGs
+    sheet_bg_style: str = "transparent"      # transparent | match | checker | solid
+    repeat_single: bool = True               # Repeat 1 image across full grid
+    paginate_sheet: bool = False             # Export all inputs across grid pages
     out_root: Path | None = None
     input_root: Path | None = None
     mirror: bool = False
@@ -307,6 +375,8 @@ class Result:
     rendered_count: int = 0
     skipped_count: int = 0
     output_sha256: str = ""
+    out_paths: list[str] | None = None
+    output_sha256s: dict[str, str] | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -341,6 +411,47 @@ def _contact_output(paths, opts: ShowcaseOptions) -> Path:
         return Path(opts.out_root) / name
     first = Path(paths[0]) if paths else Path.cwd()
     return first.parent / "showcase" / name
+
+
+def _spritesheet_output(paths, opts: ShowcaseOptions, page: int | None = None) -> Path:
+    first = Path(paths[0]) if paths else Path.cwd()
+    if page is None:
+        stem = first.stem if len(paths) == 1 else "spritesheet"
+        name = f"{stem}_spritesheet_{opts.cols}x{opts.rows}.png"
+    else:
+        name = f"presentation_sheet_{page:03d}_{opts.cols}x{opts.rows}.png"
+    if opts.out_root:
+        return Path(opts.out_root) / name
+    return first.parent / "showcase" / name
+
+
+def discover_presentation_library(path: Path | str) -> dict:
+    """Discover a generic volume presentation library and its matching media."""
+    selected = Path(path).expanduser().resolve()
+    root = selected.parent if selected.name == PRESENTATION_LIBRARY_FOLDERS["heroes"] else selected
+    heroes_dir = root / PRESENTATION_LIBRARY_FOLDERS["heroes"]
+    animations_dir = root / PRESENTATION_LIBRARY_FOLDERS["animations"]
+    if not heroes_dir.is_dir():
+        raise ValueError(f"presentation library is missing '{heroes_dir.name}': {root}")
+    heroes = sorted(heroes_dir.glob("*_Presentation.png"), key=lambda item: item.name.casefold())
+    if not heroes:
+        raise ValueError(f"presentation library has no hero renders: {heroes_dir}")
+    names = [hero.name.removesuffix("_Presentation.png") for hero in heroes]
+    gifs = [animations_dir / f"{name}_Turntable.gif" for name in names]
+    mp4s = [animations_dir / f"{name}_Turntable.mp4" for name in names]
+    return {
+        "root": root,
+        "heroes_dir": heroes_dir,
+        "animations_dir": animations_dir,
+        "combined_dir": root / PRESENTATION_LIBRARY_FOLDERS["combined"],
+        "sheets_dir": root / PRESENTATION_LIBRARY_FOLDERS["sheets"],
+        "heroes": heroes,
+        "hero_count": len(heroes),
+        "gif_count": sum(candidate.is_file() for candidate in gifs),
+        "mp4_count": sum(candidate.is_file() for candidate in mp4s),
+        "missing_gifs": [str(candidate) for candidate in gifs if not candidate.is_file()],
+        "missing_mp4s": [str(candidate) for candidate in mp4s if not candidate.is_file()],
+    }
 
 
 def partner_candidates(src: Path, opts: ShowcaseOptions) -> tuple[Path, ...]:
@@ -467,6 +578,135 @@ def build_contact_sheet(paths, opts: ShowcaseOptions) -> Result:
     )
 
 
+def build_spritesheet(paths, opts: ShowcaseOptions) -> Result:
+    """Compose transparent images into framed icons and/or an NxN spritesheet grid."""
+    paths = list(paths)
+    if not paths:
+        return Result("(spritesheet)", "failed", "no images provided", detail="input.empty")
+
+    if not opts.export_sheet and not opts.export_icons:
+        return Result(
+            "(spritesheet)", "failed",
+            "at least one export target (spritesheet or individual icons) must be selected",
+            detail="options.no_export_target", input_count=len(paths),
+        )
+
+    page_size = max(1, int(opts.cols) * int(opts.rows))
+    page_count = (len(paths) + page_size - 1) // page_size if opts.paginate_sheet else 1
+    sheet_destinations = [
+        _spritesheet_output(paths, opts, page=index + 1 if opts.paginate_sheet else None)
+        for index in range(page_count)
+    ]
+    sheet_dst = sheet_destinations[0]
+    first_icon_dst = plan_output(Path(paths[0]), opts, "_icon")
+    primary_dst = sheet_dst if opts.export_sheet else first_icon_dst
+
+    if opts.dry_run:
+        actions = []
+        if opts.export_sheet:
+            actions.append(
+                f"{page_count} presentation sheet(s) ({opts.cols}x{opts.rows})"
+                if opts.paginate_sheet else f"spritesheet ({opts.cols}x{opts.rows})"
+            )
+        if opts.export_icons:
+            actions.append(f"{len(paths)} individual icon(s)")
+        verb = " + ".join(actions)
+        return Result(
+            "(spritesheet)", "dry-run", f"would render {verb}",
+            out_path=str(primary_dst), input_count=len(paths),
+        )
+
+    try:
+        from PIL import Image
+        framed_icons = []
+        skipped = []
+        icon_outputs = []
+
+        for p in paths:
+            path = Path(p)
+            try:
+                with Image.open(path) as im:
+                    framed = frame_hero(im, opts)
+                    framed_icons.append(framed.copy())
+                if opts.export_icons:
+                    out_path = plan_output(path, opts, "_icon")
+                    _atomic_save_png(framed, out_path)
+                    icon_outputs.append(out_path)
+            except Exception as ex:
+                skipped.append(path.name)
+
+        if not framed_icons:
+            return Result(
+                "(spritesheet)", "failed",
+                f"no readable images ({len(skipped)} unreadable)",
+                detail="input.unreadable", input_count=len(paths), skipped_count=len(skipped),
+            )
+
+        digest = ""
+        output_paths: list[str] = []
+        output_hashes: dict[str, str] = {}
+        if opts.export_sheet:
+            sheet_bg = opts.sheet_bg_style
+            if sheet_bg == "match":
+                sheet_bg = opts.bg_style
+            pages = (
+                [framed_icons[index:index + page_size] for index in range(0, len(framed_icons), page_size)]
+                if opts.paginate_sheet else [framed_icons]
+            )
+            for destination, page_icons in zip(sheet_destinations, pages):
+                sheet = spritesheet_grid(
+                    page_icons,
+                    cols=opts.cols,
+                    rows=opts.rows,
+                    cell_size=opts.cell_size,
+                    pad=opts.padding,
+                    bg_style=sheet_bg,
+                    bg_color=opts.bg_color,
+                    repeat_single=opts.repeat_single,
+                )
+                _atomic_save_png(sheet, destination)
+                page_digest = sha256_file(destination)
+                output_paths.append(str(destination))
+                output_hashes[str(destination)] = page_digest
+            digest = output_hashes[str(sheet_dst)]
+        elif icon_outputs:
+            digest = sha256_file(icon_outputs[0])
+            output_paths = [str(path) for path in icon_outputs]
+            output_hashes = {str(path): sha256_file(path) for path in icon_outputs}
+
+        parts = []
+        if opts.export_sheet:
+            parts.append(
+                f"{len(sheet_destinations)} paginated {opts.cols}x{opts.rows} sheet(s)"
+                if opts.paginate_sheet else f"{opts.cols}x{opts.rows} sheet"
+            )
+        if opts.export_icons:
+            parts.append(f"{len(icon_outputs)} icon(s)")
+        summary = " + ".join(parts) + " rendered"
+        detail = "ok"
+        if skipped:
+            summary += f" — skipped {len(skipped)} unreadable: {', '.join(skipped[:5])}"
+            detail = "degraded"
+
+        rendered_items = len(framed_icons) if opts.paginate_sheet or opts.export_icons else min(
+            len(framed_icons), opts.cols * opts.rows
+        )
+        return Result(
+            "(spritesheet)", "rendered", summary,
+            out_path=str(primary_dst), detail=detail,
+            input_count=len(paths),
+            rendered_count=rendered_items,
+            skipped_count=len(skipped),
+            output_sha256=digest,
+            out_paths=output_paths,
+            output_sha256s=output_hashes,
+        )
+    except ImportError:
+        return Result("(spritesheet)", "failed", "Pillow not installed — pip install pillow", detail="dep.missing", input_count=len(paths))
+    except Exception as ex:
+        return Result("(spritesheet)", "failed", f"could not build spritesheet: {ex}", detail="render.failed", input_count=len(paths))
+
+
 def validate_result(result: Result, opts: ShowcaseOptions) -> bool:
     """Verify exact output bytes and mode-specific geometry before reuse."""
     if result.action == "dry-run":
@@ -484,6 +724,12 @@ def validate_result(result: Result, opts: ShowcaseOptions) -> bool:
         output = Path(result.out_path)
         if sha256_file(output) != result.output_sha256:
             return False
+        if result.out_paths and result.output_sha256s:
+            for value in result.out_paths:
+                candidate = Path(value)
+                expected_hash = result.output_sha256s.get(value)
+                if not expected_hash or not candidate.is_file() or sha256_file(candidate) != expected_hash:
+                    return False
         with Image.open(output) as image:
             image.load()
             if image.format != "PNG" or image.width <= 0 or image.height <= 0:
@@ -502,6 +748,16 @@ def validate_result(result: Result, opts: ShowcaseOptions) -> bool:
                     pad + cols * (cell + pad),
                     header_h + pad + rows * (cell + label_h + pad),
                 )
+                return image.size == expected
+            if opts.mode == "spritesheet":
+                if not opts.export_sheet and opts.export_icons:
+                    expected = max(32, int(opts.cell_size))
+                    return image.size == (expected, expected)
+                cols = max(1, int(opts.cols))
+                rows = max(1, int(opts.rows))
+                cell = max(16, int(opts.cell_size))
+                pad = max(0, int(opts.padding))
+                expected = (pad + cols * (cell + pad), pad + rows * (cell + pad))
                 return image.size == expected
             return opts.mode == "before_after"
     except (ImportError, OSError, TypeError, ValueError):
