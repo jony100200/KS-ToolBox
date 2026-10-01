@@ -1,7 +1,7 @@
 # KS ToolBox — Micro-Model Directory & Weights Guide
 
 > **Deterministic-First Principle:**
-> KS ToolBox runs **100% offline out-of-the-box**. All 20 tools work without any neural models using high-performance mathematical filters, Pillow, NumPy, and bundled FFmpeg.
+> KS ToolBox runs **100% offline out-of-the-box**. All 21 tools work without any neural models using high-performance mathematical filters, Pillow, NumPy, and bundled FFmpeg.
 >
 > **1-Click In-App Download & Auto-Organization:**
 > You can download and organize the optional micro-models directly in KS ToolBox with one click: click the **Download AI Models** button in the sidebar (directly above *Free AI Models (RAM)*).

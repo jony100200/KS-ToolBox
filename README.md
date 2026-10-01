@@ -2,7 +2,7 @@
   <img src="assets/KS_ToolBox_GitHub_Banner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
 </p>
 
-<p align="center"><b>One window, 19 batch tools and one custom sprite viewer.</b><br>
+<p align="center"><b>One window, 19 batch tools, a sprite viewer and a Unity package builder.</b><br>
 A fast, portable, cross-platform desktop app that brings a suite of practical
 file / image / video / audio / asset batch utilities under a single UI —
 free, offline, no credits, no cloud.</p>
