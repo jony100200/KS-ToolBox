@@ -37,6 +37,7 @@ cross-platform UI. Free, offline, no credits, no cloud.
 - **Tileset Checker** — seam-continuity score, offset preview, N×N tile montage.
 - **Texture Renderer** — batch-export from Substance Designer & Material Maker (requires those tools).
 - **Package Extractor** — Unity `.unitypackage` + zip/tar extraction with folder reconstruction; zip-slip / symlink / decompression-bomb safe.
+- **Unity Packager** — build a `.unitypackage` from a project folder without opening Unity; preview, atomic write, deterministic output.
 
 **Library / Dataset**
 - **Asset Auditor** — duplicate (exact + perceptual), corrupt/empty/oversized/unsafe-name/resolution audit → HTML/JSON/CSV.

@@ -59,6 +59,7 @@ always explicit and confirmed.
 | [**Tileset Checker**](tools/tileset_checker/README.md) | Score & preview how seamlessly a texture tiles — seam score, offset preview, N×N tile montage. |
 | [**Texture Renderer**](tools/texture_renderer/README.md) | Batch-export textures from Substance Designer (`.sbsar`) and Material Maker (`.ptex`) projects. *(requires those external tools)* |
 | [**Package Extractor**](tools/package_extractor/README.md) | Extract Unity `.unitypackage` + zip/tar archives and rebuild the original folders — with zip-slip / symlink / decompression-bomb guards. |
+| [**Unity Packager**](tools/unity_packager/README.md) | Build a `.unitypackage` from a project folder without opening Unity — preview, safe paths, duplicate-GUID check, deterministic output. |
 
 ### 🔍 Library & Dataset
 | Tool | What it does |
