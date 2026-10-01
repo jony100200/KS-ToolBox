@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual env (the build env; recreate from requirements)
+.venv/
+.venv-release/
+venv/
+
+# Build artifacts
+build/
+dist/
+
+# Generated smoke-test / run outputs (regenerable — never track)
+_test_out/
+_enhance_test/
+scratch_out/
+test_output/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.bmp
+*.tga
+*.mp4
+*.part
+*.part.*
+
+# Runtime caches / downloaded models
+.kstoolbox_cache/
+*.kstoolbox_cache/
+models/
+
+# Generated run manifests (uncomment to ignore)
+# *_manifest.csv
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+tools/image_enhancer/engine.py.bak_pre_x2
+bin/ffmpeg.exe
+bin/ffprobe.exe
+/_reports
+
+# Internal process, agent charters, and engineering standards
+AGENTS.md
+KS_ENGINEERING_STANDARD.md
+OptimizePrompt.txt
+
+# Internal research, architecture, and developer-only documentation
+docs/
+tools/*/REFERENCES.md
+
+# Tests and benchmarks (developer-only)
+tests/
+benchmarks/
+test_smoke.py
+tools/*/test_smoke.py
+run_compress_courses.py
+
