@@ -1,7 +1,7 @@
 """Headless CLI runner for KS-ToolBox Image Enhancer.
 
-Enables automated, headless batch execution across fleet machines (Boss, Laptop, Mint)
-without launching the CustomTkinter GUI.
+Runs batch enhancement from a script or the command line without launching the
+CustomTkinter GUI.
 
 Usage:
     python -m tools.image_enhancer.cli --input <file_or_dir> --out <dir> --preset auto

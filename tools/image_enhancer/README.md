@@ -91,9 +91,9 @@ All models are strictly opt-in and accessible via the **📦 Model Rack** manage
 
 ---
 
-## 6. Autonomous Agent & CLI Fleet Automation (Prothik / Kendro / CLI)
+## 6. Scripting & Command Line
 
-Image Enhancer is built to be driven either interactively via GUI or autonomously by background coding agents (**Prothik**, **Kendro**, or scripts) across fleet machines (**Boss**, **Laptop**, **Mint**).
+Besides the window, Image Enhancer can run from a Python script or from the command line, so you can batch it from your own tools or scheduled jobs without opening the GUI.
 
 ### A. Python Programmatic API
 ```python
@@ -102,14 +102,14 @@ from tools.image_enhancer import engine as e
 
 # 1. One-button Auto Enhance
 res = e.process(
-    Path("D:/assets/character.png"),
-    e.EnhanceOptions(preset="auto", mode="deterministic", out_root=Path("D:/enhanced"))
+    Path("photos/character.png"),
+    e.EnhanceOptions(preset="auto", mode="deterministic", out_root=Path("enhanced"))
 )
 print("Enhanced image saved to:", res.out_path)
 
 # 2. Natural Skin / De-Gloss on Portraits
 res = e.process(
-    Path("D:/assets/portrait.png"),
+    Path("photos/portrait.png"),
     e.EnhanceOptions(preset="natural_skin", de_gloss_strength=0.85, pore_boost=1.20)
 )
 ```
@@ -117,13 +117,13 @@ res = e.process(
 ### B. Headless CLI Runner
 ```powershell
 # One-button Auto Enhance on a folder
-python -m tools.image_enhancer.cli --input "D:\path\to\images" --out "D:\path\to\enhanced" --preset auto
+python -m tools.image_enhancer.cli --input "path\to\images" --out "path\to\enhanced" --preset auto
 
 # Natural Skin / De-Gloss pass on portraits
-python -m tools.image_enhancer.cli --input "D:\path\to\portraits" --out "D:\path\to\enhanced" --preset natural_skin --mode deterministic
+python -m tools.image_enhancer.cli --input "path\to\portraits" --out "path\to\enhanced" --preset natural_skin --mode deterministic
 
 # Super-Resolution 2x via Real-ESRGAN NCNN
-python -m tools.image_enhancer.cli --input "D:\path\to\images" --out "D:\path\to\enhanced" --scale 2 --model realesr-animevideov3-x2
+python -m tools.image_enhancer.cli --input "path\to\images" --out "path\to\enhanced" --scale 2 --model realesr-animevideov3-x2
 ```
 
 ---
