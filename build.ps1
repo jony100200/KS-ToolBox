@@ -5,7 +5,9 @@
 # bundle contains only KS ToolBox's own dependencies.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
-$py = Join-Path $root ".venv\Scripts\python.exe"
+# Release builds should use a clean environment with only requirements.txt + requirements-build.txt,
+# so optional extras installed in .venv are not swept into the bundle. Set KS_BUILD_PYTHON to that python.exe.
+$py = if ($env:KS_BUILD_PYTHON) { $env:KS_BUILD_PYTHON } else { Join-Path $root ".venv\Scripts\python.exe" }
 if (-not (Test-Path $py)) { throw "No .venv found. Create it and install requirements first." }
 
 Write-Host "=== verifying pinned build tooling ==="
