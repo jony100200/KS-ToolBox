@@ -207,10 +207,13 @@ def fetch_url_info(url: str, cancel_check: Callable[[], bool] | None = None) -> 
     if HAS_YTDLP:
         try:
             ydl_opts = {
-                'extract_flat': True,
+                'extract_flat': 'in_playlist',
                 'quiet': True,
                 'no_warnings': True,
                 'skip_download': True,
+                'socket_timeout': 15,
+                'retries': 3,
+                'ignoreerrors': True,
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -225,9 +228,13 @@ def fetch_url_info(url: str, cancel_check: Callable[[], bool] | None = None) -> 
                     items: list[VideoItem] = []
                     idx = 1
                     for entry in raw_entries:
+                        if cancel_check and cancel_check():
+                            break
                         if not entry:
                             continue
                         vid = entry.get("id") or ""
+                        if not vid:
+                            continue
                         title = entry.get("title") or f"Video {vid}"
                         dur = int(entry.get("duration") or 0)
                         thumb = entry.get("thumbnail") or f"https://img.youtube.com/vi/{vid}/maxresdefault.jpg"
@@ -245,6 +252,9 @@ def fetch_url_info(url: str, cancel_check: Callable[[], bool] | None = None) -> 
                             channel=entry.get("channel") or info.get("channel") or "",
                         ))
                         idx += 1
+                        if idx > 1000:  # Safety boundary for mega-channels
+                            break
+
                     url_type = "channel" if ("/@" in url or "/channel/" in url or "/c/" in url) else "playlist"
                     return FetchResult(
                         title=info.get("title") or "YouTube Collection",

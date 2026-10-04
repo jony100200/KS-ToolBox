@@ -9,6 +9,7 @@ Features:
 """
 from __future__ import annotations
 
+import concurrent.futures
 import io
 import os
 import threading
@@ -40,6 +41,13 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         self._current_result: e.FetchResult | None = None
         self._thumb_cache: dict[str, ctk.CTkImage] = {}
 
+        # Performance & Concurrency Optimization:
+        # Controlled worker pool prevents rate limits, socket exhaustion, and UI thread lag
+        self._thumb_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="yt_thumb")
+        self._scan_epoch = 0
+        self._render_token = 0
+        self._filter_timer: str | None = None
+
         self._worker: threading.Thread | None = None
         self._cancel_event = threading.Event()
         self._is_working = False
@@ -48,21 +56,20 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         self._default_out_dir = Path.home() / "Downloads" / "YouTube_Downloads"
 
         # 3-Panel Grid Configuration:
-        # Col 0: Source & Asset Inspector (~340px)
-        # Col 1: Expansive Scanned Video Table (Center, weight=5)
-        # Col 2: Queue & Color-Coded Log Console (~340px)
+        # Col 0: Source & Asset Inspector (Generous width, weight=4, minsize=350)
+        # Col 1: Expansive Scanned Video Table (Center, weight=5, minsize=420)
+        # Col 2: Squeezed Queue & Logs (Right, compact, weight=2, minsize=230)
         self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=3, minsize=320)
-        self.grid_columnconfigure(1, weight=5, minsize=440)
-        self.grid_columnconfigure(2, weight=3, minsize=320)
+        self.grid_columnconfigure(0, weight=4, minsize=350)
+        self.grid_columnconfigure(1, weight=5, minsize=420)
+        self.grid_columnconfigure(2, weight=2, minsize=230)
 
         # Build 3 Panels
         self._build_left_panel()
         self._build_center_panel()
         self._build_right_panel()
 
-        # Dynamic Full-Height Viewport Auto-Expansion:
-        # Ensures the 3 panels stretch 100% to the bottom of the window on any monitor resolution
+        # Dynamic Full-Height Viewport & Responsive Layout:
         self.bind("<Configure>", self._on_configure_expand)
         if hasattr(parent, "bind"):
             parent.bind("<Configure>", self._on_configure_expand)
@@ -79,8 +86,24 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
             create_win = getattr(self._host, "_create_window_id", None)
             if canvas is not None and create_win is not None:
                 h = canvas.winfo_height()
+                w = canvas.winfo_width()
                 if h > 200:
                     canvas.itemconfigure(create_win, height=max(h, 560))
+
+                # Dynamic Responsive Column Balancing:
+                # Prioritize Left (Input & Assets) and Center (Collection); squeeze Right (Queue & Logs)
+                if w >= 1300:
+                    self.grid_columnconfigure(0, weight=4, minsize=370)
+                    self.grid_columnconfigure(1, weight=6, minsize=480)
+                    self.grid_columnconfigure(2, weight=2, minsize=240)
+                elif w >= 1050:
+                    self.grid_columnconfigure(0, weight=4, minsize=350)
+                    self.grid_columnconfigure(1, weight=5, minsize=420)
+                    self.grid_columnconfigure(2, weight=2, minsize=230)
+                else:
+                    self.grid_columnconfigure(0, weight=4, minsize=330)
+                    self.grid_columnconfigure(1, weight=4, minsize=360)
+                    self.grid_columnconfigure(2, weight=2, minsize=210)
         except Exception:
             pass
 
@@ -97,7 +120,7 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
 
         # --- Section A: YouTube URL Input ---
         ctk.CTkLabel(
-            scroll, text="YOUTUBE URL (VIDEO / PLAYLIST / CHANNEL)",
+            scroll, text="YOUTUBE SOURCE LINK (VIDEO / PLAYLIST / CHANNEL)",
             font=t.font(10, bold=True), text_color=t.ACCENT_SOFT
         ).pack(anchor="w", pady=(0, 4))
 
@@ -109,25 +132,24 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         self._url_entry.pack(fill="x", pady=(0, 6))
         self._url_entry.bind("<Return>", lambda _: self._on_inspect())
 
-        # Link Buttons Row
-        link_btn_row = ctk.CTkFrame(scroll, fg_color="transparent")
-        link_btn_row.pack(fill="x", pady=(0, 8))
-        link_btn_row.grid_columnconfigure(0, weight=3)
-        link_btn_row.grid_columnconfigure(1, weight=2)
-        link_btn_row.grid_columnconfigure(2, weight=2)
-
-        # Vibrant action button for scanning
+        # Full-width prominent Scan button (impossible to squish or clip)
         self._scan_btn = ctk.CTkButton(
-            link_btn_row, text="Scan Link", command=self._on_inspect, height=30,
-            fg_color="#0D9488", hover_color="#0F766E", font=t.font(11, bold=True)
+            scroll, text="Scan Link", command=self._on_inspect, height=32,
+            fg_color="#0D9488", hover_color="#0F766E", font=t.font(12, bold=True)
         )
-        self._scan_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self._scan_btn.pack(fill="x", pady=(0, 4))
 
-        paste_btn = c.secondary_button(link_btn_row, text="Paste", command=self._on_paste, height=30)
-        paste_btn.grid(row=0, column=1, sticky="ew", padx=2)
+        # Secondary utilities row: Paste URL and Clear side-by-side
+        aux_btn_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        aux_btn_row.pack(fill="x", pady=(0, 8))
+        aux_btn_row.grid_columnconfigure(0, weight=1)
+        aux_btn_row.grid_columnconfigure(1, weight=1)
 
-        clear_btn = c.ghost_button(link_btn_row, text="Clear", command=self._on_clear, height=30)
-        clear_btn.grid(row=0, column=2, sticky="ew", padx=(4, 0))
+        paste_btn = c.secondary_button(aux_btn_row, text="Paste URL", command=self._on_paste, height=26, font=t.font(10))
+        paste_btn.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+
+        clear_btn = c.ghost_button(aux_btn_row, text="Clear", command=self._on_clear, height=26, font=t.font(10))
+        clear_btn.grid(row=0, column=1, sticky="ew", padx=(3, 0))
 
         # Status badge & info
         status_row = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -312,7 +334,7 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
 
         self._filter_entry = c.entry(tool_bar, placeholder_text="Filter videos...", height=26)
         self._filter_entry.grid(row=0, column=1, sticky="ew", padx=4)
-        self._filter_entry.bind("<KeyRelease>", lambda _: self._apply_filter())
+        self._filter_entry.bind("<KeyRelease>", self._on_filter_key)
 
         self._select_all_btn = c.ghost_button(
             tool_bar, text="Select All", command=self._on_select_all, width=70, height=26, font=t.font(10)
@@ -359,74 +381,74 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         card.grid(row=0, column=2, sticky="nsew", padx=(t.PAD_GRID // 2, t.PAD_GRID), pady=t.PAD_GRID)
         b = card.body
 
-        # Action Buttons Row
+        # Action Buttons Row (Compact & Sleek)
         act_row = ctk.CTkFrame(b, fg_color="transparent")
-        act_row.pack(fill="x", pady=(0, 8))
+        act_row.pack(fill="x", pady=(0, 6))
         act_row.grid_columnconfigure(0, weight=3)
-        act_row.grid_columnconfigure(1, weight=1)
+        act_row.grid_columnconfigure(1, weight=2)
 
         # Vibrant teal/gradient primary download button matching Image 2
         self._download_btn = ctk.CTkButton(
             act_row,
             text="Start Download",
             command=self._on_start_download,
-            height=36,
+            height=28,
             fg_color="#0D9488",
             hover_color="#14B8A6",
-            font=t.font(12, bold=True),
+            font=t.font(11, bold=True),
         )
-        self._download_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self._download_btn.grid(row=0, column=0, sticky="ew", padx=(0, 4))
 
         self._cancel_btn = c.danger_button(
             act_row,
             text="Cancel",
             command=self._on_cancel,
-            height=36,
-            font=t.font(11, bold=True),
+            height=28,
+            font=t.font(10),
         )
         self._cancel_btn.grid(row=0, column=1, sticky="ew")
         self._cancel_btn.configure(state="disabled")
 
-        # Progress Stats Box
+        # Progress Stats Box (Squeezed & Clean)
         stats_box = ctk.CTkFrame(b, fg_color=t.BG_COLOR, corner_radius=t.RADIUS_CARD)
-        stats_box.pack(fill="x", pady=(0, 8), padx=1, ipady=4)
+        stats_box.pack(fill="x", pady=(0, 6), padx=1, ipady=2)
 
         self._progress_status_label = ctk.CTkLabel(
             stats_box,
-            text="Queue Idle — Waiting for download",
-            font=t.font(11),
+            text="Queue Idle — Ready",
+            font=t.font(10),
             text_color=t.TEXT_MAIN,
             anchor="w",
         )
-        self._progress_status_label.pack(fill="x", padx=10, pady=(4, 2))
+        self._progress_status_label.pack(fill="x", padx=8, pady=(2, 1))
 
         # Vibrant progress bar matching Image 2
         self._progress_bar = ctk.CTkProgressBar(
-            stats_box, height=8, fg_color=t.CARD_BORDER, progress_color="#14B8A6"
+            stats_box, height=6, fg_color=t.CARD_BORDER, progress_color="#14B8A6"
         )
-        self._progress_bar.pack(fill="x", padx=10, pady=(2, 4))
+        self._progress_bar.pack(fill="x", padx=8, pady=(1, 2))
         self._progress_bar.set(0)
 
         self._progress_metrics_label = ctk.CTkLabel(
             stats_box,
             text="0 / 0 completed",
-            font=t.mono(10),
+            font=t.mono(9),
             text_color=t.TEXT_MUTED,
             anchor="w",
         )
-        self._progress_metrics_label.pack(fill="x", padx=10, pady=(0, 4))
+        self._progress_metrics_label.pack(fill="x", padx=8, pady=(0, 2))
 
-        # Color-Coded Activity Console
+        # Color-Coded Activity Console (Squeezed & Space-Efficient)
         log_header = ctk.CTkFrame(b, fg_color="transparent")
-        log_header.pack(fill="x", pady=(4, 2))
+        log_header.pack(fill="x", pady=(2, 2))
 
-        ctk.CTkLabel(log_header, text="ACTIVITY LOG", font=t.font(10, bold=True), text_color=t.TEXT_MUTED).pack(side="left")
-        c.ghost_button(log_header, text="Clear Log", command=self._on_clear_log, width=60, height=20, font=t.font(9)).pack(side="right")
+        ctk.CTkLabel(log_header, text="ACTIVITY LOG", font=t.font(9, bold=True), text_color=t.TEXT_MUTED).pack(side="left")
+        c.ghost_button(log_header, text="Clear", command=self._on_clear_log, width=48, height=18, font=t.font(8)).pack(side="right")
 
         self._log_box = ctk.CTkTextbox(
-            b, fg_color=t.BG_COLOR, text_color=t.TEXT_MUTED, font=t.mono(10), corner_radius=t.RADIUS_CARD
+            b, fg_color=t.BG_COLOR, text_color=t.TEXT_MUTED, font=ctk.CTkFont(family="Consolas", size=9), corner_radius=t.RADIUS_CARD
         )
-        self._log_box.pack(fill="both", expand=True, pady=(2, 0))
+        self._log_box.pack(fill="both", expand=True, pady=(1, 0))
 
         # Configure Terminal Tags for Syntax-Colored Console matching Mock Image 2
         tb = self._log_box._textbox
@@ -468,14 +490,20 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         draw.text((THUMB_W // 2 - 10, THUMB_H // 2 - 6), f"#{index:02d}", fill=(100, 116, 139, 255))
         return ctk.CTkImage(light_image=img, dark_image=img, size=(THUMB_W, THUMB_H))
 
-    def _fetch_thumbnail_async(self, item: e.VideoItem, label_widget: ctk.CTkLabel):
-        """Asynchronously download and burn the duration badge onto the thumbnail."""
+    def _fetch_thumbnail_async(self, item: e.VideoItem, label_widget: ctk.CTkLabel, epoch: int | None = None):
+        """Asynchronously download and burn the duration badge onto the thumbnail via controlled thread pool."""
+        if epoch is None:
+            epoch = self._scan_epoch
+
         if item.video_id in self._thumb_cache:
             cached_img = self._thumb_cache[item.video_id]
             self.after(0, lambda: label_widget.configure(image=cached_img))
             return
 
         def fetcher():
+            if epoch != self._scan_epoch or self._cancel_event.is_set():
+                return
+
             try:
                 urls_to_try = []
                 if item.thumbnail_url:
@@ -486,6 +514,8 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
 
                 raw_bytes = None
                 for u in urls_to_try:
+                    if epoch != self._scan_epoch or self._cancel_event.is_set():
+                        return
                     try:
                         req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"})
                         with urllib.request.urlopen(req, timeout=5) as resp:
@@ -496,7 +526,7 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
                     except Exception:
                         continue
 
-                if not raw_bytes:
+                if not raw_bytes or epoch != self._scan_epoch or self._cancel_event.is_set():
                     return
 
                 pil_img = Image.open(io.BytesIO(raw_bytes)).convert("RGBA")
@@ -513,13 +543,16 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
                     )
                     draw.text((THUMB_W - badge_w - 2, THUMB_H - 13), text, fill=(255, 255, 255, 240))
 
+                if epoch != self._scan_epoch or self._cancel_event.is_set():
+                    return
+
                 ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(THUMB_W, THUMB_H))
                 self._thumb_cache[item.video_id] = ctk_img
                 self.after(0, lambda: label_widget.configure(image=ctk_img))
             except Exception:
                 pass
 
-        threading.Thread(target=fetcher, daemon=True).start()
+        self._thumb_executor.submit(fetcher)
 
     # =========================================================================
     # User Interactions & Live Filter
@@ -578,16 +611,26 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
             entry["cb"].deselect()
         self._update_selected_count()
 
+    def _on_filter_key(self, event=None):
+        """Debounce filter queries to keep typing fluid on large collections."""
+        if self._filter_timer is not None:
+            self.after_cancel(self._filter_timer)
+        self._filter_timer = self.after(120, self._apply_filter)
+
     def _apply_filter(self):
+        self._filter_timer = None
         query = self._filter_entry.get().strip().lower()
         visible = 0
         for entry in self._item_rows:
-            title = entry["item"].title.lower()
-            if not query or query in title:
-                entry["frame"].pack(fill="x", pady=2, padx=2)
+            matches = not query or query in entry["item"].title.lower()
+            if matches != entry.get("is_visible", True):
+                entry["is_visible"] = matches
+                if matches:
+                    entry["frame"].pack(fill="x", pady=2, padx=2)
+                else:
+                    entry["frame"].pack_forget()
+            if matches:
                 visible += 1
-            else:
-                entry["frame"].pack_forget()
         self._update_selected_count(visible_override=visible if query else None)
 
     def _update_selected_count(self, visible_override: int | None = None):
@@ -599,6 +642,8 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
             self._items_count_label.configure(text=f"{total} items ({selected} selected)")
 
     def _clear_items(self):
+        self._scan_epoch += 1
+        self._render_token += 1
         self._items = []
         self._item_rows = []
         for child in self._items_container.winfo_children():
@@ -632,7 +677,7 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         self._log_colored("SCAN", f"Scanning URL: {url}")
 
         def worker():
-            res = e.fetch_url_info(url)
+            res = e.fetch_url_info(url, cancel_check=lambda: self._cancel_event.is_set())
             self.after(0, lambda: self._on_inspect_complete(res))
 
         self._worker = threading.Thread(target=worker, daemon=True)
@@ -642,6 +687,10 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         self._is_working = False
         self._scan_btn.configure(state="normal")
         self._current_result = res
+        self._scan_epoch += 1
+        self._render_token += 1
+        current_token = self._render_token
+        epoch = self._scan_epoch
 
         if res.error:
             self._status_pill.set_state("ERROR", "error")
@@ -657,70 +706,107 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         self._info_label.configure(text=res.title[:30])
         self._log_colored("INFO", f"Scan successful: {summary}")
 
-        # Render items into container with real thumbnail image labels
+        # Clear previous rows
         for child in self._items_container.winfo_children():
             child.destroy()
         self._item_rows.clear()
 
-        for idx, item in enumerate(self._items, 1):
-            row = ctk.CTkFrame(self._items_container, fg_color=t.CARD_BG, corner_radius=t.RADIUS_CARD)
-            row.pack(fill="x", pady=2, padx=2)
-            row.grid_columnconfigure(2, weight=1)
-
-            # 1. Number Index
-            idx_lbl = ctk.CTkLabel(row, text=f"#{item.index:02d}", font=ctk.CTkFont(family="Consolas", size=10, weight="bold"), text_color=t.TEXT_MUTED, width=28)
-            idx_lbl.grid(row=0, column=0, padx=4)
-
-            # 2. Thumbnail Preview Image Label (Starts with placeholder, lazy loads real thumbnail)
-            thumb_ph = self._make_placeholder_thumbnail(item.index)
-            thumb_lbl = ctk.CTkLabel(row, image=thumb_ph, text="", width=THUMB_W, height=THUMB_H)
-            thumb_lbl.grid(row=0, column=1, padx=4, pady=3)
-            self._fetch_thumbnail_async(item, thumb_lbl)
-
-            # 3. Title (Clean wrappable label)
-            title_lbl = ctk.CTkLabel(
-                row,
-                text=item.title,
+        total_items = len(self._items)
+        if total_items == 0:
+            self._empty_label = ctk.CTkLabel(
+                self._items_container,
+                text="No videos found in this collection.",
+                text_color=t.TEXT_MUTED,
                 font=t.font(11),
-                text_color=t.TEXT_MAIN,
-                anchor="w",
-                justify="left",
             )
-            title_lbl.grid(row=0, column=2, sticky="ew", padx=6)
+            self._empty_label.pack(pady=100)
+            return
 
-            # 4. Duration
-            dur_lbl = ctk.CTkLabel(
-                row,
-                text=item.duration_str,
-                font=t.mono(10),
-                text_color=t.TEXT_MUTED,
-                width=60,
-                anchor="center",
-            )
-            dur_lbl.grid(row=0, column=3, padx=4)
+        # Progressive chunked rendering keeps the UI 100% responsive on large collections
+        CHUNK_SIZE = 40
 
-            # 5. Selection Checkbox
-            cb = ctk.CTkCheckBox(row, text="", width=24, fg_color=t.ACCENT_BLUE, command=self._update_selected_count)
-            cb.select()
-            cb.grid(row=0, column=4, padx=4)
+        def render_chunk(start_idx: int):
+            if current_token != self._render_token:
+                return
+            end_idx = min(start_idx + CHUNK_SIZE, total_items)
+            for i in range(start_idx, end_idx):
+                self._render_single_item_row(self._items[i], epoch)
 
-            # 6. Status Label
-            stat_lbl = ctk.CTkLabel(
-                row,
-                text="Queued",
-                font=t.font(10),
-                text_color=t.TEXT_MUTED,
-                width=70,
-                anchor="e",
-            )
-            stat_lbl.grid(row=0, column=5, padx=(4, 8))
+            if end_idx < total_items:
+                self._items_count_label.configure(text=f"Loading {end_idx}/{total_items} items...")
+                self.after(5, lambda: render_chunk(end_idx))
+            else:
+                self._update_selected_count()
+                self._log_colored("QUEUED", f"Ready to download {total_items} items from collection")
 
-            self._item_rows.append({
-                "item": item,
-                "cb": cb,
-                "stat": stat_lbl,
-                "frame": row,
-            })
+        render_chunk(0)
+
+    def _render_single_item_row(self, item: e.VideoItem, epoch: int):
+        row = ctk.CTkFrame(self._items_container, fg_color=t.CARD_BG, corner_radius=t.RADIUS_CARD)
+        row.pack(fill="x", pady=2, padx=2)
+        row.grid_columnconfigure(2, weight=1)
+
+        # 1. Number Index
+        idx_lbl = ctk.CTkLabel(
+            row,
+            text=f"#{item.index:02d}",
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            text_color=t.TEXT_MUTED,
+            width=28,
+        )
+        idx_lbl.grid(row=0, column=0, padx=4)
+
+        # 2. Thumbnail Preview Image Label (Starts with placeholder, lazy loads real thumbnail)
+        thumb_ph = self._make_placeholder_thumbnail(item.index)
+        thumb_lbl = ctk.CTkLabel(row, image=thumb_ph, text="", width=THUMB_W, height=THUMB_H)
+        thumb_lbl.grid(row=0, column=1, padx=4, pady=3)
+        self._fetch_thumbnail_async(item, thumb_lbl, epoch)
+
+        # 3. Title (Clean wrappable label)
+        title_lbl = ctk.CTkLabel(
+            row,
+            text=item.title,
+            font=t.font(11),
+            text_color=t.TEXT_MAIN,
+            anchor="w",
+            justify="left",
+        )
+        title_lbl.grid(row=0, column=2, sticky="ew", padx=6)
+
+        # 4. Duration
+        dur_lbl = ctk.CTkLabel(
+            row,
+            text=item.duration_str,
+            font=t.mono(10),
+            text_color=t.TEXT_MUTED,
+            width=60,
+            anchor="center",
+        )
+        dur_lbl.grid(row=0, column=3, padx=4)
+
+        # 5. Selection Checkbox
+        cb = ctk.CTkCheckBox(row, text="", width=24, fg_color=t.ACCENT_BLUE, command=self._update_selected_count)
+        cb.select()
+        cb.grid(row=0, column=4, padx=4)
+
+        # 6. Status Label
+        stat_lbl = ctk.CTkLabel(
+            row,
+            text="Queued",
+            font=t.font(10),
+            text_color=t.TEXT_MUTED,
+            width=70,
+            anchor="e",
+        )
+        stat_lbl.grid(row=0, column=5, padx=(4, 8))
+
+        self._item_rows.append({
+            "item": item,
+            "cb": cb,
+            "stat": stat_lbl,
+            "frame": row,
+            "is_visible": True,
+        })
 
         self._update_selected_count()
         self._log_colored("QUEUED", f"Ready to download {len(self._items)} items from collection")
@@ -802,53 +888,99 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
 
         self._log_colored("SCAN", f"Starting queue: {len(selected_entries)} items -> {target_out.name}")
 
+        # Check if user requested thumbnails only (blazing fast parallel download)
+        only_thumbnails = opts.download_thumbnails and not (
+            opts.download_video or opts.download_audio or opts.download_subtitles
+        )
+
         def worker():
             total = len(selected_entries)
             completed = 0
-            for idx, entry in enumerate(selected_entries, 1):
-                if self._cancel_event.is_set():
-                    self.after(0, lambda: self._log_colored("WARN", "Download cancelled by user."))
-                    break
+            completed_lock = threading.Lock()
 
-                item = entry["item"]
-                stat_lbl = entry["stat"]
+            if only_thumbnails:
+                def download_single(entry):
+                    nonlocal completed
+                    if self._cancel_event.is_set():
+                        return
+                    item = entry["item"]
+                    stat_lbl = entry["stat"]
+                    self.after(0, lambda: stat_lbl.configure(text="Downloading...", text_color=t.ACCENT_SOFT))
 
-                def update_start(lbl=stat_lbl, it=item, i=idx):
-                    lbl.configure(text="Downloading...", text_color=t.ACCENT_SOFT)
-                    self._progress_status_label.configure(text=f"[{i}/{total}] {it.title[:35]}...")
-                    self._progress_metrics_label.configure(text=f"{i - 1} / {total} completed")
+                    ok, msg = e.download_item(
+                        item,
+                        target_out,
+                        opts,
+                        cancel_check=lambda: self._cancel_event.is_set(),
+                    )
+                    with completed_lock:
+                        if ok:
+                            completed += 1
+                        c_idx = completed
 
-                self.after(0, update_start)
+                    def update_done(lbl=stat_lbl, success=ok, m=msg, count=c_idx, it=item):
+                        if success:
+                            lbl.configure(text="Done ✓", text_color=t.STATE["done"][1])
+                            self._log_colored("DONE", f"[{it.index:02d}] {it.title[:32]} -> {m}")
+                        else:
+                            lbl.configure(text="Error ✗", text_color=t.STATE["error"][1])
+                            self._log_colored("ERROR", f"[{it.index:02d}] {it.title[:32]} -> {m}")
+                        self._progress_bar.set(count / total)
+                        self._progress_status_label.configure(text=f"Downloaded {count}/{total} thumbnails...")
+                        self._progress_metrics_label.configure(text=f"{count} / {total} completed")
 
-                def p_cb(msg: str, frac: float):
-                    overall = (idx - 1 + frac) / total
-                    self.after(0, lambda m=msg, o=overall: self._on_item_progress(m, o))
+                    self.after(0, update_done)
 
-                ok, msg = e.download_item(
-                    item,
-                    target_out,
-                    opts,
-                    progress_cb=p_cb,
-                    cancel_check=lambda: self._cancel_event.is_set(),
-                )
+                with concurrent.futures.ThreadPoolExecutor(max_workers=5, thread_name_prefix="thumb_dl") as ex:
+                    futures = [ex.submit(download_single, entry) for entry in selected_entries]
+                    for f in concurrent.futures.as_completed(futures):
+                        if self._cancel_event.is_set():
+                            break
+            else:
+                for idx, entry in enumerate(selected_entries, 1):
+                    if self._cancel_event.is_set():
+                        self.after(0, lambda: self._log_colored("WARN", "Download cancelled by user."))
+                        break
 
-                if self._cancel_event.is_set():
-                    break
+                    item = entry["item"]
+                    stat_lbl = entry["stat"]
 
-                if ok:
-                    completed += 1
+                    def update_start(lbl=stat_lbl, it=item, i=idx):
+                        lbl.configure(text="Downloading...", text_color=t.ACCENT_SOFT)
+                        self._progress_status_label.configure(text=f"[{i}/{total}] {it.title[:35]}...")
+                        self._progress_metrics_label.configure(text=f"{i - 1} / {total} completed")
 
-                def update_done(lbl=stat_lbl, success=ok, m=msg, c_idx=completed, it=item):
-                    if success:
-                        lbl.configure(text="Done ✓", text_color=t.STATE["done"][1])
-                        self._log_colored("DONE", f"[{it.index:02d}] {it.title[:32]} -> {m}")
-                    else:
-                        lbl.configure(text="Error ✗", text_color=t.STATE["error"][1])
-                        self._log_colored("ERROR", f"[{it.index:02d}] {it.title[:32]} -> {m}")
-                    self._progress_bar.set(c_idx / total)
-                    self._progress_metrics_label.configure(text=f"{c_idx} / {total} completed")
+                    self.after(0, update_start)
 
-                self.after(0, update_done)
+                    def p_cb(msg: str, frac: float):
+                        overall = (idx - 1 + frac) / total
+                        self.after(0, lambda m=msg, o=overall: self._on_item_progress(m, o))
+
+                    ok, msg = e.download_item(
+                        item,
+                        target_out,
+                        opts,
+                        progress_cb=p_cb,
+                        cancel_check=lambda: self._cancel_event.is_set(),
+                    )
+
+                    if self._cancel_event.is_set():
+                        break
+
+                    if ok:
+                        completed += 1
+
+                    def update_done(lbl=stat_lbl, success=ok, m=msg, c_idx=completed, it=item):
+                        if success:
+                            lbl.configure(text="Done ✓", text_color=t.STATE["done"][1])
+                            self._log_colored("DONE", f"[{it.index:02d}] {it.title[:32]} -> {m}")
+                        else:
+                            lbl.configure(text="Error ✗", text_color=t.STATE["error"][1])
+                            self._log_colored("ERROR", f"[{it.index:02d}] {it.title[:32]} -> {m}")
+                        self._progress_bar.set(c_idx / total)
+                        self._progress_metrics_label.configure(text=f"{c_idx} / {total} completed")
+
+                    self.after(0, update_done)
 
             self.after(0, lambda: self._on_download_finished(completed, total, target_out))
 
@@ -861,6 +993,8 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
 
     def _on_cancel(self):
         self._cancel_event.set()
+        self._scan_epoch += 1
+        self._render_token += 1
         self._cancel_btn.configure(state="disabled")
         self._progress_status_label.configure(text="Cancelling download...")
         self._status_pill.set_state("CANCELLING", "waiting")
@@ -884,3 +1018,14 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
                 "Download Complete",
                 f"Successfully downloaded {completed} of {total} items!\n\nFolder:\n{out_dir}",
             )
+
+    def destroy(self):
+        """Cleanly terminate worker threads and thumbnail pool on widget destroy."""
+        self._scan_epoch += 1
+        self._render_token += 1
+        self._cancel_event.set()
+        try:
+            self._thumb_executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+        super().destroy()
