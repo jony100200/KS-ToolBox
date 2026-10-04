@@ -522,3 +522,30 @@ class ToolBoxShell(ctk.CTk):
         self.after_cancel(self._queue_poll)
         self._services.queue.close()
         self.destroy()
+
+    def report_callback_exception(self, exc, val, tb) -> None:
+        """Prevent unhandled Tkinter callback exceptions from shutting down the app.
+
+        Logs the full traceback to stderr (or kstoolbox.log under pythonw.exe)
+        and alerts the user gracefully while keeping the workstation running.
+        """
+        import logging
+        import traceback
+        err_msg = "".join(traceback.format_exception(exc, val, tb))
+        logging.error("Exception in Tkinter callback:\n%s", err_msg)
+        if sys.stderr is not None:
+            try:
+                sys.stderr.write(f"Exception in Tkinter callback:\n{err_msg}\n")
+                sys.stderr.flush()
+            except Exception:
+                pass
+        try:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "KS ToolBox - Error",
+                f"An error occurred in an action:\n\n{type(val).__name__}: {val}\n\nThe application will stay open.",
+                parent=self,
+            )
+        except Exception:
+            pass
+

@@ -22,8 +22,9 @@ _COLLISION_LABELS = {"Create a copy": "copy", "Overwrite": "overwrite", "Stop if
 
 
 class UnityPackagerPanel(ctk.CTkFrame):
-    def __init__(self, parent):
+    def __init__(self, parent, services=None):
         super().__init__(parent, fg_color=t.BG_COLOR)
+        self._services = services
         self._checks: dict[str, ctk.CTkCheckBox] = {}
         self._cancel = threading.Event()
         self._results: queue.SimpleQueue = queue.SimpleQueue()
@@ -52,9 +53,16 @@ class UnityPackagerPanel(ctk.CTkFrame):
     def _build_folders_card(self):
         card = c.Card(self, "2 · Folders to include", icon=Icons.LAYERS)
         card.grid(row=1, column=0, sticky="ew", padx=t.PAD_GRID, pady=(t.PAD_GRID, 0))
+
+        # Actions toolbar
+        actions = ctk.CTkFrame(card.body, fg_color="transparent")
+        actions.pack(fill="x", pady=(0, 6))
+        c.ghost_button(actions, "Select All", self._select_all_folders, width=88).pack(side="left", padx=(0, 6))
+        c.ghost_button(actions, "Deselect All", self._deselect_all_folders, width=94).pack(side="left", padx=(0, 10))
+        c.ghost_button(actions, "Add another folder…", self._add_folder, width=160).pack(side="left")
+
         self._list = ctk.CTkScrollableFrame(card.body, height=130, fg_color=t.BG_COLOR)
         self._list.pack(fill="x")
-        c.ghost_button(card.body, "Add another folder…", self._add_folder, width=170).pack(anchor="w", pady=(8, 0))
 
     def _build_output_card(self):
         card = c.Card(self, "3 · Package", icon=Icons.TOOLBOX)
@@ -100,7 +108,14 @@ class UnityPackagerPanel(ctk.CTkFrame):
     # -- inputs ----------------------------------------------------------------
 
     def _browse_project(self):
-        chosen = filedialog.askdirectory(title="Select the Unity project folder")
+        try:
+            top = self.winfo_toplevel()
+        except Exception:
+            top = None
+        try:
+            chosen = filedialog.askdirectory(title="Select the Unity project folder", parent=top)
+        except Exception:
+            chosen = filedialog.askdirectory(title="Select the Unity project folder")
         if not chosen:
             return
         root = Path(chosen)
@@ -113,14 +128,49 @@ class UnityPackagerPanel(ctk.CTkFrame):
         self._set_status("Tick the folders to ship, then Build.", "idle")
 
     def _load_folders(self, root: Path):
-        for check in self._checks.values():
-            check.destroy()
+        for check in list(self._checks.values()):
+            try:
+                check.destroy()
+            except Exception:
+                pass
         self._checks.clear()
         assets = root / "Assets"
-        for first in sorted(p for p in assets.iterdir() if p.is_dir() and not e._ignored(p.name)):
-            subs = sorted(p for p in first.iterdir() if p.is_dir() and not e._ignored(p.name))
+        if not assets.is_dir():
+            return
+        try:
+            first_dirs = sorted(p for p in assets.iterdir() if p.is_dir() and not e._ignored(p.name))
+        except OSError as exc:
+            self._set_status(f"Error reading Assets: {exc}", "error")
+            return
+
+        found = 0
+        for first in first_dirs:
+            try:
+                subs = sorted(p for p in first.iterdir() if p.is_dir() and not e._ignored(p.name))
+            except OSError:
+                subs = []
             for folder in subs or [first]:
-                self._add_check(folder.relative_to(root).as_posix())
+                try:
+                    self._add_check(folder.relative_to(root).as_posix(), checked=True)
+                    found += 1
+                except Exception:
+                    pass
+        if found == 0:
+            self._set_status("No exportable folders found in Assets/.", "waiting")
+
+    def _select_all_folders(self):
+        for box in self._checks.values():
+            try:
+                box.select()
+            except Exception:
+                pass
+
+    def _deselect_all_folders(self):
+        for box in self._checks.values():
+            try:
+                box.deselect()
+            except Exception:
+                pass
 
     def _add_check(self, rel: str, checked: bool = False):
         if rel in self._checks:
@@ -135,7 +185,15 @@ class UnityPackagerPanel(ctk.CTkFrame):
         root = self._root()
         if root is None:
             return
-        chosen = filedialog.askdirectory(title="Pick a folder inside Assets", initialdir=str(root / "Assets"))
+        try:
+            top = self.winfo_toplevel()
+        except Exception:
+            top = None
+        initial = str(root / "Assets") if (root / "Assets").is_dir() else str(root)
+        try:
+            chosen = filedialog.askdirectory(title="Pick a folder inside Assets", initialdir=initial, parent=top)
+        except Exception:
+            chosen = filedialog.askdirectory(title="Pick a folder inside Assets", initialdir=initial)
         if not chosen:
             return
         try:
@@ -146,9 +204,28 @@ class UnityPackagerPanel(ctk.CTkFrame):
         self._add_check(rel, checked=True)
 
     def _browse_output(self):
-        name = (Path(next(iter(self._selected()), "package")).name or "package") + ".unitypackage"
-        path = filedialog.asksaveasfilename(title="Save package as", defaultextension=".unitypackage",
-                                            initialfile=name, filetypes=[("Unity package", "*.unitypackage")])
+        selected = self._selected()
+        first_name = Path(selected[0]).name if selected else "package"
+        name = (first_name or "package") + ".unitypackage"
+        try:
+            top = self.winfo_toplevel()
+        except Exception:
+            top = None
+        try:
+            path = filedialog.asksaveasfilename(
+                title="Save package as",
+                defaultextension=".unitypackage",
+                initialfile=name,
+                filetypes=[("Unity package", "*.unitypackage")],
+                parent=top,
+            )
+        except Exception:
+            path = filedialog.asksaveasfilename(
+                title="Save package as",
+                defaultextension=".unitypackage",
+                initialfile=name,
+                filetypes=[("Unity package", "*.unitypackage")],
+            )
         if path:
             self._output.delete(0, "end")
             self._output.insert(0, path)
@@ -171,10 +248,16 @@ class UnityPackagerPanel(ctk.CTkFrame):
         output = self._output.get().strip()
         if not output and selected:
             output = str(root.parent / (Path(selected[0]).name + ".unitypackage"))
+            self._output.delete(0, "end")
             self._output.insert(0, output)
+        level_val = e.LEVELS.get(self._level.get(), 6)
+        collision_val = _COLLISION_LABELS.get(self._collision.get(), "copy")
         return e.PackageOptions(
-            project_root=root, includes=tuple(selected), output=Path(output or "package.unitypackage"),
-            compress_level=e.LEVELS[self._level.get()], collision=_COLLISION_LABELS[self._collision.get()],
+            project_root=root,
+            includes=tuple(selected),
+            output=Path(output or "package.unitypackage"),
+            compress_level=level_val,
+            collision=collision_val,
         )
 
     # -- actions ---------------------------------------------------------------
@@ -208,7 +291,11 @@ class UnityPackagerPanel(ctk.CTkFrame):
         built = result["data"]
         message = (f"Create {opts.output.name}?\n\n{built.files} file(s), {built.folders} folder(s)"
                    + (f"\n{len(built.skipped)} item(s) will be skipped (no .meta)." if built.skipped else ""))
-        if not messagebox.askyesno("Build Unity package", message, parent=self):
+        try:
+            top = self.winfo_toplevel()
+        except Exception:
+            top = self
+        if not messagebox.askyesno("Build Unity package", message, parent=top):
             return
         self._cancel.clear()
         self._set_busy(True)
@@ -226,40 +313,54 @@ class UnityPackagerPanel(ctk.CTkFrame):
 
     def _poll(self):
         self._poll_job = None
+        if self._destroying:
+            return
         try:
             result = self._results.get_nowait()
         except queue.Empty:
             if not self._destroying and self._worker is not None and self._worker.is_alive():
                 self._poll_job = self.after(30, self._poll)
             return
+        except Exception:
+            return
         self._set_busy(False)
         if result["error"]:
             self._report(f"✗ {result['details']}")
-            self._set_status(result["details"], "waiting" if result["error_type"] == "cancelled" else "error")
+            self._set_status(result["details"], "waiting" if result.get("error_type") == "cancelled" else "error")
             return
         data = result["data"]
         lines = [f"✓ {data['path']}",
                  f"  {data['files']} file(s), {data['folders']} folder(s) · "
                  f"{data['package_bytes'] / 1048576:.2f} MB · sha256 {data['sha256'][:16]}…"]
-        lines += [f"  skipped — {reason}" for reason in data["skipped"]]
+        lines += [f"  skipped — {reason}" for reason in data.get("skipped", [])]
         self._report("\n".join(lines))
         self._set_status("Package created.", "done")
 
     # -- helpers ---------------------------------------------------------------
 
     def _set_busy(self, busy: bool):
-        self._build_btn.configure(state="disabled" if busy else "normal")
-        self._preview_btn.configure(state="disabled" if busy else "normal")
-        self._cancel_btn.configure(state="normal" if busy else "disabled")
+        try:
+            self._build_btn.configure(state="disabled" if busy else "normal")
+            self._preview_btn.configure(state="disabled" if busy else "normal")
+            self._cancel_btn.configure(state="normal" if busy else "disabled")
+        except Exception:
+            pass
 
     def _report(self, text: str):
-        self._log.configure(state="normal")
-        self._log.delete("1.0", "end")
-        self._log.insert("1.0", text)
-        self._log.configure(state="disabled")
+        try:
+            self._log.configure(state="normal")
+            self._log.delete("1.0", "end")
+            self._log.insert("1.0", text)
+            self._log.configure(state="disabled")
+        except Exception:
+            pass
 
     def _set_status(self, text: str, state: str):
-        self._status.set_state((text if len(text) <= 60 else text[:57] + "...").upper(), state)
+        if hasattr(self, "_status") and self._status is not None:
+            try:
+                self._status.set_state((text if len(text) <= 60 else text[:57] + "...").upper(), state)
+            except Exception:
+                pass
 
     def destroy(self):
         self._destroying = True
@@ -267,6 +368,6 @@ class UnityPackagerPanel(ctk.CTkFrame):
         if self._poll_job is not None:
             try:
                 self.after_cancel(self._poll_job)
-            except TclError:
+            except (TclError, Exception):
                 pass
         super().destroy()

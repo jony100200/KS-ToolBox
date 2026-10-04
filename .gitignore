@@ -60,4 +60,5 @@ benchmarks/
 test_smoke.py
 tools/*/test_smoke.py
 run_compress_courses.py
-
+logs/
+scratch/

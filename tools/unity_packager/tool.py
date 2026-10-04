@@ -19,4 +19,4 @@ class UnityPackagerTool:
     def build_panel(self, parent: ctk.CTkFrame, services) -> ctk.CTkBaseClass:
         # Lazy import keeps discovery and the sidebar independent of the panel.
         from .panel import UnityPackagerPanel
-        return UnityPackagerPanel(parent)
+        return UnityPackagerPanel(parent, services=services)
