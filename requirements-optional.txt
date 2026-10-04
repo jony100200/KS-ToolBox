@@ -11,3 +11,6 @@ markdown>=3.5            #   markdown -> html/pdf
 xhtml2pdf>=0.2.17        #   html / markdown -> pdf   (pulls reportlab, pypdf, html5lib)
 mammoth>=1.6             #   docx -> html/pdf
 pypdfium2>=4.0           #   pdf -> image / text      (PDFium; NOT PyMuPDF, which is AGPL)
+
+# YouTube Downloader — video / audio / subtitles streams (thumbnails require no pip deps):
+yt-dlp>=2026.0.0
