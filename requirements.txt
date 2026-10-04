@@ -5,6 +5,7 @@ customtkinter==5.2.2
 send2trash==2.1.0        # recoverable "delete original" (Recycle Bin / Trash)
 pillow==12.3.0           # image tools + Format Converter (images)
 numpy==2.2.3             # Alpha Doctor edge math + image ops (pinned release standard)
+yt-dlp>=2026.8.0         # YouTube Downloader tool
 
 # External binaries (not pip): FFmpeg + ffprobe power the video/audio tools and
 # Format Converter A/V. The portable release carries the validated pair in bin/;
