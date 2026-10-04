@@ -2,21 +2,25 @@
   <img src="assets/KS_ToolBox_GitHub_Banner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
 </p>
 
-<p align="center"><b>One window, 19 batch tools, a sprite viewer and a Unity package builder.</b><br>
-A fast, portable, cross-platform desktop app that brings a suite of practical
-file / image / video / audio / asset batch utilities under a single UI —
-free, offline, no credits, no cloud.</p>
+<p align="center"><b>21 free tools in one window.</b><br>
+Batch-process videos, images, audio, documents and game assets on your own computer.<br>
+No account. No cloud. No credits.</p>
+
+<p align="center">
+  <a href="https://github.com/jony100200/KS-ToolBox/releases"><b>⬇ Download for Windows</b></a>
+  &nbsp;·&nbsp; <a href="#tools">See all tools</a>
+  &nbsp;·&nbsp; <a href="#run-it">Run from source</a>
+</p>
 
 ---
 
-KS ToolBox is a **plugin toolbox**: one CustomTkinter shell that auto-discovers
-self-contained tools and presents them through four focused work areas instead
-of a wall of tool names. Home, live search, recent tools, and category pages
-keep the interface calm as the catalog grows. Its **19 batch workflows** share
-preview, safe output, durable queue/recovery, validation, manifests, and
-completion reports. Sprite Viewer keeps a purpose-built interactive screen.
-The app is **deterministic-first**: optional local utility models are lazy and
-never load at startup.
+## Why KS ToolBox
+
+- **Everything in one place.** Compress video, resize and clean up images, remove backgrounds, convert files, build Unity packages and more, without hunting for a separate program for each job.
+- **Safe by default.** Every tool shows a **preview** of what it will do before it writes anything, and your original files are never overwritten unless you turn that on and confirm.
+- **Private and offline.** Your files never leave your computer. The only time it goes online is if you choose to download the optional AI models.
+- **Portable.** On Windows there is nothing to install: unzip the folder and double-click `KS ToolBox.exe`.
+- **Built for big batches.** Drop in hundreds of files, watch progress in the Queue, and get a report at the end. A broken file doesn't stop the rest.
 
 ## Start here
 
@@ -47,6 +51,7 @@ always explicit and confirmed.
 | [**Metadata Scrubber**](tools/metadata_scrubber/README.md) | Batch remove EXIF, GPS coordinates, camera serials, and AI generation parameters/prompts from PNG, JPEG, and WebP. |
 | [**Pixel Art Converter**](tools/pixel_art/README.md) | Turn images into clean pixel art — chunky pixels, reduced palette, sharp alpha. |
 | [**To SVG**](tools/to_svg/README.md) | Vectorize raster images to SVG (vtracer). |
+| [**Font Builder**](tools/font_builder/README.md) | Turn a folder of letter images or SVGs into a real TrueType (`.ttf`) font, with automatic glyph naming and spacing. |
 | [**Icon Normalizer**](tools/icon_normalizer/README.md) | Trim, square-pad, and resize icons/sprites to a uniform canvas. |
 | [**Showcase**](tools/showcase/README.md) | Present your work: contact sheets, framed hero renders, and before/after comparisons. |
 
@@ -73,17 +78,16 @@ machine-readable completion report.
 
 ## Run it
 
-**Portable build (no Python needed).** Grab/build the one-folder release and
-double-click `KS ToolBox.exe` — a Python interpreter and all dependencies are
-bundled. Copy the folder anywhere; it's self-contained.
+**Windows (no Python needed).** Download the zip from the [**Releases**](https://github.com/jony100200/KS-ToolBox/releases) page, unzip it anywhere, and double-click `KS ToolBox.exe`. Python and everything else is already inside the folder.
 
-**From source (PowerShell):**
+**From source (Windows, Linux or macOS).** You need Python 3.12.
 ```bash
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r requirements-optional.txt # optional tool features
-.\.venv\Scripts\python.exe main.py
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt          # Windows; on Linux/macOS use .venv/bin/python
+.venv/Scripts/python -m pip install -r requirements-optional.txt  # optional: extra features for some tools
+.venv/Scripts/python main.py
 ```
-KS ToolBox uses its dedicated `.venv`. The portable release bundles FFmpeg/ffprobe; source users can provide binaries on PATH or in `bin/`.
+The video and audio tools need FFmpeg. The Windows download already includes it; from source, put `ffmpeg` and `ffprobe` on your PATH or in a `bin/` folder.
 
 ## Optional AI Micro-Models
 
@@ -93,7 +97,9 @@ While all tools run 100% deterministically without neural models, KS ToolBox sup
 
 See [**`MODELS.md`**](MODELS.md) for the complete list of supported models, direct download links, and manual setup instructions.
 
-## Build a portable release
+## For developers
+
+### Build a portable release
 
 ```powershell
 powershell -File build.ps1
@@ -104,7 +110,7 @@ The build fails on unknown bundled package licences and generates
 `SBOM.spdx.json`, `DEPENDENCY_MANIFEST.json`, `RELEASE_COMPONENTS.md`, exact
 licence texts, binary hashes, and FFmpeg build/source evidence.
 
-## Design
+### Design
 
 - **Engine ≠ UI.** Each tool is pure headless logic (`engine.py`) + a thin UI
   (`panel.py`). Errors are values (a standard envelope), never crashes.
@@ -117,7 +123,7 @@ licence texts, binary hashes, and FFmpeg build/source evidence.
 See each tool's guide in [**Tools**](#tools) above for specific options,
 supported formats, and settings.
 
-## Add a tool
+### Add a tool
 
 Drop a folder in `tools/` exposing a module-level `TOOL` — discovery finds it, the
 shell shows it, no other file changes. See [`CONTRIBUTING.md`](CONTRIBUTING.md).

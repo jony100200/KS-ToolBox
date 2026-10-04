@@ -65,25 +65,13 @@ module-level `TOOL` is required.
 
 ## Verifying your tool
 
-From the repo root, using an isolated uv overlay so you don't touch the app venv
-(include `customtkinter` plus your tool's own deps):
-
-```
-uv run --no-project --with customtkinter --with <your-deps> python -m tools.<name>.test_smoke
-```
-
-And confirm discovery still lists everything (runs in the app `.venv`):
+Run the app and open your tool, and confirm discovery lists it (this runs in the app `.venv`):
 
 ```
 python -c "from toolbox.discovery import discover; print(sorted(t.meta.id for t in discover().all()))"
 ```
 
-Before a release-facing change, also run:
-
-```
-python -m benchmarks.check_docs
-python benchmarks/run_all_smoke.py
-```
+If your tool has a headless `engine.py`, test it on a small real sample before opening a pull request.
 
 ## Style
 
