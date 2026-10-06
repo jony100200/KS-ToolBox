@@ -420,6 +420,11 @@ def download_item(
         'no_warnings': True,
         'quiet': True,
         'outtmpl': str(out_dir / f"{base_stem}.%(ext)s"),
+        'retries': 10,
+        'fragment_retries': 10,
+        'extractor_retries': 5,
+        'sleep_interval': 2,
+        'max_sleep_interval': 10,
     }
 
     # Format selection
@@ -479,16 +484,85 @@ def download_item(
 
     ydl_opts['progress_hooks'] = [ydl_hook]
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    def _do_download(skip_dl_override=None, subtitle_override=None):
+        _opts = dict(ydl_opts)
+        if skip_dl_override is not None:
+            _opts['skip_download'] = skip_dl_override
+        if subtitle_override is not None:
+            _opts['writesubtitles'] = True
+            _opts['writeautomaticsub'] = True
+            _opts['subtitleslangs'] = subtitle_override if isinstance(subtitle_override, list) else [subtitle_override]
+            _opts['subtitlesformat'] = 'srt'
+        elif not options.download_subtitles:
+            _opts.pop('writesubtitles', None)
+            _opts.pop('writeautomaticsub', None)
+            _opts.pop('subtitleslangs', None)
+            _opts.pop('subtitlesformat', None)
+        with yt_dlp.YoutubeDL(_opts) as ydl:
             ydl.download([item.url])
+
+    def _download_media():
+        _opts = dict(ydl_opts)
+        for k in ['writesubtitles', 'writeautomaticsub', 'subtitleslangs', 'subtitlesformat']:
+            _opts.pop(k, None)
+        with yt_dlp.YoutubeDL(_opts) as ydl:
+            ydl.download([item.url])
+
+    def _download_subtitles(langs, skip_dl=True):
+        _opts = dict(ydl_opts)
+        _opts['skip_download'] = skip_dl
+        _opts['writesubtitles'] = True
+        _opts['writeautomaticsub'] = True
+        _opts['subtitleslangs'] = langs if isinstance(langs, list) else [langs]
+        _opts['subtitlesformat'] = 'srt'
+        with yt_dlp.YoutubeDL(_opts) as ydl:
+            ydl.download([item.url])
+        stem = out_dir / sanitize_filename(item.title)
+        existing = list(out_dir.glob(f"{stem.name}*.srt"))
+        return len(existing) > 0, existing
+
+    try:
+        if options.download_video or options.download_audio:
+            _download_media()
             if options.download_video:
                 downloaded_assets.append("Video")
             if options.download_audio:
                 downloaded_assets.append(f"Audio ({options.audio_format})")
-            if options.download_subtitles:
-                downloaded_assets.append("Subtitles")
+
+        if options.download_subtitles:
+            subtitle_ok = False
+            last_sub_err = None
+            primary_lang = options.subtitle_lang if options.subtitle_lang != "all" else "en"
+            for attempt in range(3):
+                try:
+                    if attempt == 0:
+                        langs = [primary_lang]
+                    elif attempt == 1:
+                        import time
+                        time.sleep(5)
+                        langs = ["a." + primary_lang]
+                    else:
+                        import time
+                        time.sleep(10)
+                        langs = ["en", "a.en"]
+                    ok, files = _download_subtitles(langs, skip_dl=not (options.download_video or options.download_audio))
+                    if ok:
+                        subtitle_ok = True
+                        downloaded_assets.append("Subtitles")
+                        break
+                    last_sub_err = "No subtitle files were created (video may not have subtitles available)"
+                except Exception as ex2:
+                    last_sub_err = str(ex2)
+                    if "429" not in last_sub_err and attempt == 0:
+                        break
+
+            if not subtitle_ok:
+                downloaded_assets.append(f"Subtitles failed ({last_sub_err})")
+
+        if downloaded_assets and any("failed" not in a for a in downloaded_assets):
             return True, ", ".join(downloaded_assets)
+        return False, ", ".join(downloaded_assets) if downloaded_assets else f"Error: {err_msg}"
+
     except KeyboardInterrupt:
         return False, "Cancelled by user"
     except Exception as ex:

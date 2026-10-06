@@ -893,7 +893,7 @@ def _inspect_file(
                 return err("output.invalid", "PDF signature is missing")
         except OSError as ex:
             return err("output.invalid", f"PDF validation failed: {ex}")
-    elif target in {"html", "txt"}:
+    elif target in {"html", "txt", "md"}:
         text_valid = _validate_utf8(candidate, cancelled)
         if text_valid["error"]:
             return text_valid
