@@ -809,6 +809,7 @@ class YouTubeDownloaderPanel(ctk.CTkFrame):
         })
 
         self._update_selected_count()
+        self._log_colored("QUEUED", f"Ready to download {len(self._items)} items from collection")
 
     # =========================================================================
     # Queue Execution & Asset Downloading
