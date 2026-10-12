@@ -65,3 +65,7 @@ tools/*/test_smoke.py
 run_compress_courses.py
 logs/
 scratch/
+COMMUNITY_LAUNCH_KIT.md
+GITHUB_RELEASE_v1.1.0.md
+tools/youtube_downloader/test_smoke.py
+tools/youtube_downloader/test_smoke.py
