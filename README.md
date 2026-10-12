@@ -2,7 +2,7 @@
   <img src="assets/KSToolBoxBanner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
 </p>
 
-<p align="center"><b>21 free tools in one window.</b><br>
+<p align="center"><b>A growing set of tools in 1 place.</b><br>
 Batch-process videos, images, audio, documents and game assets on your own computer.<br>
 No account. No cloud. No credits.</p>
 
