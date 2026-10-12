@@ -19,7 +19,10 @@ _enhance_test/
 scratch_out/
 test_output/
 *.png
+!assets/KSToolBoxBanner.png
+!assets/KSToolBox.ico
 *.jpg
+
 *.jpeg
 *.webp
 *.bmp
