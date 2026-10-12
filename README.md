@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/KS_ToolBox_GitHub_Banner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
+  <img src="assets/KSToolBoxBanner.png" alt="KS ToolBox — small, practical batch tools for files, media, and game assets" width="100%">
 </p>
 
 <p align="center"><b>21 free tools in one window.</b><br>
