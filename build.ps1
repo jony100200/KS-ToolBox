@@ -9,6 +9,8 @@ $root = $PSScriptRoot
 # so optional extras installed in .venv are not swept into the bundle. Set KS_BUILD_PYTHON to that python.exe.
 $py = if ($env:KS_BUILD_PYTHON) {
   $env:KS_BUILD_PYTHON
+} elseif (Test-Path (Join-Path $root ".venv-release\Scripts\python.exe")) {
+  Join-Path $root ".venv-release\Scripts\python.exe"
 } elseif (Test-Path (Join-Path $root ".venv\Scripts\python.exe")) {
   Join-Path $root ".venv\Scripts\python.exe"
 } elseif (Test-Path "D:\KSAppDev\.venv\Scripts\python.exe") {
@@ -84,7 +86,7 @@ if (Test-Path $exe) {
   }
 
   Write-Host "`nBuild OK: $exe"
-  & powershell -NoProfile -File (Join-Path $root "benchmarks\measure_package.ps1")
+  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root "benchmarks\measure_package.ps1")
   Write-Host "`nShip the whole 'dist\KS ToolBox' folder (zip it for a portable download)."
   Write-Host "Publish corresponding FFmpeg source access beside every binary download."
 } else {
