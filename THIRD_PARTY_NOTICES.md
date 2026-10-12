@@ -12,7 +12,7 @@ also generates `RELEASE_COMPONENTS.md`, `DEPENDENCY_MANIFEST.json`, and
 | **FFmpeg / ffprobe** (`bin/`) | Video Compressor, Video Chopper, Audio Tool, Format Converter (A/V) | BtbN `win64-lgpl`, verified as **LGPL-3.0-or-later** at build time | The release inventory records the exact build, configure flags, binary hashes, and source evidence and includes the matching LGPL text. Video Compressor uses SVT-AV1 or AV1 NVENC. |
 | **Python and Tcl/Tk** | application runtime | PSF-2.0 / TCL | Exact runtime version and notices are copied into each release. |
 | **PyInstaller bootloader** | portable executable | GPL-2.0-or-later WITH Bootloader-exception | The exact PyInstaller notice is copied into each release. |
-| **Font Awesome 6 Free (Solid) font** (`assets/fonts/fa-solid-900.ttf`) | all icons | SIL OFL-1.1 | Only the font file is bundled; its exact upstream licence is copied into each release. |
+| **Tabler Icons font** (`assets/fonts/tabler-icons.ttf`) | all icons | MIT | Only the webfont file is bundled; its exact upstream licence is copied into each release. |
 | **CustomTkinter** | the whole UI | MIT | — |
 | **send2trash** | recoverable "delete original" | BSD-3-Clause | — |
 | **Pillow** | image decoding, transforms, and export | HPND | — |
