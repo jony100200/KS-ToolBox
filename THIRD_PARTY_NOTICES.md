@@ -17,6 +17,7 @@ also generates `RELEASE_COMPONENTS.md`, `DEPENDENCY_MANIFEST.json`, and
 | **send2trash** | recoverable "delete original" | BSD-3-Clause | — |
 | **Pillow** | image decoding, transforms, and export | HPND | — |
 | **NumPy** | Alpha Doctor, asset inspection, and texture analysis | BSD-3-Clause | — |
+| **yt-dlp** | YouTube Downloader | Unlicense | — |
 
 Transitive Python packages present in the actual frozen build are also listed in
 the generated release inventory with their exact installed versions and copied

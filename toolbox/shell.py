@@ -71,6 +71,7 @@ def restart_command() -> tuple[list[str], Path]:
 
 class ToolBoxShell(ctk.CTk):
     HOME_ID = "__home__"
+    WORKFLOWS_ID = "__workflows__"
     QUEUE_ID = "__queue__"
     SEARCH_ID = "__search__"
     CATEGORY_PREFIX = "category:"
@@ -176,6 +177,9 @@ class ToolBoxShell(ctk.CTk):
         ).pack(anchor="w", padx=16, pady=(2, 5))
 
         self._add_nav(self.HOME_ID, "Home", lambda: self._select(self.HOME_ID))
+        self._workflows_button = self._add_nav(
+            self.WORKFLOWS_ID, "Workflows", lambda: self._select(self.WORKFLOWS_ID)
+        )
         self._queue_button = self._add_nav(
             self.QUEUE_ID, "Queue", lambda: self._select(self.QUEUE_ID)
         )
@@ -191,7 +195,7 @@ class ToolBoxShell(ctk.CTk):
 
         help_text = ctk.CTkLabel(
             bar,
-            text="Ctrl+K  Search\nCtrl+1  Home  ·  Ctrl+2  Queue",
+            text="Ctrl+K  Search\nCtrl+1  Home  ·  Ctrl+2  Workflows  ·  Ctrl+3  Queue",
             justify="left",
             font=t.font(9),
             text_color=t.TEXT_MUTED,
@@ -236,12 +240,14 @@ class ToolBoxShell(ctk.CTk):
         self.bind_all("<Control-k>", self._focus_search)
         self.bind_all("<Control-K>", self._focus_search)
         self.bind_all("<Control-Key-1>", lambda _event: self._select(self.HOME_ID))
-        self.bind_all("<Control-Key-2>", lambda _event: self._select(self.QUEUE_ID))
+        self.bind_all("<Control-Key-2>", lambda _event: self._select(self.WORKFLOWS_ID))
+        self.bind_all("<Control-Key-3>", lambda _event: self._select(self.QUEUE_ID))
         self.bind_all("<Alt-Left>", self._go_back)
         if sys.platform == "darwin":
             self.bind_all("<Command-k>", self._focus_search)
             self.bind_all("<Command-Key-1>", lambda _event: self._select(self.HOME_ID))
-            self.bind_all("<Command-Key-2>", lambda _event: self._select(self.QUEUE_ID))
+            self.bind_all("<Command-Key-2>", lambda _event: self._select(self.WORKFLOWS_ID))
+            self.bind_all("<Command-Key-3>", lambda _event: self._select(self.QUEUE_ID))
 
     def _focus_search(self, _event=None) -> str:
         self._search_entry.focus_set()
@@ -327,7 +333,7 @@ class ToolBoxShell(ctk.CTk):
         self._update_nav_highlight(view_id, tool)
 
     def _is_valid_view(self, view_id: str, tool: Tool | None) -> bool:
-        if tool is not None or view_id in {self.HOME_ID, self.QUEUE_ID, self.SEARCH_ID}:
+        if tool is not None or view_id in {self.HOME_ID, self.WORKFLOWS_ID, self.QUEUE_ID, self.SEARCH_ID}:
             return view_id != self.SEARCH_ID or view_id in self._pages
         if view_id.startswith(self.CATEGORY_PREFIX):
             try:
@@ -354,6 +360,12 @@ class ToolBoxShell(ctk.CTk):
     def _build_page(
         self, view_id: str, tool: Tool | None
     ) -> ctk.CTkBaseClass:
+        if view_id == self.WORKFLOWS_ID:
+            from toolbox.workflow_panel import WorkflowPanel
+
+            panel = WorkflowPanel(self._content)
+            self._panels[view_id] = panel
+            return panel
         if view_id == self.QUEUE_ID:
             from toolbox.queue_panel import QueuePanel
 

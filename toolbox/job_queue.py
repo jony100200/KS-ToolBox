@@ -37,6 +37,7 @@ class QueueSubmission:
     on_error: Callable[[Exception], None] | None = None
     on_cancel: Callable[[QueueSnapshot], None] | None = None
     finalize: Callable[[BatchReport], object] | None = None
+    max_workers: int = 1
 
 
 @dataclass(frozen=True)
@@ -325,6 +326,7 @@ class JobQueue:
                     cancellation=token,
                     on_progress=progress,
                     validate_stored=submission.validate_stored,
+                    max_workers=getattr(submission, "max_workers", 1),
                 )
             detail = "reused completed job" if report.reused else ""
             value = None

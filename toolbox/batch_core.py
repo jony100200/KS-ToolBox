@@ -322,6 +322,7 @@ class BatchRunner:
         cancellation: CancellationToken | None = None,
         on_progress: ProgressCallback | None = None,
         validate_stored: StoredResultValidator | None = None,
+        max_workers: int = 1,
     ) -> BatchReport:
         token = cancellation or CancellationToken()
         diagnostics: list[str] = []
@@ -354,18 +355,62 @@ class BatchRunner:
         self._store.set_job_state(definition.job_id, JobState.RUNNING)
         total = len(definition.inputs)
 
-        for item in self._store.pending_items(definition.job_id):
-            if token.is_cancelled:
-                self._store.set_job_state(definition.job_id, JobState.CANCELLING)
-                self._store.set_job_state(definition.job_id, JobState.CANCELLED)
-                return replace(
-                    self._store.build_report(definition.job_id),
-                    recovered=prepared.recovered,
-                    diagnostics=tuple(diagnostics),
-                )
-            if token.is_paused:
-                self._store.set_job_state(definition.job_id, JobState.PAUSED)
-                if not token.wait_if_paused():
+        if max_workers > 1:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            pending = self._store.pending_items(definition.job_id)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_item = {}
+                for item in pending:
+                    if token.is_cancelled:
+                        break
+                    attempts = self._store.begin_item(definition.job_id, item.position)
+                    future = executor.submit(execute, Path(item.input_path))
+                    future_to_item[future] = (item, attempts)
+
+                completed_count = 0
+                for future in as_completed(future_to_item):
+                    item, attempts = future_to_item[future]
+                    try:
+                        raw_result = future.result()
+                        outcome = classify(raw_result)
+                        if not isinstance(outcome, ItemOutcome):
+                            raise TypeError("classify must return ItemOutcome")
+                    except Exception as ex:  # noqa: BLE001 - isolate one malformed item
+                        if token.is_cancelled:
+                            self._store.defer_item(
+                                definition.job_id,
+                                item.position,
+                                f"cancelled during execution: {type(ex).__name__}: {ex}",
+                            )
+                            continue
+                        outcome = ItemOutcome.failed(
+                            f"{type(ex).__name__}: {ex}",
+                            data={"exception_type": type(ex).__name__},
+                        )
+
+                    if outcome.state is ItemState.FAILED:
+                        outcome = replace(outcome, state=ItemState.QUARANTINED, retryable=False)
+                    self._store.finish_item(definition.job_id, item.position, outcome)
+
+                    completed_count += 1
+                    if on_progress is not None:
+                        current = ItemRecord(
+                            position=item.position,
+                            input_path=item.input_path,
+                            state=outcome.state,
+                            attempts=attempts,
+                            details=outcome.details,
+                            data=outcome.data,
+                        )
+                        try:
+                            on_progress(BatchProgress(definition.job_id, completed_count, total, current))
+                        except Exception as ex:  # noqa: BLE001 - subscriber errors cannot lose work
+                            diagnostics.append(f"progress subscriber failed: {type(ex).__name__}: {ex}")
+
+                if token.is_cancelled:
+                    for f in future_to_item:
+                        f.cancel()
                     self._store.set_job_state(definition.job_id, JobState.CANCELLING)
                     self._store.set_job_state(definition.job_id, JobState.CANCELLED)
                     return replace(
@@ -373,21 +418,19 @@ class BatchRunner:
                         recovered=prepared.recovered,
                         diagnostics=tuple(diagnostics),
                     )
-                self._store.set_job_state(definition.job_id, JobState.RUNNING)
-
-            while True:
-                attempts = self._store.begin_item(definition.job_id, item.position)
-                try:
-                    outcome = classify(execute(Path(item.input_path)))
-                    if not isinstance(outcome, ItemOutcome):
-                        raise TypeError("classify must return ItemOutcome")
-                except Exception as ex:  # noqa: BLE001 - isolate one malformed item
-                    if token.is_cancelled:
-                        self._store.defer_item(
-                            definition.job_id,
-                            item.position,
-                            f"cancelled during execution: {type(ex).__name__}: {ex}",
-                        )
+        else:
+            for item in self._store.pending_items(definition.job_id):
+                if token.is_cancelled:
+                    self._store.set_job_state(definition.job_id, JobState.CANCELLING)
+                    self._store.set_job_state(definition.job_id, JobState.CANCELLED)
+                    return replace(
+                        self._store.build_report(definition.job_id),
+                        recovered=prepared.recovered,
+                        diagnostics=tuple(diagnostics),
+                    )
+                if token.is_paused:
+                    self._store.set_job_state(definition.job_id, JobState.PAUSED)
+                    if not token.wait_if_paused():
                         self._store.set_job_state(definition.job_id, JobState.CANCELLING)
                         self._store.set_job_state(definition.job_id, JobState.CANCELLED)
                         return replace(
@@ -395,31 +438,53 @@ class BatchRunner:
                             recovered=prepared.recovered,
                             diagnostics=tuple(diagnostics),
                         )
-                    outcome = ItemOutcome.failed(
-                        f"{type(ex).__name__}: {ex}",
-                        data={"exception_type": type(ex).__name__},
-                    )
+                    self._store.set_job_state(definition.job_id, JobState.RUNNING)
 
-                if outcome.state is ItemState.FAILED and outcome.retryable and attempts <= definition.max_retries:
-                    continue
-                if outcome.state is ItemState.FAILED:
-                    outcome = replace(outcome, state=ItemState.QUARANTINED, retryable=False)
-                self._store.finish_item(definition.job_id, item.position, outcome)
-
-                if on_progress is not None:
-                    current = ItemRecord(
-                        position=item.position,
-                        input_path=item.input_path,
-                        state=outcome.state,
-                        attempts=attempts,
-                        details=outcome.details,
-                        data=outcome.data,
-                    )
+                while True:
+                    attempts = self._store.begin_item(definition.job_id, item.position)
                     try:
-                        on_progress(BatchProgress(definition.job_id, item.position + 1, total, current))
-                    except Exception as ex:  # noqa: BLE001 - subscriber errors cannot lose work
-                        diagnostics.append(f"progress subscriber failed: {type(ex).__name__}: {ex}")
-                break
+                        outcome = classify(execute(Path(item.input_path)))
+                        if not isinstance(outcome, ItemOutcome):
+                            raise TypeError("classify must return ItemOutcome")
+                    except Exception as ex:  # noqa: BLE001 - isolate one malformed item
+                        if token.is_cancelled:
+                            self._store.defer_item(
+                                definition.job_id,
+                                item.position,
+                                f"cancelled during execution: {type(ex).__name__}: {ex}",
+                            )
+                            self._store.set_job_state(definition.job_id, JobState.CANCELLING)
+                            self._store.set_job_state(definition.job_id, JobState.CANCELLED)
+                            return replace(
+                                self._store.build_report(definition.job_id),
+                                recovered=prepared.recovered,
+                                diagnostics=tuple(diagnostics),
+                            )
+                        outcome = ItemOutcome.failed(
+                            f"{type(ex).__name__}: {ex}",
+                            data={"exception_type": type(ex).__name__},
+                        )
+
+                    if outcome.state is ItemState.FAILED and outcome.retryable and attempts <= definition.max_retries:
+                        continue
+                    if outcome.state is ItemState.FAILED:
+                        outcome = replace(outcome, state=ItemState.QUARANTINED, retryable=False)
+                    self._store.finish_item(definition.job_id, item.position, outcome)
+
+                    if on_progress is not None:
+                        current = ItemRecord(
+                            position=item.position,
+                            input_path=item.input_path,
+                            state=outcome.state,
+                            attempts=attempts,
+                            details=outcome.details,
+                            data=outcome.data,
+                        )
+                        try:
+                            on_progress(BatchProgress(definition.job_id, item.position + 1, total, current))
+                        except Exception as ex:  # noqa: BLE001 - subscriber errors cannot lose work
+                            diagnostics.append(f"progress subscriber failed: {type(ex).__name__}: {ex}")
+                    break
 
         report = self._store.build_report(definition.job_id)
         quarantined = report.counts[ItemState.QUARANTINED.value]
