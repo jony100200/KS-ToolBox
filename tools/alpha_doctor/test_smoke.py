@@ -19,8 +19,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-np: Any = None
-e: Any = None
+try:
+    import numpy as np
+    from tools.alpha_doctor import engine as e
+except ImportError:
+    np = None
+    e = None
+
 
 
 def test_pure() -> None:

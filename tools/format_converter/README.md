@@ -26,8 +26,9 @@ files you loaded.
 | `.md` | `html`, `pdf` | `markdown` (+ `xhtml2pdf` for pdf) |
 | `.html` | `pdf` | `xhtml2pdf` |
 | `.docx` | `html`, `pdf` | `mammoth` (+ `xhtml2pdf` for pdf) |
-| `.pdf` | `png`, `jpg` (one image per page) | `pypdfium2` |
+| `.pdf` | `md` (structured GitHub-Flavored Markdown with page/section markers) | `pypdfium2` |
 | `.pdf` | `txt` | `pypdfium2` |
+| `.pdf` | `png`, `jpg` (one image per page) | `pypdfium2` |
 
 Nothing is written until you turn off **Preview only**; originals are never
 touched. A `convert_manifest.csv` records every file when an output folder is set.
@@ -44,7 +45,7 @@ matches:
 - images reopen successfully with the recorded geometry, mode, frame count,
   byte count, and SHA-256;
 - audio/video passes ffprobe duration validation plus exact hashing;
-- PDF output has a PDF signature; HTML/text must be valid streaming UTF-8;
+- PDF output has a PDF signature; HTML/text/Markdown must be valid streaming UTF-8;
 - PDF page directories contain exactly the numbered pages recorded by the job,
   with every page reopened and hashed.
 

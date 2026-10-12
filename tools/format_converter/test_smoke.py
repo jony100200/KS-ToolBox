@@ -5,7 +5,7 @@ Five legs, each skipping cleanly if its dependency is absent:
   * images          — Pillow: png -> jpg (flatten), ico, webp.
   * audio/video     — bundled ffmpeg: mp4 -> mp3 (extract) and mp4 -> gif.
   * documents       — markdown: md -> html.
-  * PDF page/text   — pypdfium2: two-page PDF -> atomic page set + streamed txt.
+  * PDF page/text   — pypdfium2: two-page PDF -> atomic page set + streamed txt + md.
 
 Run standalone:  python -m tools.format_converter.test_smoke
 """
@@ -177,7 +177,13 @@ def test_pdf_pages() -> None:
         assert text_result.action == "converted", text_result.reason
         assert Path(text_result.out_path).is_file()
         assert e.validate_result(text_result, text_opts)
-    print("PASS: PDF — two-page render and streamed text output validated.")
+        md_opts = e.ConvertOptions(target="md", out_root=tmp / "md", dry_run=False)
+        md_result = e.process(src, md_opts)
+        assert md_result.action == "converted", md_result.reason
+        assert e.validate_result(md_result, md_opts)
+        markdown = Path(md_result.out_path).read_text(encoding="utf-8")
+        assert "Total Pages" in markdown and "Page 1" in markdown, "pdf -> md structure missing"
+    print("PASS: PDF — two-page render, streamed text, and Markdown output validated.")
 
 
 def main() -> int:

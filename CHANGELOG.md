@@ -4,6 +4,13 @@ All notable changes to KS ToolBox. Format loosely follows Keep a Changelog.
 
 ## Unreleased
 
+- Format Converter: documented the existing `pdf -> md` extraction (page/section-marked
+  GitHub-Flavored Markdown) in the tool's capability table, which previously listed only
+  `png`/`jpg`/`txt` for PDF sources.
+- Format Converter: fixed Markdown output skipping the streaming UTF-8 validation applied
+  to `html` and `txt`, so a corrupted `pdf -> md` artifact could be committed unvalidated.
+- Format Converter: extended the smoke test with a real `pdf -> md` leg, asserting the
+  converted document carries the page/section structure the capability promises.
 - Added a documentation map, direct links to all 18 tool guides, documentation
   link/coverage validation, current queue/recovery guidance, and clear historical
   labels on older migration/audit records.
