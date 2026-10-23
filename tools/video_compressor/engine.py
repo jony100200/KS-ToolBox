@@ -234,7 +234,7 @@ def compress(src: str | Path, dst: str | Path, *, crf: int = 20,
 
 def _ffmpeg_cmd(ff: str, src: Path, dst: Path, crf: int, encoder: str) -> list[str]:
     if encoder == "nvenc_av1":
-        vcodec = ["-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", str(crf)]
+        vcodec = ["-c:v", "av1_nvenc", "-preset", "p5", "-rc", "vbr", "-cq", str(crf), "-b:v", "0"]
     else:
         # SVT-AV1 is BSD-2-Clause and is included by the verified LGPL FFmpeg
         # bundle. Preset 6 is a quality/speed balance for unattended batches.
@@ -255,7 +255,8 @@ def _ffmpeg_cmd(ff: str, src: Path, dst: Path, crf: int, encoder: str) -> list[s
 # ---------------------------------------------------------------------------
 
 def measure_vmaf(reference: str | Path, distorted: str | Path,
-                 fps: float | None = None, timeout: int | None = None,
+                 fps: float | None = None, sample_seconds: float | None = None,
+                 timeout: int | None = None,
                  cancelled: Callable[[], bool] | None = None) -> dict:
     """Mean VMAF of distorted vs reference (0-100). Degrades to None if libvmaf
     isn't available — caller must treat a missing score as "unproven".
@@ -273,7 +274,8 @@ def measure_vmaf(reference: str | Path, distorted: str | Path,
     lavfi = (f"[0:v]{sync}format=yuv420p,setpts=PTS-STARTPTS[d];"
              f"[1:v]{sync}format=yuv420p,setpts=PTS-STARTPTS[r];"
              f"[d][r]libvmaf=n_threads=6")
-    cmd = [ff, "-i", str(distorted), "-i", str(reference), "-lavfi", lavfi, "-f", "null", "-"]
+    limit = ["-t", str(sample_seconds)] if sample_seconds and sample_seconds > 0 else []
+    cmd = [ff, "-i", str(distorted), "-i", str(reference), "-lavfi", lavfi, *limit, "-f", "null", "-"]
     try:
         r = _run_cancellable(cmd, timeout=timeout, cancelled=cancelled)
     except subprocess.TimeoutExpired:
@@ -305,6 +307,7 @@ class ProcessOptions:
     mirror: bool = False              # rebuild the input folder structure under out_root
     policy: Policy = field(default_factory=Policy)
     vmaf_floor: float = 92.0          # min VMAF to accept an encode (visually-lossless)
+    vmaf_sample_seconds: float | None = 60.0  # seconds to sample for VMAF verification (None = full)
     delete_original: bool = False     # only true after user opts in; uses recycle bin when possible
     skip_existing: bool = True        # resumable batches: don't redo a file whose output exists
     dry_run: bool = True              # default safe: report, don't write/delete
@@ -409,7 +412,8 @@ def process(path: str | Path, opts: ProcessOptions,
 
     # Quality gate — measure before trusting (sync to source fps).
     try:
-        vm = measure_vmaf(src, candidate, fps=info.fps, cancelled=cancelled)
+        vm = measure_vmaf(src, candidate, fps=info.fps,
+                          sample_seconds=opts.vmaf_sample_seconds, cancelled=cancelled)
     except Exception:
         candidate.unlink(missing_ok=True)
         raise

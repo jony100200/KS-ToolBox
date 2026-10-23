@@ -49,9 +49,14 @@ def test_fetch_url_info_playlist():
     assert res.items[0].video_id == "fNk_zzaMoSs"
 
 
-if __name__ == "__main__":
+def main() -> int:
     test_tool_meta()
     test_sanitize_filename()
     test_format_duration()
     test_direct_thumbnail_download()
-    print("Smoke tests passed successfully!")
+    print("PASS: youtube_downloader — tool meta, sanitization, and thumbnail download verified.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

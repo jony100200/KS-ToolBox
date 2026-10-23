@@ -61,6 +61,7 @@ always explicit and confirmed.
 | [**Alpha Doctor**](tools/alpha_doctor/README.md) | Remove backgrounds & repair alpha — deterministic chroma / auto-solid / edge-flood keying + despill/defringe/premultiply, with an *optional* U2Net method for hard photos. |
 | [**Material Converter**](tools/material_converter/README.md) | Pack/convert/rename PBR texture-map sets — ORM/MOS packing, DirectX↔OpenGL normals, gloss↔roughness, Unity/Unreal/Godot/Blender/glTF presets. |
 | [**Sprite Viewer**](tools/sprite_viewer/README.md) | View & play sprite sheets and animations — grid/cell/auto-detect slicing, playback, slice-grid overlay. |
+| [**Seamless Checker**](tools/seamless_checker/README.md) | Interactive 3×3 wrap inspector and redo triage — dual-pass PBR and standalone detection, mouse zoom/pan, all-or-nothing Redo transfer. |
 | [**Tileset Checker**](tools/tileset_checker/README.md) | Score & preview how seamlessly a texture tiles — seam score, offset preview, N×N tile montage. |
 | [**Texture Renderer**](tools/texture_renderer/README.md) | Batch-export textures from Substance Designer (`.sbsar`) and Material Maker (`.ptex`) projects. *(requires those external tools)* |
 | [**Package Extractor**](tools/package_extractor/README.md) | Extract Unity `.unitypackage` + zip/tar archives and rebuild the original folders — with zip-slip / symlink / decompression-bomb guards. |
