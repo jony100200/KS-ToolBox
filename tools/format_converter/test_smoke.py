@@ -103,6 +103,32 @@ def test_images() -> None:
     print("PASS: images — png -> jpg (flattened), ico, webp.")
 
 
+def test_images_keep_icc_and_orientation() -> None:
+    """Regression (2026-11-12 audit): ICC dropped and phone photos converted sideways."""
+    if importlib.util.find_spec("PIL") is None:
+        print("SKIP: Pillow not installed — ICC/orientation leg skipped."); return
+    from PIL import Image, ImageCms
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src = tmp / "phone.jpg"
+        icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+        exif = Image.Exif(); exif[0x0112] = 6          # stored landscape, shown portrait
+        Image.new("RGB", (80, 40), (90, 140, 200)).save(src, quality=95, icc_profile=icc,
+                                                        exif=exif.tobytes())
+        for target in ("png", "webp", "jpg"):
+            opts = e.ConvertOptions(target=target, out_root=tmp / target, dry_run=False)
+            res = e.process(src, opts)
+            assert res.action == "converted", f"{target}: {res.reason}"
+            with Image.open(res.out_path) as got:
+                assert got.size == (40, 80), f"{target}: orientation not applied {got.size}"
+                assert got.info.get("icc_profile") == icc, f"{target}: ICC profile dropped"
+        cmyk = tmp / "print.jpg"
+        Image.new("CMYK", (16, 16), (0, 128, 255, 0)).save(cmyk)
+        res = e.process(cmyk, e.ConvertOptions(target="png", out_root=tmp / "cmyk", dry_run=False))
+        assert res.action == "converted", res.reason
+    print("PASS: images — ICC kept and EXIF orientation applied (png, webp, jpg); CMYK ok.")
+
+
 def test_ffmpeg() -> None:
     if not e.resolve_tool("ffmpeg"):
         print("SKIP: ffmpeg not found — audio/video leg skipped."); return
@@ -189,6 +215,7 @@ def test_pdf_pages() -> None:
 def main() -> int:
     test_dispatch()
     test_images()
+    test_images_keep_icc_and_orientation()
     test_ffmpeg()
     test_docs()
     test_pdf_pages()

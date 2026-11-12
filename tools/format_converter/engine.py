@@ -164,6 +164,35 @@ def _write_text_atomic(
 
 # --- image converters (Pillow) ------------------------------------------------
 
+_ICC_TARGETS = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
+
+
+def _upright(im):
+    """Apply the EXIF orientation (phones store photos sideways plus a tag)."""
+    from PIL import ImageOps
+    return ImageOps.exif_transpose(im) or im
+
+
+def _icc_space(icc: bytes) -> str:
+    """Colour space of an embedded ICC profile ('RGB', 'CMYK', 'GRAY', ...)."""
+    import io
+    from PIL import ImageCms
+    try:
+        return ImageCms.ImageCmsProfile(io.BytesIO(icc)).profile.xcolor_space.strip()
+    except (OSError, ImageCms.PyCMSError):
+        return ""
+
+
+def _cmyk_to_srgb(im, icc: bytes):
+    """Colour-managed CMYK -> sRGB, so the RGB output does not carry a CMYK profile."""
+    import io
+    from PIL import ImageCms
+    srgb = ImageCms.createProfile("sRGB")
+    rgb = ImageCms.profileToProfile(im, ImageCms.ImageCmsProfile(io.BytesIO(icc)), srgb,
+                                    outputMode="RGB")
+    return rgb, ImageCms.ImageCmsProfile(srgb).tobytes()
+
+
 def _img_convert(
     src: Path,
     dst: Path,
@@ -189,7 +218,7 @@ def _img_convert(
             dst.parent.mkdir(parents=True, exist_ok=True)
 
             if tgt == ".ico":
-                im.convert("RGBA").save(tmp, format="ICO",
+                _upright(im).convert("RGBA").save(tmp, format="ICO",
                                         sizes=[(16, 16), (32, 32), (48, 48), (256, 256)])
                 _cancelled(cancelled, "image-commit", dst)
                 tmp.replace(dst)
@@ -215,7 +244,11 @@ def _img_convert(
                         frame.close()
 
             # Still image (or first frame of an animation).
-            img = im.convert("RGBA") if im.mode in ("P", "LA", "RGBA") else im.convert("RGB")
+            icc = im.info.get("icc_profile")
+            still = _upright(im)
+            if still.mode == "CMYK" and icc:
+                still, icc = _cmyk_to_srgb(still, icc)
+            img = still.convert("RGBA") if still.mode in ("P", "LA", "PA", "RGBA") else still.convert("RGB")
             note = "first frame only" if animated else ""
             if tgt in (".jpg", ".jpeg", ".bmp") and img.mode in ("RGBA", "LA", "P"):
                 bg = Image.new("RGB", img.size, opts.flatten_bg)
@@ -225,6 +258,8 @@ def _img_convert(
             save_kw: dict = {}
             if tgt in (".jpg", ".jpeg", ".webp"):
                 save_kw["quality"] = opts.quality
+            if icc and tgt in _ICC_TARGETS and _icc_space(icc) == "RGB":
+                save_kw["icc_profile"] = icc
             img.save(tmp, **save_kw)
             _cancelled(cancelled, "image-commit", dst)
             tmp.replace(dst)

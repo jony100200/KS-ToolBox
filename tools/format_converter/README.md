@@ -10,6 +10,8 @@ files you loaded.
 **Images** (Pillow): `png · jpg · webp · bmp · tiff · ico` ↔ each other.
 - Alpha is flattened onto a background colour when the target can't hold it (jpg/bmp).
 - Animated `gif ↔ webp` preserves frames; `gif → png/jpg` takes the first frame.
+- The colour (ICC) profile is kept (CMYK sources are colour-managed to sRGB), and the
+  EXIF orientation is applied, so phone photos convert upright.
 - `ico` output is written multi-size (16/32/48/256).
 
 **Audio / Video** (bundled ffmpeg):

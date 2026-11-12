@@ -22,6 +22,11 @@ images (PSNR in dB against the clean original, higher is better).
     match with RGB Lanczos (`nearest` still keeps the exact palette for pixel art).
   - The AI path applies the source orientation to the NCNN output as well.
   - Smoke tests: `KS_TOOLBOX_SKIP_GPU=1` skips the optional Real-ESRGAN leg on a busy GPU.
+- **Format Converter: ICC and orientation.** Still-image conversions keep an RGB ICC
+  profile (audit: dropped for jpg and webp; now kept, PSNR unchanged at 42.2 / 41.7 dB),
+  colour-manage CMYK sources with a profile to sRGB, and apply the EXIF orientation
+  (audit: phone JPEG -> PNG came out 1920x1080 sideways; now 1080x1920).
+  ICO output is upright too.
 
 ## [1.1.0] — 2026-10-12
 
