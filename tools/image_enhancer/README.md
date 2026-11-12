@@ -59,6 +59,26 @@ For users who want manual control and real-time visual feedback:
 | **B&W Contrast** | Fine-art monochrome conversion with clarity and grain. |
 | **Custom (Manual)** | Full stack customization with arbitrary filter stacking. |
 
+**How presets combine with the sliders.** Only **Auto** (or *auto-select*) applies the
+measured smart plan (brightness, de-gloss, micro-texture, denoise). Every other preset
+does exactly what its row says; the sliders are extra adjustments on top and reset to
+neutral when you pick a preset.
+
+**Filters behind the presets.**
+- *Denoise* is a noise-adaptive bilateral filter on luminance and colour: it measures the
+  noise first, so a clean image is barely touched (σ-12 noise: 26.8 → 36.0 dB).
+- *Sharpen* and the detail presets use a standard unsharp mask on luminance with a noise
+  threshold; *High-Pass* adds detail to luminance; *Edge Boost* adds detail only along
+  edges and keeps the overall brightness.
+- *Despeckle* is a gated 3×3 median: only isolated outlier pixels are replaced.
+- Transparent images: the colour hidden under fully transparent pixels is replaced with
+  nearby visible colour before filtering, so no fringe appears at the edges.
+
+**OpenCV presets.** *CLAHE Texture*, *Vector / Cel-Shade* and *Anime / Manga* need OpenCV
+(`pip install opencv-python-headless`, optional). Without it the panel says so, a weaker
+Pillow fallback runs, and each result is marked **needs-review** with the fallback named
+in its report line.
+
 ---
 
 ## 4. Specialist AI Micro-Model Rack ("Rack of Tiny Experts")

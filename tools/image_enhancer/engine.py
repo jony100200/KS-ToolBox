@@ -31,6 +31,12 @@ _ESRGAN_SELECTABLE = _ESRGAN_MODELS + (
     "realesr-animevideov3-x3",      # native 3x
     "realesr-animevideov3-x4",
 )
+# Presets whose main pass needs OpenCV, with the Pillow fallback used without it.
+OPENCV_PRESETS = {
+    "clahe_texture": "clarity instead of CLAHE",
+    "vector_cel": "adaptive-palette posterize instead of bilateral cel shading",
+    "anime_style": "Pillow smooth + edge lines instead of the bilateral/DoG shader",
+}
 _SESSIONS: dict[str, object] = {}
 _FACE_DETECTORS: dict[tuple[int, int], object] = {}
 Cancelled = Callable[[], bool] | None
@@ -126,20 +132,23 @@ def utility_status() -> dict[str, str | bool]:
     try:
         import cv2  # noqa: F401
         faces_ready = _YUNET.is_file()
-        repair_ready = True
+        repair_ready = opencv_ready = True
     except ImportError:
-        faces_ready = repair_ready = False
+        faces_ready = repair_ready = opencv_ready = False
 
     return {
         "upscale_ready": esrgan_ready,
         "segmentation_ready": segmentation_ready,
         "faces_ready": faces_ready,
         "repair_ready": repair_ready,
+        "opencv_ready": opencv_ready,
         "details": " | ".join((
             f"Real-ESRGAN {'ready' if esrgan_ready else 'optional'}",
             f"U2NetP mask {'ready' if segmentation_ready else 'optional'}",
             f"YuNet faces {'ready' if faces_ready else 'optional'}",
             f"local repair {'ready' if repair_ready else 'missing OpenCV'}",
+            "OpenCV presets ready" if opencv_ready
+            else "CLAHE/cel/anime presets need OpenCV (Pillow fallback, reported)",
         )),
     }
 
@@ -359,11 +368,21 @@ def _save_png(image, path: Path) -> None:
     temp.replace(path)
 
 
-def _with_smart_plan(options: EnhanceOptions, route: smart.Plan) -> EnhanceOptions:
-    """Combine measured settings with explicit controls."""
+def _with_mode_limits(options: EnhanceOptions, route: smart.Plan) -> EnhanceOptions:
+    """Deterministic routing forbids model-backed scale/region/face work."""
     deterministic = route.effective_mode == "deterministic"
     return replace(
         options,
+        scale_factor=1 if deterministic else options.scale_factor,
+        region_mode="none" if deterministic and options.region_mode in {"subject_mask", "faces"} else options.region_mode,
+        face_detail=False if deterministic else options.face_detail,
+    )
+
+
+def _with_smart_plan(options: EnhanceOptions, route: smart.Plan) -> EnhanceOptions:
+    """Combine measured settings with explicit controls (Auto preset / auto-select only)."""
+    return replace(
+        _with_mode_limits(options, route),
         brightness=options.brightness * route.brightness,
         contrast=options.contrast * route.contrast,
         gamma=options.gamma * route.gamma,
@@ -373,9 +392,6 @@ def _with_smart_plan(options: EnhanceOptions, route: smart.Plan) -> EnhanceOptio
         sharpen=options.sharpen * route.sharpen,
         de_gloss_strength=max(options.de_gloss_strength, route.de_gloss),
         micro_texture_amount=max(options.micro_texture_amount, route.micro_texture),
-        scale_factor=1 if deterministic else options.scale_factor,
-        region_mode="none" if deterministic and options.region_mode in {"subject_mask", "faces"} else options.region_mode,
-        face_detail=False if deterministic else options.face_detail,
     )
 
 
@@ -400,7 +416,11 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
                            auto_select=options.auto_select_mode or options.preset == "auto",
                            requested_scale=options.scale_factor)
 
-        metadata = {"smart_profile": profile.to_dict(), "smart_plan": route.to_dict()}
+        # Manual presets do exactly what their name says; the measured tonal plan
+        # (brightness, de-gloss, micro-texture, ...) belongs to Auto only.
+        smart_tonal = options.preset == "auto" or options.auto_select_mode
+        metadata = {"smart_profile": profile.to_dict(), "smart_plan": route.to_dict(),
+                    "smart_plan_applied": smart_tonal}
         if route.effective_mode == "deterministic" and (options.face_detail or options.region_mode in {"subject_mask", "faces"}):
             metadata["smart_suppressed"] = "model-backed face/subject routing disabled by deterministic mode"
 
@@ -408,7 +428,8 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
             return Result(str(source), "dry-run", f"would run {route.effective_mode} Smart Enhance", str(target),
                           detail="smart.preview", metadata=metadata)
 
-        effective_options = _with_smart_plan(options, route)
+        effective_options = (_with_smart_plan(options, route) if smart_tonal
+                             else _with_mode_limits(options, route))
         image = original
         artifacts: list[str] = []
 
@@ -438,8 +459,14 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
                     image = image.resize((target_w, target_h), Image.Resampling.LANCZOS)
 
         base = image.convert("RGB")
-        enhanced_rgba, applied_stack = _apply_stack(base, effective_options, boxes=tuple(boxes))
+        # The stack sees the alpha so it can neutralise the colour hidden under
+        # transparent pixels before any neighbourhood filter runs.
+        enhanced_rgba, applied_stack = _apply_stack(image if image.mode == "RGBA" else base,
+                                                    effective_options, boxes=tuple(boxes))
         enhanced = enhanced_rgba.convert("RGB")
+        fallbacks = [name for name in applied_stack if "needs OpenCV" in name]
+        if fallbacks:
+            metadata["fallbacks"] = fallbacks
 
         masks = []
         region_boxes: list[tuple[int, int, int, int]] = []
@@ -517,9 +544,11 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
         if effective_options.repair_alpha_holes:
             tags.append("alpha-hole-repair")
 
-        action = "needs-review" if skin_guard["needs_review"] else "enhanced"
-        if action == "needs-review":
+        action = "needs-review" if skin_guard["needs_review"] or fallbacks else "enhanced"
+        if skin_guard["needs_review"]:
             tags.append("skin-tone-review")
+        if fallbacks:
+            tags.append("degraded:needs-OpenCV (weaker Pillow fallback used)")
 
         return Result(str(source), action, " + ".join(tags), str(target), "+".join(tags), tuple(artifacts), metadata)
     except CommandCancelled:

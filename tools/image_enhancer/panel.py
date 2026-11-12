@@ -458,6 +458,11 @@ class ImageEnhancerPanel(BaseBatchPanel):
             self._schedule_preview()
 
     def _reset_all_sliders(self):
+        self._reset_sliders_to_neutral()
+        self._preset_display.set("Auto (Recommended)")
+        self._schedule_preview()
+
+    def _reset_sliders_to_neutral(self):
         defaults = {
             "brightness": 1.0, "contrast": 1.0, "gamma": 1.0, "saturation": 1.0,
             "vibrance": 0.0, "temperature": 0.0, "tint": 0.0, "de_gloss_strength": 0.0,
@@ -471,8 +476,6 @@ class ImageEnhancerPanel(BaseBatchPanel):
                 self._slider_vars[k].set(v)
                 if k in self._slider_labels:
                     self._slider_labels[k].configure(text=f"{v:.2f}")
-        self._preset_display.set("Auto (Recommended)")
-        self._schedule_preview()
 
     def _toggle_privacy_shield(self):
         self._privacy_shield_active = not self._privacy_shield_active
@@ -597,63 +600,12 @@ class ImageEnhancerPanel(BaseBatchPanel):
             self._canvas.create_text(offset_x + target_w - 8, offset_y + 14, text="AFTER", fill=t.ACCENT_BLUE, anchor="e", font=t.font(9, "bold"))
 
     def _preset_changed(self, display_name: str):
-        preset_key = _PRESET_MAP.get(display_name, "auto")
-        if preset_key == "de_gloss":
-            self._set_val("de_gloss_strength", 0.85)
-        elif preset_key == "natural_skin":
-            self._set_val("de_gloss_strength", 0.75)
-            self._set_val("micro_texture_amount", 0.035)
-        elif preset_key == "vivid_pop":
-            self._set_val("contrast", 1.10)
-            self._set_val("saturation", 1.18)
-            self._set_val("vibrance", 0.15)
-            self._set_val("clarity", 0.25)
-        elif preset_key == "clahe_texture":
-            self._set_val("clahe_strength", 0.80)
-            self._set_val("clarity", 0.25)
-        elif preset_key == "auto_white_balance":
-            self._set_val("auto_wb_strength", 1.0)
-        elif preset_key == "despeckle_clean":
-            self._set_val("despeckle_strength", 0.85)
-            self._set_val("denoise", 0.25)
-        elif preset_key == "soft_glamour":
-            self._set_val("de_gloss_strength", 0.65)
-            self._set_val("soft_glow", 0.28)
-        elif preset_key == "warm_sunset":
-            self._set_val("temperature", 0.22)
-            self._set_val("soft_glow", 0.18)
-            self._set_val("vignette", 0.25)
-        elif preset_key == "cinematic_teal":
-            self._set_val("split_tone", 0.35)
-            self._set_val("clarity", 0.20)
-            self._set_val("vignette", 0.30)
-            self._set_val("film_grain", 0.025)
-        elif preset_key == "radial_focus":
-            self._set_val("radial_focus", 0.80)
-            self._set_val("vignette", 0.25)
-        elif preset_key == "privacy_censor":
-            self._set_val("privacy_blur", 0.85)
-        elif preset_key == "pixelate_censor":
-            self._set_val("pixelate_block", 20.0)
-        elif preset_key == "bw_contrast":
-            self._set_val("saturation", 0.0)
-            self._set_val("contrast", 1.25)
-            self._set_val("clarity", 0.35)
-            self._set_val("vignette", 0.35)
-        elif preset_key == "dcp_dehaze":
-            self._set_val("contrast", 1.05)
-            self._set_val("saturation", 1.05)
-        elif preset_key == "anime_style":
-            self._set_val("contrast", 1.04)
-            self._set_val("saturation", 1.08)
-            self._set_val("soft_glow", 0.20)
-        elif preset_key == "vector_cel":
-            self._set_val("contrast", 1.04)
-            self._set_val("saturation", 1.08)
-        elif preset_key == "red_eye_fix":
-            pass
-        elif preset_key == "auto":
-            pass
+        # A preset carries its own settings; the sliders are extra adjustments on
+        # top of it. Echoing the preset's values into the sliders applied them
+        # twice (e.g. Vivid Pop contrast 1.10 x 1.10), so they go back to neutral.
+        self._reset_sliders_to_neutral()
+        if hasattr(self, "_status"):
+            self._refresh_status()
         self._schedule_preview()
 
     def _set_val(self, key: str, val: float):
@@ -688,6 +640,14 @@ class ImageEnhancerPanel(BaseBatchPanel):
         rack = model_rack.get_rack_status()
         ready = all(bool(state[key]) for key in ("upscale_ready", "segmentation_ready", "faces_ready", "repair_ready"))
         contract = "Deterministic: Fast CPU frequency separation" if self._mode.get() == "Deterministic" else "Hybrid: Utility models on demand" if self._mode.get() == "Hybrid" else "AI-only: Model restoration pass"
+        preset_key = _PRESET_MAP.get(self._preset_display.get(), "auto")
+        if not state.get("opencv_ready", True) and preset_key in e.OPENCV_PRESETS:
+            self._status.configure(
+                text=f"⚠ This preset needs OpenCV (pip install opencv-python-headless). Without it a weaker "
+                     f"Pillow fallback runs: {e.OPENCV_PRESETS[preset_key]}. Results are marked needs-review.",
+                text_color=t.STATE["waiting"][1],
+            )
+            return
         self._status.configure(
             text=f"{contract} · {state['details']} · Model Rack: {rack['installed_count']}/{rack['total']} installed",
             text_color=t.STATE["done"][1] if ready else t.STATE["waiting"][1]
@@ -846,6 +806,9 @@ class ImageEnhancerPanel(BaseBatchPanel):
         }.get(res.action, t.TEXT_MUTED)
         name = Path(res.src).name
         extra = f"  → {res.out_path}" if res.out_path else f"  — {res.reason}"
+        fallbacks = (res.metadata or {}).get("fallbacks")
+        if fallbacks:
+            extra += "  — needs OpenCV, weaker fallback used: " + ", ".join(fallbacks)
         self._logline(f"  {icon} {name}{extra}", color)
 
     def _queue_complete(self, completion: QueueCompletion) -> None:

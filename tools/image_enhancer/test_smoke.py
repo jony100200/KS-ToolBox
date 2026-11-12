@@ -1,6 +1,7 @@
 """Release-bar smoke test for the standalone local Image Enhancer."""
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -17,11 +18,114 @@ from tools.image_enhancer import classical_ops  # noqa: E402
 from tools.image_enhancer import model_rack  # noqa: E402
 
 
+def _psnr(a, b) -> float:
+    x = np.asarray(a.convert("RGB"), np.float64); y = np.asarray(b.convert("RGB"), np.float64)
+    mse = float(np.mean((x - y) ** 2))
+    return 99.0 if mse == 0 else float(10 * np.log10(255 ** 2 / mse))
+
+
+def _fixture():
+    """Photo-like synthetic image: gradients, hard edges, soft texture (deterministic)."""
+    from PIL import Image, ImageDraw, ImageFilter
+    h, w = 192, 256
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    rng = np.random.default_rng(3)
+    tex = np.asarray(Image.fromarray((rng.random((h, w)) * 255).astype(np.uint8))
+                     .filter(ImageFilter.GaussianBlur(3)), np.float32) - 128
+    rgb = np.stack([60 + xx * 0.5 + tex * 0.8, 50 + yy * 0.6 + tex * 0.6, 120 + tex * 0.5], -1)
+    image = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((40, 40, 120, 120), fill=(220, 180, 60))
+    draw.ellipse((140, 60, 220, 150), fill=(30, 140, 90))
+    draw.line((10, 170, 245, 20), fill=(250, 250, 250), width=2)
+    return image
+
+
+def _run(e_opts_root, src, **kw):
+    from PIL import Image
+    res = e.process(src, e.EnhanceOptions(out_root=e_opts_root, mode="deterministic", **kw))
+    assert res.action in {"enhanced", "needs-review"}, res
+    with Image.open(res.out_path) as out:
+        return out.convert("RGBA").copy(), res
+
+
+def quality_regressions() -> None:
+    """2026-11-12 audit regressions. Pillow + numpy only, so they run in the shipped build."""
+    from PIL import Image, ImageFilter
+    clean = _fixture()
+    rng = np.random.default_rng(7)
+    arr = np.asarray(clean, np.float32)
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        # Manual presets do not get the smart tonal plan.
+        clean.save(root / "clean.png")
+        out, res = _run(root / "manual", root / "clean.png", preset="custom")
+        assert res.metadata["smart_plan_applied"] is False
+        assert _psnr(out, clean) == 99.0, "custom preset with neutral sliders changed the image"
+        _, auto = _run(root / "auto", root / "clean.png", preset="auto")
+        assert auto.metadata["smart_plan_applied"] is True
+        # Zero-strength passes never run (a 0-strength de-gloss used to boost pores).
+        assert fs.build_stack(preset="custom", brightness=1, contrast=1, gamma=1, hue_degrees=0, saturation=1,
+                              vibrance=0, temperature=0, tint=0, denoise=0, sharpen=1, high_pass=0,
+                              edge_boost=0) == []
+
+        # Denoise: edge-preserving, beats the old Gaussian (audit 31.0 dB) by a margin.
+        noisy = Image.fromarray(np.clip(arr + rng.normal(0, 12, arr.shape), 0, 255).astype(np.uint8))
+        noisy.save(root / "noisy.png")
+        den, _ = _run(root / "den", root / "noisy.png", preset="custom", denoise=1.0)
+        before = _psnr(noisy, clean)
+        assert _psnr(den, clean) >= before + 6.0, (before, _psnr(den, clean))
+        # ...and barely touches a clean image.
+        den_clean, _ = _run(root / "den_clean", root / "clean.png", preset="custom", denoise=1.0)
+        assert _psnr(den_clean, clean) >= 40.0, _psnr(den_clean, clean)
+
+        # Sharpen / detail: unsharp mask must improve a mildly blurred image.
+        blurry = clean.filter(ImageFilter.GaussianBlur(1.2)); blurry.save(root / "blurry.png")
+        for kw in ({"preset": "detail"}, {"preset": "custom", "sharpen": 2.0}):
+            sharp, _ = _run(root / f"sharp_{kw['preset']}", root / "blurry.png", **kw)
+            assert _psnr(sharp, clean) > _psnr(blurry, clean), (kw, _psnr(sharp, clean), _psnr(blurry, clean))
+
+        # Despeckle preset: gated median only.
+        speck = arr.copy(); mask = rng.random(arr.shape[:2])
+        speck[mask < 0.005] = 0; speck[mask > 0.995] = 255
+        Image.fromarray(speck.astype(np.uint8)).save(root / "speck.png")
+        desp, _ = _run(root / "desp", root / "speck.png", preset="despeckle_clean")
+        assert _psnr(desp, clean) >= 38.0, _psnr(desp, clean)
+
+        # Edge boost keeps the brightness (was blended towards a black edge map).
+        boosted, _ = _run(root / "edge", root / "clean.png", preset="custom", edge_boost=1.0)
+        luma_in = float(np.asarray(clean.convert("L"), np.float32).mean())
+        luma_out = float(np.asarray(boosted.convert("L"), np.float32).mean())
+        assert abs(luma_out - luma_in) < 1.5, (luma_in, luma_out)
+
+        # Transparent sprite: the colour hidden under alpha=0 must not bleed into edges.
+        rgba = np.dstack([arr, np.zeros(arr.shape[:2], np.float32)])
+        rgba[30:160, 30:220, 3] = 255
+        rgba[28:30, 30:220, 3] = 128                     # a soft top edge
+        rgba[rgba[..., 3] == 0, :3] = (255, 0, 255)      # magenta hidden colour
+        Image.fromarray(rgba.astype(np.uint8), "RGBA").save(root / "sprite.png")
+        sprite, _ = _run(root / "sprite", root / "sprite.png", preset="gentle_restore")
+        band = np.asarray(sprite)[28:31, 30:220].astype(np.float32)
+        magenta = np.clip((band[..., 0] + band[..., 2]) / 2 - band[..., 1], 0, None).mean()
+        reference = np.clip((arr[28:31, 30:220, 0] + arr[28:31, 30:220, 2]) / 2 - arr[28:31, 30:220, 1], 0, None).mean()
+        assert magenta <= reference + 3.0, (magenta, reference)
+
+        # OpenCV-only presets announce their fallback instead of running silently.
+        if not classical_ops.has_opencv():
+            _, clahe = _run(root / "clahe", root / "clean.png", preset="clahe_texture")
+            assert clahe.action == "needs-review" and clahe.metadata.get("fallbacks"), clahe
+            assert "needs-OpenCV" in clahe.reason, clahe.reason
+            assert e.utility_status()["opencv_ready"] is False
+    print("PASS: image_enhancer quality - manual presets exact, denoise/sharpen/despeckle improve, "
+          "edge boost keeps brightness, no RGBA fringe, OpenCV fallbacks reported.")
+
+
 def main() -> int:
     from PIL import Image, ImageDraw
     state = e.utility_status()
     assert all(key in state for key in ("upscale_ready", "segmentation_ready", "faces_ready", "repair_ready")), state
     import importlib.util
+    quality_regressions()
     if importlib.util.find_spec("cv2") is None:
         print("SKIP: OpenCV not installed - Image Enhancer checks skipped (optional).")
         return 0
@@ -183,16 +287,17 @@ def main() -> int:
         with Image.open(phase3.out_path) as repaired:
             assert repaired.mode == "RGBA" and repaired.getpixel((20, 20))[3] == 255
 
-        if state["upscale_ready"]:
+        if state["upscale_ready"] and not os.environ.get("KS_TOOLBOX_SKIP_GPU"):
             ai = e.process(rgb, e.EnhanceOptions(out_root=root / "ai", mode="ai", scale_factor=2))
             assert ai.action in valid_output_actions and e.validate_result(ai), ai
             assert ai.metadata["smart_plan"]["effective_mode"] == "ai" and ai.metadata["smart_plan"]["use_model"]
             with Image.open(ai.out_path) as upscaled:
                 assert upscaled.size == (128, 96), upscaled.size
 
-        face_detail = e.process(rgb, e.EnhanceOptions(out_root=root / "face_detail", region_mode="manual_box",
-                                                       manual_box=(20, 20, 60, 60), face_detail=True))
-        assert face_detail.action in valid_output_actions and e.validate_result(face_detail), face_detail
+        if not os.environ.get("KS_TOOLBOX_SKIP_GPU"):      # face detail runs Real-ESRGAN when ready
+            face_detail = e.process(rgb, e.EnhanceOptions(out_root=root / "face_detail", region_mode="manual_box",
+                                                           manual_box=(20, 20, 60, 60), face_detail=True))
+            assert face_detail.action in valid_output_actions and e.validate_result(face_detail), face_detail
 
         # 5. Headless CLI execution test
         cli_out = root / "cli_out"

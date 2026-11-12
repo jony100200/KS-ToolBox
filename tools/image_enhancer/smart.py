@@ -31,6 +31,7 @@ class Profile:
     confidence: float
     recommendation: str
     reasons: tuple[str, ...]
+    noise_sigma: float = 0.0          # Gaussian noise sigma on 0-255 luma, full resolution
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -139,6 +140,7 @@ def analyse(image) -> Profile:
     from PIL import Image
 
     source = image.convert("RGB")
+    noise_sigma = _noise_sigma(source)
     longest = max(source.size)
     if longest > 512:
         scale = 512 / longest
@@ -198,8 +200,18 @@ def analyse(image) -> Profile:
         sharpness=round(sharpness, 4), noise=round(noise, 4), compression=round(compression, 4),
         specular_gap=round(specular_gap, 4),
         confidence=round(float(np.clip(confidence, 0.0, 1.0)), 4), recommendation=recommendation,
-        reasons=tuple(notes),
+        reasons=tuple(notes), noise_sigma=round(noise_sigma, 3),
     )
+
+
+def _noise_sigma(source) -> float:
+    """Noise sigma from a full-resolution centre crop (downscaling would hide the noise)."""
+    from .classical_ops import estimate_noise_sigma
+    w, h = source.size
+    cw, ch = min(w, 512), min(h, 512)
+    left, top = (w - cw) // 2, (h - ch) // 2
+    crop = np.asarray(source.crop((left, top, left + cw, top + ch)).convert("L"), dtype=np.float32)
+    return estimate_noise_sigma(crop)
 
 
 def plan(profile: Profile, *, requested_mode: str, auto_select: bool, requested_scale: int) -> Plan:
@@ -230,6 +242,11 @@ def plan(profile: Profile, *, requested_mode: str, auto_select: bool, requested_
     if profile.sharpness < 0.18 and profile.noise < 0.06:
         sharpen += min(0.35, (0.18 - profile.sharpness) * 1.9)
     denoise = min(0.45, max(0.0, profile.noise - 0.04) * 3.0)
+    # The denoise filter adapts to the measured sigma; ask for full strength once
+    # noise is clearly visible (sigma ~8 on 0-255 luma = sigma-12 RGB noise).
+    denoise = max(denoise, round(float(np.clip((profile.noise_sigma - 2.5) / 5.5, 0.0, 1.0)), 3))
+    if denoise >= 0.3:
+        reasons.append(f"noise sigma {profile.noise_sigma:.1f} -> denoise {denoise:.2f}")
 
     # De-gloss and micro-texture planning
     de_gloss = 0.0

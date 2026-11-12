@@ -27,6 +27,31 @@ images (PSNR in dB against the clean original, higher is better).
   colour-manage CMYK sources with a profile to sRGB, and apply the EXIF orientation
   (audit: phone JPEG -> PNG came out 1920x1080 sideways; now 1080x1920).
   ICO output is upright too.
+- **Image Enhancer: presets, filters and transparency.** Audit images, 1024x576, PSNR vs the
+  clean original (before -> after):
+  - The smart plan now runs only for Auto / auto-select. Default preset on a clean photo:
+    33.0 -> 37.4 dB vs the input (no unrequested brightness or de-gloss).
+  - Zero-strength passes no longer run: a 0-strength de-gloss boosted pores by 15 % and
+    0-strength vignette/grain/glow ran on every image (the source of the mottled grain).
+  - Denoise is a noise-adaptive bilateral filter (luma + chroma), not a Gaussian:
+    sigma-12 noise 26.8 dB input -> 31.0 (old, denoise 1.0) -> 36.0 dB (nlmeans ref 33.2).
+    Auto on the noisy image: 24.7 -> 31.0 dB (the plan now reads a full-resolution noise sigma).
+  - Sharpen / detail use a luminance unsharp mask with threshold; High-Pass adds detail
+    instead of blending towards grey. Blurred input 35.0 dB: Clarity & Detail 24.7 -> 35.5,
+    Texture Cleanup 21.0 -> 34.4, Sharpen 2.0 27.8 -> 36.5 (USM ref 37.4).
+  - Despeckle preset is the gated 3x3 median only: 24.0 -> 50.1 dB (3x3 median ref 42.5).
+  - Edge Boost adds edge detail to luminance: mean brightness 82.6 -> 82.0 (was 66.5).
+  - RGBA: hidden colour under alpha=0 is filled from visible neighbours before filtering:
+    magenta edge bleed 4.91 -> 0.00.
+  - CLAHE / cel / anime presets without OpenCV say so in the panel, name the fallback in the
+    result and mark it needs-review (no silent weaker filter). OpenCV stays optional.
+  - Panel: picking a preset resets the sliders to neutral; they used to echo the preset's own
+    values, which applied them twice (e.g. Vivid Pop contrast 1.10 x 1.10).
+  - Speed: 0.2-1.2 s per 1024x576 image; full HD Auto 1.7 s (was 1.6), Natural Skin 4.0 s
+    (was 3.0; its denoise pass is now the bilateral).
+  - Smoke tests: the new quality legs need only Pillow + numpy, so they run in the shipped
+    build (the old enhancer smoke skipped entirely without OpenCV). `KS_TOOLBOX_SKIP_GPU=1`
+    skips the Real-ESRGAN legs.
 
 ## [1.1.0] — 2026-10-12
 

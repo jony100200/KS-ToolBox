@@ -38,7 +38,7 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
         FilterPass("saturation", {"factor": 1.18}),
         FilterPass("vibrance", {"amount": 0.15}),
         FilterPass("clarity", {"amount": 0.25}),
-        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 1.25, "threshold": 3.0}),
+        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 0.8, "threshold": 3.0}),
     ),
     "warm_sunset": (
         FilterPass("temperature", {"amount": 0.22}),
@@ -73,7 +73,7 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
         FilterPass("clahe", {"clip_limit": 2.2}),
         FilterPass("clarity", {"amount": 0.25}),
         FilterPass("contrast", {"factor": 1.04}),
-        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 1.20, "threshold": 3.0}),
+        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 0.8, "threshold": 3.0}),
     ),
     "auto_white_balance": (
         FilterPass("auto_wb", {"p_norm": 6.0}),
@@ -81,10 +81,8 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
         FilterPass("saturation", {"factor": 1.04}),
     ),
     "despeckle_clean": (
-        FilterPass("despeckle", {"radius": 2.0, "threshold": 22.0}),
-        FilterPass("denoise", {"radius": 0.25}),
-        FilterPass("high_pass", {"radius": 1.2, "opacity": 0.20}),
-        FilterPass("contrast", {"factor": 1.04}),
+        # Only the gated 3x3 median: specks out, everything else untouched.
+        FilterPass("despeckle", {"radius": 1.0, "threshold": 22.0}),
     ),
     "radial_focus": (
         FilterPass("radial_focus", {"focus_radius": 0.35, "blur_radius": 24.0}),
@@ -127,16 +125,13 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
     ),
     "gentle_restore": (
         FilterPass("denoise", {"radius": 0.5}),
-        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 1.25, "threshold": 3.0}),
+        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 0.6, "threshold": 3.0}),
         FilterPass("contrast", {"factor": 1.03}),
-        FilterPass("edge_boost", {"amount": 0.04}),
     ),
     "detail": (
-        FilterPass("denoise", {"radius": 0.2}),
-        FilterPass("high_pass", {"radius": 1.2, "opacity": 0.18}),
-        FilterPass("unsharp_threshold", {"radius": 1.5, "amount": 1.35, "threshold": 2.5}),
-        FilterPass("clarity", {"amount": 0.25}),
-        FilterPass("contrast", {"factor": 1.04}),
+        FilterPass("denoise", {"radius": 0.3}),
+        FilterPass("unsharp_threshold", {"radius": 1.5, "amount": 1.2, "threshold": 2.0}),
+        FilterPass("clarity", {"amount": 0.10}),
     ),
     "colour_restore": (
         FilterPass("denoise", {"radius": 0.3}),
@@ -147,15 +142,14 @@ _PRESETS: dict[str, tuple[FilterPass, ...]] = {
     "portrait_polish": (
         FilterPass("wavelet_degloss", {"strength": 0.60, "pore_boost": 1.15}),
         FilterPass("selective_blur", {"radius": 2.0, "max_delta": 15.0}),
-        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 1.20, "threshold": 4.0}),
+        FilterPass("unsharp_threshold", {"radius": 1.2, "amount": 0.6, "threshold": 4.0}),
         FilterPass("contrast", {"factor": 1.05}),
         FilterPass("saturation", {"factor": 1.04}),
     ),
     "texture_cleanup": (
-        FilterPass("denoise", {"radius": 0.35}),
+        FilterPass("denoise", {"radius": 0.6}),
         FilterPass("high_pass", {"radius": 1.5, "opacity": 0.28}),
-        FilterPass("sharpen", {"factor": 1.25}),
-        FilterPass("contrast", {"factor": 1.08}),
+        FilterPass("contrast", {"factor": 1.04}),
     ),
     "bw_contrast": (
         FilterPass("saturation", {"factor": 0.0}),
@@ -172,19 +166,37 @@ def preset_names() -> tuple[str, ...]:
     return tuple(_PRESETS)
 
 
+# The parameter(s) whose neutral value makes a pass a no-op. Shape parameters
+# (radius, scale, pore_boost) do not count: a zero-strength vignette with radius
+# 0.85 must not run, and a zero-strength de-gloss must not boost pores.
+_STRENGTH_KEYS: dict[str, tuple[str, ...]] = {
+    "hue": ("degrees",), "vibrance": ("amount",), "temperature": ("amount",), "tint": ("amount",),
+    "edge_boost": ("amount",), "high_pass": ("opacity",), "denoise": ("radius",),
+    "de_gloss": ("strength",), "wavelet_degloss": ("strength",), "micro_texture": ("amount",),
+    "soft_glow": ("opacity",), "clarity": ("amount",), "vignette": ("amount",),
+    "film_grain": ("amount",), "split_tone": ("amount",), "privacy_blur": ("radius", "pixelate_block"),
+    "radial_focus": ("blur_radius",), "clahe": ("clip_limit",), "auto_wb": ("p_norm",),
+    "despeckle": ("radius",),
+}
+_FACTOR_OPS = {"brightness", "contrast", "saturation", "sharpen"}
+
+
+def _is_noop(item: FilterPass) -> bool:
+    if item.op in _FACTOR_OPS:
+        return item.params.get("factor", 1.0) == 1.0
+    if item.op == "gamma":
+        return item.params.get("value", 1.0) == 1.0
+    keys = _STRENGTH_KEYS.get(item.op)
+    return keys is not None and not any(item.params.get(key, 0.0) for key in keys)
+
+
 def compact_stack(passes: list[FilterPass]) -> list[FilterPass]:
     """Remove disabled/no-op passes and merge adjacent multiplicative passes."""
     merged: list[FilterPass] = []
     for current in passes:
-        if not current.enabled:
+        if not current.enabled or _is_noop(current):
             continue
-        if current.op in {"brightness", "contrast", "saturation", "sharpen"} and current.params.get("factor", 1.0) == 1.0:
-            continue
-        if current.op in {"hue", "vibrance", "temperature", "tint", "edge_boost", "high_pass", "denoise",
-                          "de_gloss", "micro_texture", "soft_glow", "clarity", "vignette", "film_grain",
-                          "split_tone", "privacy_blur", "radial_focus", "clahe", "auto_wb", "despeckle"} and not any(current.params.values()):
-            continue
-        if merged and current.op == merged[-1].op and current.op in {"brightness", "contrast", "saturation", "sharpen"}:
+        if merged and current.op == merged[-1].op and current.op in _FACTOR_OPS:
             previous = merged.pop()
             merged.append(FilterPass(current.op, {"factor": previous.params.get("factor", 1.0) * current.params.get("factor", 1.0)}))
         else:
@@ -209,13 +221,14 @@ def build_stack(*, preset: str, brightness: float, contrast: float, gamma: float
     if auto_wb_strength > 0.0:
         passes.append(FilterPass("auto_wb", {"p_norm": 6.0}))
     if despeckle_strength > 0.0:
-        passes.append(FilterPass("despeckle", {"radius": 2.0, "threshold": 25.0}))
+        passes.append(FilterPass("despeckle", {"radius": 1.0, "threshold": 22.0}))
     if clahe_strength > 0.0:
         passes.append(FilterPass("clahe", {"clip_limit": clahe_strength * 3.0}))
 
     passes.extend((
         FilterPass("denoise", {"radius": denoise}),
-        FilterPass("wavelet_degloss", {"strength": de_gloss, "pore_boost": 1.15}),
+        # No fine-scale boost on top of a denoise: it would re-amplify the noise.
+        FilterPass("wavelet_degloss", {"strength": de_gloss, "pore_boost": 1.0 if denoise > 0 else 1.15}),
         FilterPass("micro_texture", {"amount": micro_texture, "scale": 2.2}),
         FilterPass("clarity", {"amount": clarity}),
         FilterPass("brightness", {"factor": brightness}),
@@ -243,21 +256,59 @@ def apply(image: Image.Image, passes: list[FilterPass],
           boxes: tuple[tuple[int, int, int, int], ...] | None = None) -> tuple[Image.Image, tuple[str, ...]]:
     alpha = image.convert("RGBA").getchannel("A")
     result = image.convert("RGB")
+    if passes and alpha.getextrema()[0] < 255:
+        result = fill_hidden_rgb(result, alpha)
     names: list[str] = []
+    opencv = classical_ops.has_opencv()
     for item in passes:
         result = _apply(result, item, boxes=boxes)
-        names.append(item.op)
+        if not opencv and item.op in classical_ops.OPENCV_FALLBACKS:
+            names.append(f"{item.op}[fallback:{classical_ops.OPENCV_FALLBACKS[item.op]};needs OpenCV]")
+        else:
+            names.append(item.op)
     result = result.convert("RGBA")
     result.putalpha(alpha)
     return result, tuple(names)
+
+
+def fill_hidden_rgb(rgb: Image.Image, alpha: Image.Image) -> Image.Image:
+    """Replace the colour under fully transparent pixels with nearby visible colour.
+
+    Filters that look at neighbours (blur, sharpen, denoise) would otherwise pull
+    the hidden colour (often magenta or black in game exports) into the visible
+    edge. Normalised convolution at growing radii fills every hidden pixel; the
+    visible pixels and the alpha channel are not changed.
+    """
+    a = np.asarray(alpha, dtype=np.float32) / 255.0
+    hidden = a <= 0.0
+    if not hidden.any() or hidden.all():
+        return rgb
+    src = np.asarray(rgb, dtype=np.float32)
+    weight = (~hidden).astype(np.float32)
+    premult = Image.fromarray((src * weight[..., None]).round().astype(np.uint8), "RGB")
+    mask = Image.fromarray((weight * 255).astype(np.uint8), "L")
+    out = src.copy()
+    todo = hidden.copy()
+    for radius in (2, 6, 18, 54, 162):
+        wsum = np.asarray(mask.filter(ImageFilter.GaussianBlur(radius)), dtype=np.float32) / 255.0
+        ready = todo & (wsum > 0.02)
+        if ready.any():
+            csum = np.asarray(premult.filter(ImageFilter.GaussianBlur(radius)), dtype=np.float32)
+            out[ready] = csum[ready] / wsum[ready][:, None]
+            todo &= ~ready
+        if not todo.any():
+            break
+    if todo.any():
+        out[todo] = src[~hidden].mean(axis=0)
+    return Image.fromarray(np.clip(out, 0, 255).round().astype(np.uint8), "RGB")
 
 
 def _apply(image: Image.Image, item: FilterPass,
            boxes: tuple[tuple[int, int, int, int], ...] | None = None) -> Image.Image:
     op, p = item.op, item.params
     if op == "denoise":
-        radius = max(0.0, p.get("radius", 0.0))
-        return image if radius <= 0 else image.filter(ImageFilter.GaussianBlur(min(radius, 2.0)))
+        # "radius" is the historical key; it is now the denoise strength (0-2).
+        return classical_ops.edge_preserving_denoise(image, strength=max(0.0, p.get("radius", 0.0)))
     if op == "brightness":
         return ImageEnhance.Brightness(image).enhance(max(0.0, p.get("factor", 1.0)))
     if op == "contrast":
@@ -265,7 +316,11 @@ def _apply(image: Image.Image, item: FilterPass,
     if op == "saturation":
         return ImageEnhance.Color(image).enhance(max(0.0, p.get("factor", 1.0)))
     if op == "sharpen":
-        return ImageEnhance.Sharpness(image).enhance(max(0.0, p.get("factor", 1.0)))
+        factor = max(0.0, p.get("factor", 1.0))
+        if factor < 1.0:                          # below 1 = soften, as before
+            return ImageEnhance.Sharpness(image).enhance(factor)
+        return classical_ops.unsharp_mask_threshold(image, radius=1.5, amount=(factor - 1.0) * 1.2,
+                                                    threshold=2.0)
     if op == "gamma":
         gamma = max(0.01, p.get("value", 1.0))
         lut = [max(0, min(255, round((i / 255.0) ** (1.0 / gamma) * 255))) for i in range(256)]
@@ -281,10 +336,7 @@ def _apply(image: Image.Image, item: FilterPass,
     if op == "high_pass":
         return _high_pass(image, p.get("radius", 1.25), p.get("opacity", 0.0))
     if op == "edge_boost":
-        amount = max(0.0, p.get("amount", 0.0))
-        edges = image.convert("L").filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(0.75))
-        layer = Image.merge("RGB", (edges, edges, edges))
-        return Image.blend(image, layer, min(0.6, amount * 0.25))
+        return classical_ops.edge_boost(image, max(0.0, p.get("amount", 0.0)))
     if op in {"de_gloss", "wavelet_degloss"}:
         return classical_ops.wavelet_de_gloss(
             image,
@@ -313,7 +365,7 @@ def _apply(image: Image.Image, item: FilterPass,
     if op == "auto_wb":
         return classical_ops.auto_white_balance(image, p_norm=p.get("p_norm", 6.0))
     if op == "despeckle":
-        return classical_ops.adaptive_despeckle(image, radius=int(p.get("radius", 2)), threshold=p.get("threshold", 25.0))
+        return classical_ops.adaptive_despeckle(image, radius=int(p.get("radius", 1)), threshold=p.get("threshold", 22.0))
     if op == "dcp_dehaze":
         return classical_ops.dark_channel_dehaze(image, strength=p.get("strength", 0.75))
     if op == "retinex":
@@ -391,12 +443,10 @@ def _vibrance(image: Image.Image, amount: float) -> Image.Image:
 
 
 def _high_pass(image: Image.Image, radius: float, opacity: float) -> Image.Image:
+    """High-pass sharpening: add the detail layer to luminance (was a blend towards grey)."""
     if opacity <= 0:
         return image
-    base = np.asarray(image, dtype=np.int16)
-    blur = np.asarray(image.filter(ImageFilter.GaussianBlur(max(0.1, radius))), dtype=np.int16)
-    high = np.clip(128 + base - blur, 0, 255).astype(np.uint8)
-    return Image.blend(image, Image.fromarray(high, "RGB"), min(1.0, opacity))
+    return classical_ops.luma_high_pass(image, radius=max(0.1, radius), gain=min(1.0, opacity) * 2.0)
 
 
 def _micro_texture_pass(image: Image.Image, amount: float = 0.035, scale: float = 2.2, seed: int = 42) -> Image.Image:
