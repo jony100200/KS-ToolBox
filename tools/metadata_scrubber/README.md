@@ -29,8 +29,9 @@ Copies each selected image to the output folder, stripping:
 - **Verified, not assumed.** Every written file is re-opened and re-inspected. If anything
   survived, the item is reported as failed — it is never silently shipped.
 - **Pixels preserved.** PNG/WebP/TIFF re-encode losslessly. JPEG reuses the original
-  quantization tables and subsampling (`quality="keep"`), so there is no second generation
-  of loss.
+  quantization tables and subsampling, so the re-encode adds almost no loss (60 dB PSNR
+  on a 1080p photo). The EXIF orientation is applied to the pixels before EXIF is removed,
+  so phone photos stay upright.
 - **Colour preserved.** The ICC profile describes the pixels, not their origin, so it is kept
   by default. Uncheck *Keep colour profile* to drop it too.
 

@@ -2,6 +2,17 @@
 
 All notable changes to KS ToolBox. Format loosely follows Keep a Changelog.
 
+## [Unreleased]
+
+Image tools fix pass from the 2026-11-12 audit. Numbers are measured with the audit
+images (PSNR in dB against the clean original, higher is better).
+
+### Fixed
+- **Metadata Scrubber: every JPEG failed** (`ValueError: Cannot use 'keep' when original
+  image is not a JPEG`). The clean copy now reuses the source's quantization tables and
+  subsampling explicitly, and bakes the EXIF orientation into the pixels before EXIF is
+  dropped. Repro JPEG: before = failed; after = scrubbed, 60.1 dB vs source, no metadata left.
+
 ## [1.1.0] — 2026-10-12
 
 Major update expanding KS ToolBox to **23 verified tools**, introducing the **Unified Workflow Orchestrator**, **bounded multi-worker batch acceleration**, and a **pure MIT icon design**.

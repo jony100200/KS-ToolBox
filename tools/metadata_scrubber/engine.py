@@ -11,8 +11,9 @@ one-way guarantee is the whole point — an in-place scrub would destroy the onl
 of how an image was made.
 
 Pixels are preserved exactly: PNG/WebP re-encode losslessly, and JPEG is re-encoded with
-the original quantization tables and subsampling (`quality="keep"`), which avoids a
-second generation of loss. Colour is preserved by keeping the ICC profile, which
+the original quantization tables and subsampling (passed explicitly, because the
+clean copy is a fresh image), which avoids a second generation of loss. The EXIF
+orientation is applied to the pixels before EXIF is dropped, so photos stay upright. Colour is preserved by keeping the ICC profile, which
 describes the pixels rather than their provenance; drop it with `keep_icc=False`.
 
 Every written file is re-opened and re-inspected before it is reported as scrubbed. If
@@ -45,7 +46,6 @@ LEAKY_KEYS = (
 # Keys that describe the pixels rather than their provenance -> never treated as leaks.
 _PIXEL_KEYS = ("icc_profile", "dpi", "gamma", "transparency", "srgb", "chromaticity")
 
-_LOSSLESS_SUFFIXES = {".png", ".webp", ".bmp", ".tif", ".tiff"}
 _JPEG_SUFFIXES = {".jpg", ".jpeg"}
 
 
@@ -119,6 +119,23 @@ def plan_output(src: Path, opts: ScrubOptions) -> Path:
     return root / src.name
 
 
+def _jpeg_save_kwargs(im) -> dict:
+    """Re-encode with the source's own quantization tables and subsampling.
+
+    Pillow's ``quality="keep"`` only works when saving the *opened* JPEG object; the
+    scrubber saves a fresh metadata-free copy, so the tables are passed explicitly.
+    A non-JPEG source saved as ``.jpg`` falls back to a high fixed quality.
+    """
+    if getattr(im, "format", None) == "JPEG" and getattr(im, "quantization", None):
+        from PIL import JpegImagePlugin
+        kw: dict = {"qtables": im.quantization}
+        sampling = JpegImagePlugin.get_sampling(im)
+        if sampling != -1:
+            kw["subsampling"] = sampling
+        return kw
+    return {"quality": 95}
+
+
 def _is_inside(child: Path, parent: Path) -> bool:
     try:
         child.resolve().relative_to(parent.resolve())
@@ -172,18 +189,19 @@ def process(path: str | Path, opts: ScrubOptions, *, cancelled=None) -> Result:
         with Image.open(src) as im:
             im.load()
             icc = im.info.get("icc_profile") if opts.keep_icc else None
-            # A fresh image carries no .info, so nothing can ride along on save.
-            clean = Image.new(im.mode, im.size)
-            clean.paste(im)
             save_kw: dict = {}
+            if suffix in _JPEG_SUFFIXES:
+                save_kw.update(_jpeg_save_kwargs(im))
+            # The orientation tag is EXIF and is stripped, so bake it into the pixels
+            # first; otherwise phone photos would be delivered sideways.
+            from PIL import ImageOps
+            upright = ImageOps.exif_transpose(im) or im
+            # A fresh image carries no .info, so nothing can ride along on save.
+            clean = Image.new(upright.mode, upright.size)
+            clean.paste(upright)
             if icc:
                 save_kw["icc_profile"] = icc
-            if suffix in _JPEG_SUFFIXES:
-                # Reuse the original tables: re-encoding without this adds a second
-                # generation of JPEG loss to every delivered file.
-                save_kw["quality"] = "keep"
-                save_kw["subsampling"] = "keep"
-            elif suffix in _LOSSLESS_SUFFIXES and suffix == ".webp":
+            if suffix == ".webp":
                 save_kw["lossless"] = True
             dst.parent.mkdir(parents=True, exist_ok=True)
             clean.save(dst, **save_kw)

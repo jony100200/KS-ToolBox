@@ -155,11 +155,49 @@ def test_durable_batch() -> None:
     print("PASS: metadata_scrubber durable batch — bad input isolated, missing output repaired.")
 
 
+def test_jpeg_scrub_keeps_tables_and_orientation() -> None:
+    """Regression: every JPEG used to fail with "Cannot use 'keep' ..." (2026-11-12)."""
+    if importlib.util.find_spec("PIL") is None or importlib.util.find_spec("numpy") is None:
+        print("SKIP: Pillow/numpy not installed - JPEG leg skipped.")
+        return
+    import numpy as np
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src = tmp / "phone.jpg"
+        base = np.zeros((48, 64, 3), np.uint8)
+        base[..., 0] = np.linspace(0, 255, 64, dtype=np.uint8)
+        base[..., 1] = np.linspace(0, 255, 48, dtype=np.uint8)[:, None]
+        base[..., 2] = 128
+        base[10:30, 8:20] = (240, 30, 60)    # an asymmetric block shows the rotation
+        exif = Image.Exif()
+        exif[0x0112] = 6                      # Orientation: rotate 90 CW to display
+        exif[0x0131] = "PhoneCam 1.0"         # Software
+        Image.fromarray(base).save(src, quality=88, exif=exif.tobytes())
+        assert "exif" in e.inspect(src)
+        res = e.process(src, e.ScrubOptions(out_root=tmp / "out"))
+        assert res.action == "scrubbed", res
+        out = Path(res.out_path)
+        assert e.inspect(out) == [], e.inspect(out)
+        with Image.open(src) as a, Image.open(out) as b:
+            assert b.format == "JPEG"
+            assert b.size == (48, 64), f"orientation not applied: {b.size}"
+            assert b.quantization == a.quantization, "quantization tables changed"
+            from PIL import ImageOps
+            ref = np.asarray(ImageOps.exif_transpose(a).convert("RGB"), np.float64)
+            got = np.asarray(b.convert("RGB"), np.float64)
+        mse = float(np.mean((ref - got) ** 2))
+        psnr = 99.0 if mse == 0 else 10 * np.log10(255 ** 2 / mse)
+        assert psnr >= 35.0, f"re-encode lost too much: {psnr:.1f} dB"
+    print(f"PASS: metadata_scrubber JPEG - scrubbed, upright, same tables, {psnr:.1f} dB vs source.")
+
+
 def main() -> int:
     test_detects_metadata()
     test_scrub_is_clean_lossless_and_nondestructive()
     test_refuses_to_overwrite_source()
     test_dry_run_writes_nothing()
+    test_jpeg_scrub_keeps_tables_and_orientation()
     test_durable_batch()
     return 0
 
