@@ -52,6 +52,11 @@ images (PSNR in dB against the clean original, higher is better).
   - Smoke tests: the new quality legs need only Pillow + numpy, so they run in the shipped
     build (the old enhancer smoke skipped entirely without OpenCV). `KS_TOOLBOX_SKIP_GPU=1`
     skips the Real-ESRGAN legs.
+- **Pixel Art: live preview matches the output block size.** The preview used to pixelise
+  the 360x240 preview proxy, so blocks looked several times too big: full-HD source at 6 px
+  blocks showed a 60x33 grid while the file has 320x180. The preview is now the exact output
+  grid (`engine.preview_grid`, byte-identical to the saved file), computed off the UI thread
+  (0.33 s for that image with Bayer).
 
 ## [1.1.0] — 2026-10-12
 

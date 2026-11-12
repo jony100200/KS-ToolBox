@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,9 @@ class PixelArtPanel(BaseBatchPanel):
         self._split_pos: float = 0.50
         self._show_original_only: bool = False
         self._preview_scheduled: bool = False
+        self._preview_thread: threading.Thread | None = None
+        self._preview_pending: bool = False
+        self._preview_result: tuple | None = None
         super().__init__(parent, queue_service=queue_service)
 
     def _build_options_card(self):
@@ -249,28 +253,46 @@ class PixelArtPanel(BaseBatchPanel):
         self.after(20, self._render_preview_worker)
 
     def _render_preview_worker(self):
-        self._preview_scheduled = False
-        if self._preview_image_thumb is None:
-            return
+        """Compute the exact output grid from the full-resolution image off the UI thread.
 
+        One worker at a time; a change made while it runs is rendered right after.
+        """
+        self._preview_scheduled = False
+        if self._preview_image_orig is None:
+            return
+        if self._preview_thread is not None and self._preview_thread.is_alive():
+            self._preview_pending = True
+            return
         opts = self._collect_options()
-        try:
-            pixelized = e.pixelize(
-                self._preview_image_thumb,
-                pixel_size=opts.pixel_size,
-                palette=opts.palette,
-                num_colors=opts.num_colors,
-                dither_method=opts.dither_method,
-                dither_strength=opts.dither_strength,
-                use_lab=opts.use_lab,
-                pixel_perfect=opts.pixel_perfect,
-                outline=opts.outline,
-                upscale=True
-            )
-            self._preview_pixelized_thumb = pixelized.convert("RGBA")
-            self._render_split_preview()
-        except Exception:
-            pass
+        source = self._preview_image_orig
+
+        def work():
+            try:
+                self._preview_result = (e.preview_grid(source, opts), None)
+            except Exception as ex:               # reported on the UI thread below
+                self._preview_result = (None, ex)
+
+        self._preview_result = None
+        self._preview_thread = threading.Thread(target=work, name="pixel-art-preview", daemon=True)
+        self._preview_thread.start()
+        self.after(30, self._poll_preview)
+
+    def _poll_preview(self):
+        if self._preview_thread is not None and self._preview_thread.is_alive():
+            self.after(40, self._poll_preview)
+            return
+        result, self._preview_result = self._preview_result, None
+        if self._preview_pending:
+            self._preview_pending = False
+            self._render_preview_worker()
+        if result is None:
+            return
+        grid, error = result
+        if error is not None:
+            self._logline(f"Preview failed: {type(error).__name__}: {error}", t.STATE["error"][1])
+            return
+        self._preview_pixelized_thumb = grid.convert("RGBA")
+        self._render_split_preview()
 
     def _render_split_preview(self):
         if self._preview_image_thumb is None or not hasattr(self, "_preview_pixelized_thumb"):

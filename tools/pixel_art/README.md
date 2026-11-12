@@ -32,7 +32,9 @@ A standalone, batch-capable retro pixel-art converter and hardware palette remap
    * **Sprite Outlining:** Generates 1px black or custom-colored exterior outline around sprites with transparency.
 
 5. **Interactive UI with Live Before/After Split Preview:**
-   * Draggable split slider with sub-10ms CPU live preview.
+   * Draggable split slider. The preview is the exact output grid, computed from the
+     full-resolution image on a background thread, so its blocks match the saved file
+     (Bayer/none: ~0.3 s for full HD; Floyd/Atkinson take longer on large grids).
    * `👁️ Hold to Compare` original image button.
    * Live interactive color swatch bar showing active palette colors.
 

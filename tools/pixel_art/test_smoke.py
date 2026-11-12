@@ -80,11 +80,23 @@ def main() -> int:
         with Image.open(res_nes.out_path) as got:
             assert got.size == (16, 16), f"expected native size (16, 16), got {got.size}"
 
-        # 5. Test Corrupted Artifact Validation
+        # 5. Regression (2026-11-12): the live preview shows the real output's block size.
+        big = img.resize((240, 160), Image.Resampling.BICUBIC)
+        big_src = tmp / "big.png"; big.save(big_src)
+        opts_prev = e.PixelOptions(out_root=out / "prev", pixel_size=8, palette="pico8",
+                                   dither_method="bayer4", upscale=True, dry_run=False)
+        grid = e.preview_grid(big, opts_prev)
+        assert grid.size == (30, 20), f"preview grid {grid.size} != output grid (30, 20)"
+        res_prev = e.process(big_src, opts_prev)
+        with Image.open(res_prev.out_path) as got:
+            native = got.convert("RGBA").resize(grid.size, Image.Resampling.NEAREST)
+        assert native.tobytes() == grid.convert("RGBA").tobytes(), "preview differs from the saved output"
+
+        # 6. Test Corrupted Artifact Validation
         Path(res_pico.out_path).write_bytes(b"not a valid png")
         assert not e.validate_result(res_pico, opts_pico), "corrupt stored output must not be reusable"
 
-    print("PASS: Pixel Art Studio — verified PICO-8, Game Boy, NES, Bayer 4x4, Atkinson, Floyd, Outlines, and Artifact Validation.")
+    print("PASS: Pixel Art Studio — verified PICO-8, Game Boy, NES, Bayer 4x4, Atkinson, Floyd, Outlines, preview = output grid, and Artifact Validation.")
     return 0
 
 

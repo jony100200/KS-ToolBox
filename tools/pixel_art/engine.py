@@ -135,6 +135,28 @@ def pixelize(img: Image.Image,
     return tiny_result
 
 
+def preview_grid(img: Image.Image, opts: "PixelOptions") -> Image.Image:
+    """The exact pixel grid the real output will have (one pixel per block).
+
+    Computed from the full-resolution image, so the live preview shows the same
+    block size as the saved file. Pixelising a small preview proxy instead made
+    the blocks several times too big (2026-11-12 audit).
+    """
+    return pixelize(
+        img,
+        pixel_size=opts.pixel_size,
+        palette=opts.palette,
+        num_colors=opts.num_colors,
+        dither_method=opts.dither_method,
+        dither_strength=opts.dither_strength,
+        use_lab=opts.use_lab,
+        pixel_perfect=opts.pixel_perfect,
+        outline=opts.outline,
+        outline_color=opts.outline_color,
+        upscale=False,
+    )
+
+
 @dataclass
 class PixelOptions:
     out_root: Path | None = None
