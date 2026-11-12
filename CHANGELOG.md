@@ -12,6 +12,16 @@ images (PSNR in dB against the clean original, higher is better).
   image is not a JPEG`). The clean copy now reuses the source's quantization tables and
   subsampling explicitly, and bakes the EXIF orientation into the pixels before EXIF is
   dropped. Repro JPEG: before = failed; after = scrubbed, 60.1 dB vs source, no metadata left.
+- **Image Rescale: colour, orientation, quality and filters.**
+  - ICC profile kept (audit: dropped).
+  - EXIF orientation applied, so phone photos come out upright (audit: 960x540 sideways; now 540x960).
+  - JPEG/WebP quality is a user setting, default 92 with 4:4:4 at 90+ (audit: Pillow default 75).
+    1080p photo to 960 px: 39.9 dB -> 45.2 dB vs a Lanczos reference.
+  - `auto` now uses Lanczos when enlarging too: 2x upscale 39.2 dB -> 41.2 dB.
+  - Palette/1-bit/LA images are filtered in RGB(A), not nearest-neighbour: 33.9 dB -> exact
+    match with RGB Lanczos (`nearest` still keeps the exact palette for pixel art).
+  - The AI path applies the source orientation to the NCNN output as well.
+  - Smoke tests: `KS_TOOLBOX_SKIP_GPU=1` skips the optional Real-ESRGAN leg on a busy GPU.
 
 ## [1.1.0] — 2026-10-12
 

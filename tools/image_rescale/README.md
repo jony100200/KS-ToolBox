@@ -17,7 +17,8 @@ input folder structure into the output.
 
 | Option | Meaning | Default |
 |---|---|---|
-| Resample | `auto` (Lanczos down / bilinear up) · lanczos · bicubic · bilinear · nearest | `auto` |
+| Resample | `auto` (Lanczos both ways) · lanczos · bicubic · bilinear · nearest | `auto` |
+| JPEG/WebP quality | encoder quality 1-100 (≥90 also keeps full-resolution colour, 4:4:4) | 92 |
 | Snap to multiple of | round dimensions down to a multiple (0 = off) — handy for model-friendly sizes | `0` |
 | Allow upscaling | permit deterministic enlarging (off avoids blurry blow-ups) | off |
 | AI upscale (Real-ESRGAN) | run the local NCNN 4× utility model; automatically enables upscaling | off |
@@ -26,7 +27,10 @@ input folder structure into the output.
 | Preview only | list planned resizes without writing | off |
 
 Output keeps the source format; a JPEG target is flattened to RGB automatically
-(JPEG can't store alpha). A `resize_manifest.csv` records every file when an
+(JPEG can't store alpha). The colour (ICC) profile is kept and the EXIF orientation
+is applied, so phone photos come out upright. Palette PNGs are resized in RGB/RGBA
+with the chosen filter and saved as RGB/RGBA (choose `nearest` to keep the exact
+palette, e.g. for pixel art). A `resize_manifest.csv` records every file when an
 output folder is set.
 
 ## AI upscaling

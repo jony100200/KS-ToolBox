@@ -9,6 +9,7 @@ Run standalone:  python -m tools.image_rescale.test_smoke
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -57,6 +58,9 @@ def test_optional_realesrgan_pipeline() -> None:
     """Exercise the portable AI bundle only when the local bundle is present."""
     if importlib.util.find_spec("PIL") is None:
         print("SKIP: Pillow not installed — AI pipeline leg skipped.")
+        return
+    if os.environ.get("KS_TOOLBOX_SKIP_GPU"):
+        print("SKIP: KS_TOOLBOX_SKIP_GPU set — AI pipeline leg skipped.")
         return
     status = e.ai_runtime_status()
     if not status["ready"]:
@@ -140,9 +144,83 @@ def test_durable_batch() -> None:
     print("PASS: image_rescale durable batch — isolated bad input, checkpointed, reused.")
 
 
+def _psnr(a, b) -> float:
+    import numpy as np
+    x = np.asarray(a.convert("RGB"), np.float64); y = np.asarray(b.convert("RGB"), np.float64)
+    mse = float(np.mean((x - y) ** 2))
+    return 99.0 if mse == 0 else float(10 * np.log10(255 ** 2 / mse))
+
+
+def _gradient(w: int, h: int):
+    import numpy as np
+    from PIL import Image
+    yy, xx = np.mgrid[0:h, 0:w]
+    rgb = np.stack([(xx * 255 // max(1, w - 1)), (yy * 255 // max(1, h - 1)),
+                    ((xx + yy) * 3) % 256], axis=-1).astype(np.uint8)
+    return Image.fromarray(rgb)
+
+
+def test_jpeg_keeps_icc_orientation_and_quality() -> None:
+    """Regression (2026-11-12 audit): ICC dropped, sideways phone photos, quality 75."""
+    if importlib.util.find_spec("PIL") is None or importlib.util.find_spec("numpy") is None:
+        print("SKIP: Pillow/numpy not installed — JPEG leg skipped.")
+        return
+    from PIL import Image, ImageCms
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src = tmp / "phone.jpg"
+        icc = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
+        exif = Image.Exif(); exif[0x0112] = 6            # stored landscape, shown portrait
+        _gradient(400, 200).save(src, quality=95, icc_profile=icc, exif=exif.tobytes())
+        res = e.process(src, e.ResizeOptions(out_root=tmp / "out", mode="longest_side",
+                                             longest_side=200, dry_run=False))
+        assert res.action == "resized", res
+        with Image.open(res.out_path) as got:
+            assert got.size == (100, 200), f"orientation not applied: {got.size}"
+            assert got.info.get("icc_profile") == icc, "ICC profile dropped"
+            assert got.quantization[0][0] <= 4, f"low JPEG quality: luma q0={got.quantization[0][0]}"
+        res2 = e.process(src, e.ResizeOptions(out_root=tmp / "q50", mode="longest_side",
+                                              longest_side=200, quality=50, dry_run=False))
+        with Image.open(res2.out_path) as got2:
+            assert got2.quantization[0][0] > 8, "user quality not applied"
+    print("PASS: image_rescale JPEG — upright, ICC kept, quality 92 default and settable.")
+
+
+def test_upscale_and_palette_quality() -> None:
+    """Regression: auto upscale was bilinear; palette PNGs were resized nearest-neighbour."""
+    if importlib.util.find_spec("PIL") is None or importlib.util.find_spec("numpy") is None:
+        print("SKIP: Pillow/numpy not installed — quality leg skipped.")
+        return
+    from PIL import Image
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        big = _gradient(256, 128)
+        big.resize((128, 64), Image.LANCZOS).save(tmp / "small.png")
+        res = e.process(tmp / "small.png", e.ResizeOptions(out_root=tmp / "up", mode="scale_factor",
+                        scale_factor=2.0, allow_upscale=True, dry_run=False))
+        with Image.open(res.out_path) as up:
+            ref = Image.open(tmp / "small.png").resize((256, 128), Image.LANCZOS)
+            assert _psnr(up, ref) >= 60, "auto upscale is not Lanczos"
+        pal = big.convert("P", palette=Image.ADAPTIVE, colors=64)
+        pal.save(tmp / "pal.png")
+        res = e.process(tmp / "pal.png", e.ResizeOptions(out_root=tmp / "pal", mode="scale_factor",
+                        scale_factor=0.5, dry_run=False))
+        with Image.open(res.out_path) as po:
+            assert po.mode == "RGB", po.mode
+            ref = pal.convert("RGB").resize(po.size, Image.LANCZOS)
+            assert _psnr(po, ref) >= 60, "palette PNG not filtered in RGB"
+        res = e.process(tmp / "pal.png", e.ResizeOptions(out_root=tmp / "near", mode="scale_factor",
+                        scale_factor=0.5, resample="nearest", dry_run=False))
+        with Image.open(res.out_path) as pn:
+            assert pn.mode == "P", "nearest should keep the exact palette"
+    print("PASS: image_rescale quality — Lanczos upscale, palette PNG filtered in RGB, nearest keeps P.")
+
+
 def main() -> int:
     test_sizing_math()
     test_full_pipeline()
+    test_jpeg_keeps_icc_orientation_and_quality()
+    test_upscale_and_palette_quality()
     test_optional_realesrgan_pipeline()
     test_durable_batch()
     return 0

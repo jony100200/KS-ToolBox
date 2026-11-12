@@ -64,7 +64,10 @@ class ImageRescalePanel(BaseBatchPanel):
         self._resample.set("auto"); self._resample.grid(row=1, column=0, sticky="w", padx=(0, 24), pady=(2, 0))
         ctk.CTkLabel(row2, text="Snap to multiple of (0=off)", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=1, sticky="w")
         self._snap = c.entry(row2, width=80); self._snap.insert(0, "0")
-        self._snap.grid(row=1, column=1, sticky="w", pady=(2, 0))
+        self._snap.grid(row=1, column=1, sticky="w", padx=(0, 24), pady=(2, 0))
+        ctk.CTkLabel(row2, text="JPEG/WebP quality (1-100)", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=2, sticky="w")
+        self._quality = c.entry(row2, width=80); self._quality.insert(0, str(e.ResizeOptions.quality))
+        self._quality.grid(row=1, column=2, sticky="w", pady=(2, 0))
         # output folder
         self._build_output_row(b, "Output folder (blank = ./resized beside each source)")
         # toggles
@@ -122,6 +125,9 @@ class ImageRescalePanel(BaseBatchPanel):
         mode = self._mode.get()
         try:
             snap = int(self._snap.get() or "0")
+            quality = int(self._quality.get() or str(e.ResizeOptions.quality))
+            if not 1 <= quality <= 100:
+                raise ValueError("quality")
             kw: dict = {}
             if mode == "longest_side":
                 kw["longest_side"] = int(float(self._val.get()))
@@ -132,7 +138,7 @@ class ImageRescalePanel(BaseBatchPanel):
             elif mode == "fit_inside":
                 kw["fit_w"] = int(float(self._val.get())); kw["fit_h"] = int(float(self._val2.get()))
         except ValueError:
-            self._logline("Mode value(s) must be numbers.", t.STATE["error"][1]); return None
+            self._logline("Mode value(s) must be numbers; quality must be 1-100.", t.STATE["error"][1]); return None
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
         mirror = bool(self._mirror.get())
@@ -142,7 +148,7 @@ class ImageRescalePanel(BaseBatchPanel):
             self._logline("AI model is not ready: " + str(e.ai_runtime_status()["details"]), t.STATE["error"][1])
             return None
         return e.ResizeOptions(out_root=out_root, input_root=input_root, mirror=mirror, mode=mode,
-                               allow_upscale=bool(self._upscale.get()) or ai_upscale, snap=snap,
+                               allow_upscale=bool(self._upscale.get()) or ai_upscale, snap=snap, quality=quality,
                                resample=self._resample.get(), ai_upscale=ai_upscale,
                                ai_model=self._ai_model.get(), dry_run=bool(self._dry.get()), **kw)
 
@@ -150,8 +156,8 @@ class ImageRescalePanel(BaseBatchPanel):
     def _build_submission(self, files: list[Path], opts: e.ResizeOptions) -> QueueSubmission:
         definition = JobDefinition.create(
             tool_id="image_rescale",
-            tool_version="2",
-            workflow_version="resize.v2",
+            tool_version="3",
+            workflow_version="resize.v3",
             inputs=files,
             settings=asdict(opts),
             identity_dependencies=e.ai_runtime_dependencies(opts),
