@@ -57,6 +57,15 @@ images (PSNR in dB against the clean original, higher is better).
   blocks showed a 60x33 grid while the file has 320x180. The preview is now the exact output
   grid (`engine.preview_grid`, byte-identical to the saved file), computed off the UI thread
   (0.33 s for that image with Bayer).
+- **Alpha Doctor: despill auto by default; enclosed background option.**
+  - Despill defaults to *auto*: green/blue screens (detected background or chroma key)
+    are despilled in the edge band and under transparent pixels only. Green-screen
+    composite, edge green spill: solid 142.9 -> 0.0, edge flood 142.9 -> 0.0 (chroma +
+    despill was already 0.0). Paper backgrounds are not despilled; IoU unchanged (0.993).
+  - New edge-flood option *also remove enclosed background* (off by default): comic_06
+    opaque paper pixels left 83,065 -> 2,673, but it also removes paper-coloured subject
+    areas on line art, so it stays opt-in and the limit is documented in the README.
+  - Workflow presets now use the auto despill too.
 
 ## [1.1.0] — 2026-10-12
 

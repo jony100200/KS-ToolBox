@@ -64,7 +64,7 @@ class WorkflowPreset:
     enable_alpha: bool = True
     alpha_method: str = "solid"         # solid, chroma, edge_flood
     alpha_defringe: bool = True
-    alpha_despill: bool = False
+    alpha_despill: bool | None = None   # None = Alpha Doctor auto (green/blue screen edges)
     enable_scrub: bool = True
     scrub_keep_icc: bool = True
 

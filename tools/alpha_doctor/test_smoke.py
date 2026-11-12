@@ -234,6 +234,59 @@ def test_ai_optional() -> None:
     print(f"PASS: alpha_doctor AI method ({model}) — optional path works.")
 
 
+def test_auto_despill_and_enclosed() -> None:
+    """2026-11-12 audit: despill was off by default (edge spill 143); enclosed background kept."""
+    if importlib.util.find_spec("PIL") is None:
+        print("SKIP: Pillow not installed — despill leg skipped."); return
+    from PIL import Image, ImageFilter
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        yy, xx = np.ogrid[:128, :128]
+        disc = ((yy - 64) ** 2 + (xx - 64) ** 2 <= 40 ** 2)
+        for screen, bg, chan in (("green", (0, 255, 0), 1), ("blue", (0, 0, 255), 2)):
+            # a teal-ish subject composited with a soft edge, plus a solid subject-colour patch
+            alpha = np.asarray(Image.fromarray(disc.astype(np.uint8) * 255).filter(ImageFilter.GaussianBlur(2)),
+                               np.float32)[..., None] / 255
+            subject = np.array((40, 150, 140), np.float32)
+            img = (subject * alpha + np.array(bg, np.float32) * (1 - alpha)).astype(np.uint8)
+            src = tmp / f"{screen}.png"; Image.fromarray(img, "RGB").save(src)
+            res = e.process(src, e.AlphaOptions(out_root=tmp / screen, method="solid", dry_run=False))
+            assert res.action == "cut" and f"despill:auto-{screen}" in res.detail, res
+            with Image.open(res.out_path) as got:
+                out = np.asarray(got.convert("RGBA"), np.float32)
+            others = [c for c in range(3) if c != chan]
+            edge = (out[..., 3] > 0) & (out[..., 3] < 255)
+            spill = np.clip(out[..., chan] - np.maximum(out[..., others[0]], out[..., others[1]]), 0, None)
+            # the subject's own colour has a green excess of 10, so allow that much
+            assert edge.any() and float(spill[edge].mean()) < 5.0, (screen, float(spill[edge].mean()))
+            off = e.process(src, e.AlphaOptions(out_root=tmp / f"{screen}_off", method="solid",
+                                                green_despill=False, dry_run=False))
+            with Image.open(off.out_path) as got:
+                raw = np.asarray(got.convert("RGBA"), np.float32)
+            raw_spill = np.clip(raw[..., chan] - np.maximum(raw[..., others[0]], raw[..., others[1]]), 0, None)
+            assert float(raw_spill[edge].mean()) > 3 * float(spill[edge].mean()) + 5, "despill had no effect"
+            assert tuple(out[64, 64, :3]) == (40, 150, 140), "subject interior must be untouched"
+        # A paper background is not a screen: no despill.
+        paper = np.full((64, 64, 3), (242, 238, 228), np.uint8); paper[16:48, 16:48] = (30, 140, 90)
+        Image.fromarray(paper).save(tmp / "paper.png")
+        res = e.process(tmp / "paper.png", e.AlphaOptions(out_root=tmp / "paper", method="solid", dry_run=False))
+        assert "despill" not in res.detail, res.detail
+        # Edge flood: a background-coloured hole enclosed by a ring stays unless asked.
+        ring = np.full((96, 96, 3), 245, np.uint8)
+        yy, xx = np.ogrid[:96, :96]
+        r2 = (yy - 48) ** 2 + (xx - 48) ** 2
+        ring[(r2 <= 36 ** 2) & (r2 >= 20 ** 2)] = (200, 30, 30)
+        Image.fromarray(ring).save(tmp / "ring.png")
+        kept = e.process(tmp / "ring.png", e.AlphaOptions(out_root=tmp / "kept", method="edge_flood",
+                                                          do_defringe=False, dry_run=False))
+        removed = e.process(tmp / "ring.png", e.AlphaOptions(out_root=tmp / "removed", method="edge_flood",
+                                                             remove_enclosed=True, do_defringe=False, dry_run=False))
+        with Image.open(kept.out_path) as a, Image.open(removed.out_path) as b:
+            assert a.getpixel((48, 48))[3] == 255 and b.getpixel((48, 48))[3] == 0
+            assert b.getpixel((48, 20))[3] == 255, "the ring itself must stay"
+    print("PASS: alpha_doctor auto despill (green/blue edges, interior untouched, none on paper) + enclosed option.")
+
+
 def main() -> int:
     global np, e
     if importlib.util.find_spec("numpy") is None:
@@ -246,6 +299,7 @@ def main() -> int:
     e = _engine
     test_pure()
     test_deterministic_pipeline()
+    test_auto_despill_and_enclosed()
     test_safety_contracts()
     test_ai_optional()
     return 0

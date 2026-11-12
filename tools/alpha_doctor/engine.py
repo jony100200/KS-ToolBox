@@ -12,7 +12,11 @@ Methods (pick per batch):
     edge_flood  - remove background regions connected to the image border
     ai          - u2net matte (opt-in; model download requires explicit permission)
 
-Post-ops (all deterministic): green despill, defringe (erode+feather), premultiply.
+Post-ops (all deterministic): despill, defringe (erode+feather), premultiply.
+Despill defaults to *auto*: when the background is a green or blue screen, the
+screen colour is suppressed in the edge band only (real green/blue subject colour
+inside the cut is untouched). ``green_despill=True`` keeps the old whole-image
+green clamp; ``False`` turns despill off.
 
 Errors are values: every fallible call returns the standard envelope. See
 CodingPrinciples.md.
@@ -111,8 +115,31 @@ def detect_bg_color(rgb: np.ndarray) -> np.ndarray:
     return np.median(b, axis=0)
 
 
+def _reconstruct(marker: np.ndarray, mask: np.ndarray, cancelled: Cancelled) -> np.ndarray:
+    """Morphological reconstruction: grow ``marker`` inside ``mask`` (4-connected)."""
+    h, w = mask.shape
+    marker = marker & mask
+    for _ in range(h + w):                                # geodesic reach <= h+w; converges early
+        _cancelled(cancelled, "alpha-edge-flood")
+        dil = marker.copy()
+        dil[1:, :] |= marker[:-1, :]; dil[:-1, :] |= marker[1:, :]
+        dil[:, 1:] |= marker[:, :-1]; dil[:, :-1] |= marker[:, 1:]
+        new = dil & mask
+        if np.array_equal(new, marker):
+            break
+        marker = new
+    return marker
+
+
+def _erode(mask: np.ndarray, radius: int) -> np.ndarray:
+    from PIL import Image, ImageFilter
+    img = Image.fromarray(mask.astype(np.uint8) * 255)
+    return np.asarray(img.filter(ImageFilter.MinFilter(2 * radius + 1))) > 127
+
+
 def edge_flood_alpha(
-    rgb: np.ndarray, tol: float = 30.0, cancelled: Cancelled = None
+    rgb: np.ndarray, tol: float = 30.0, cancelled: Cancelled = None,
+    remove_enclosed: bool = False, enclosed_min_px: int = 4,
 ) -> np.ndarray:
     """Remove background regions connected to the image border. Marks pixels
     within `tol` of the border colour, then keeps only those reachable from the
@@ -125,15 +152,17 @@ def edge_flood_alpha(
     marker = np.zeros((h, w), dtype=bool)                                 # seed at the four borders
     marker[0, :] |= like[0, :]; marker[-1, :] |= like[-1, :]
     marker[:, 0] |= like[:, 0]; marker[:, -1] |= like[:, -1]
-    for _ in range(h + w):                                # geodesic reach ≤ h+w; converges early
-        _cancelled(cancelled, "alpha-edge-flood")
-        dil = marker.copy()
-        dil[1:, :] |= marker[:-1, :]; dil[:-1, :] |= marker[1:, :]
-        dil[:, 1:] |= marker[:, :-1]; dil[:, :-1] |= marker[:, 1:]
-        new = dil & like
-        if np.array_equal(new, marker):
-            break
-        marker = new
+    marker = _reconstruct(marker, like, cancelled)
+    if remove_enclosed:
+        # Background trapped inside the subject (e.g. the gap between an arm and the
+        # body) is not connected to the border. Remove enclosed background-coloured
+        # areas that are thicker than 2*enclosed_min_px+1 px; thin strokes and small
+        # highlights of the same colour stay. Off by default: a white subject on a
+        # white background would lose its white parts.
+        inner = like & ~marker
+        seeds = _erode(inner, max(1, int(enclosed_min_px)))
+        if seeds.any():
+            marker |= _reconstruct(seeds, inner, cancelled)
     return np.where(marker, 0, 255).astype(np.uint8)
 
 
@@ -146,7 +175,7 @@ def matte(
     if opts.method == "solid":
         return chroma_alpha(rgb, detect_bg_color(rgb), max(20.0, opts.tolerance * 0.4), opts.feather_band)
     if opts.method == "edge_flood":
-        return edge_flood_alpha(rgb, opts.tolerance, cancelled)
+        return edge_flood_alpha(rgb, opts.tolerance, cancelled, remove_enclosed=opts.remove_enclosed)
     raise ValueError(f"not a deterministic method: {opts.method}")
 
 
@@ -303,10 +332,38 @@ def _ai_matte(
 
 # --- edge cleanup + alpha ops (pure) ------------------------------------------
 
-def despill(rgb: np.ndarray) -> np.ndarray:
-    """Clamp green to max(red, blue) per pixel — kills green-screen tint. float32."""
+def despill(rgb: np.ndarray, screen: str = "green") -> np.ndarray:
+    """Clamp the screen channel to the max of the other two — kills screen tint. float32."""
     r, g, b = rgb[:, :, 0].astype(np.float32), rgb[:, :, 1].astype(np.float32), rgb[:, :, 2].astype(np.float32)
+    if screen == "blue":
+        return np.stack([r, g, np.minimum(b, np.maximum(r, g))], -1)
     return np.stack([r, np.minimum(g, np.maximum(r, b)), b], -1)
+
+
+def screen_colour(bg: np.ndarray) -> str | None:
+    """'green' / 'blue' when a background colour is a green or blue screen, else None."""
+    r, g, b = (float(v) for v in bg[:3])
+    if g >= 80 and g > 1.4 * max(r, b):
+        return "green"
+    if b >= 80 and b > 1.4 * max(r, g):
+        return "blue"
+    return None
+
+
+def edge_despill(rgba: np.ndarray, screen: str, band_px: int = 2) -> np.ndarray:
+    """Despill everything except the opaque interior deeper than ``band_px``.
+
+    Transparent pixels are included: their colour is invisible but would bleed back
+    in when the cut is resized or filtered.
+    """
+    from PIL import Image, ImageFilter
+    alpha = rgba[:, :, 3]
+    band = np.asarray(Image.fromarray(alpha).filter(ImageFilter.MinFilter(2 * band_px + 1))) < 255
+    out = rgba.copy()
+    if band.any():
+        fixed = despill(rgba[:, :, :3], screen).clip(0, 255).astype(np.uint8)
+        out[band, :3] = fixed[band]
+    return out
 
 
 def defringe(rgba: np.ndarray, erode_px: int = 1, feather: float = 0.6) -> np.ndarray:
@@ -351,7 +408,8 @@ class AlphaOptions:
     do_defringe: bool = True
     erode_px: int = 1
     feather: float = 0.6
-    green_despill: bool = False
+    green_despill: bool | None = None  # None = auto (edge band, green/blue screens only)
+    remove_enclosed: bool = False     # edge_flood: also remove enclosed background areas
     do_premultiply: bool = False
     min_coverage: float = 0.005
     dry_run: bool = True
@@ -415,7 +473,8 @@ def normalized_options(opts: AlphaOptions) -> tuple[AlphaOptions | None, str]:
         mirror=bool(opts.mirror),
         allow_model_download=bool(opts.allow_model_download),
         do_defringe=bool(opts.do_defringe),
-        green_despill=bool(opts.green_despill),
+        green_despill=None if opts.green_despill in (None, "auto") else bool(opts.green_despill),
+        remove_enclosed=bool(opts.remove_enclosed),
         do_premultiply=bool(opts.do_premultiply),
         dry_run=bool(opts.dry_run),
     ), ""
@@ -572,9 +631,18 @@ def process(
     rgba: np.ndarray = rb["data"]
 
     _cancelled(cancelled, "alpha-postprocess", src)
+    despill_tag = ""
     if opts.green_despill:
         rgba = np.dstack([despill(rgba[:, :, :3]).clip(0, 255).astype(np.uint8), rgba[:, :, 3]])
+        despill_tag = "despill"
         _cancelled(cancelled, "alpha-despill", src)
+    elif opts.green_despill is None:
+        bg = _hex_to_rgb(opts.key_color) if opts.method == "chroma" else detect_bg_color(rgba[:, :, :3])
+        screen = screen_colour(bg)
+        if screen:
+            rgba = edge_despill(rgba, screen)
+            despill_tag = f"despill:auto-{screen}"
+            _cancelled(cancelled, "alpha-despill", src)
     if opts.do_defringe:
         rgba = defringe(rgba, opts.erode_px, opts.feather)
         _cancelled(cancelled, "alpha-defringe", src)
@@ -622,7 +690,8 @@ def process(
         )
 
     tags = [opts.method]
-    if opts.green_despill: tags.append("despill")
+    if opts.remove_enclosed and opts.method == "edge_flood": tags.append("enclosed")
+    if despill_tag: tags.append(despill_tag)
     if opts.do_defringe: tags.append("defringe")
     if opts.do_premultiply: tags.append("premult")
     reason = "background removed"

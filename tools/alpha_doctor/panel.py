@@ -32,6 +32,13 @@ _AI_MODEL_LABELS = {
 }
 
 
+# Despill menu label -> AlphaOptions.green_despill (None = auto).
+_DESPILL_CHOICES = {
+    "Auto (green/blue screen edges)": None,
+    "Green, whole image": True,
+    "Off": False,
+}
+
 class AlphaDoctorPanel(BaseBatchPanel):
     FILE_EXTS = e.IMAGE_EXTS
     FILE_LABEL = "image"
@@ -86,13 +93,22 @@ class AlphaDoctorPanel(BaseBatchPanel):
         self._dry.pack(side="left")
         self._defringe = ctk.CTkCheckBox(toggles, text="Defringe", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._defringe.select(); self._defringe.pack(side="left", padx=16)
-        self._green = ctk.CTkCheckBox(toggles, text="Green despill", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._green.pack(side="left", padx=16)
+        ctk.CTkLabel(toggles, text="Despill", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left", padx=(16, 6))
+        self._despill = ctk.CTkOptionMenu(
+            toggles, values=list(_DESPILL_CHOICES), width=200,
+            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER,
+        )
+        self._despill.set(next(iter(_DESPILL_CHOICES)))
+        self._despill.pack(side="left")
         self._premul = ctk.CTkCheckBox(toggles, text="Premultiply", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._premul.pack(side="left", padx=16)
         row2 = ctk.CTkFrame(b, fg_color="transparent"); row2.pack(fill="x", pady=(6, 0))
         self._mirror = ctk.CTkCheckBox(row2, text="Mirror input structure", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._mirror.select(); self._mirror.pack(side="left")
+        self._enclosed = ctk.CTkCheckBox(
+            row2, text="Edge flood: also remove enclosed background", font=t.font(11), fg_color=t.ACCENT_BLUE,
+        )
+        self._enclosed.pack(side="left", padx=16)
         self._hint = ctk.CTkLabel(b, text="", text_color=t.TEXT_MUTED, font=t.font(10)); self._hint.pack(anchor="w", pady=(6, 0))
         self._build_run_row(b)
 
@@ -145,7 +161,9 @@ class AlphaDoctorPanel(BaseBatchPanel):
         return e.AlphaOptions(out_root=out_root, input_root=self._resolve_input_root() if mirror else None,
                               mirror=mirror, method=self._current_method(), key_color=key_hex, tolerance=tol,
                               model=self._current_model(),
-                              do_defringe=bool(self._defringe.get()), green_despill=bool(self._green.get()),
+                              do_defringe=bool(self._defringe.get()),
+                              green_despill=_DESPILL_CHOICES[self._despill.get()],
+                              remove_enclosed=bool(self._enclosed.get()),
                               do_premultiply=bool(self._premul.get()), dry_run=bool(self._dry.get()))
 
     def _pre_run_check(self, opts: e.AlphaOptions) -> bool:

@@ -23,7 +23,16 @@ existing custom Alpha Doctor screen remains the control surface.
 ## Post-processing (all deterministic)
 
 - **Defringe** — erode + feather the alpha edge to kill the 1-px halo.
-- **Green despill** — remove green-screen tint that bleeds into edges.
+- **Despill** — *Auto* (default): when the background (or chroma key) is a green or
+  blue screen, the screen colour is suppressed in the edge band and under transparent
+  pixels only; the opaque interior is untouched, so a green shirt stays green. *Green,
+  whole image* is the old global clamp; *Off* disables it.
+- **Edge flood: also remove enclosed background** (off by default) — edge flood only
+  removes background connected to the image border, so background trapped inside the
+  subject (e.g. between an arm and the head) stays opaque. This option also removes
+  enclosed background-coloured areas thicker than about 9 px. Known limit: on line art
+  or a light subject on a matching light background it also removes subject areas of
+  the same colour (pale skin, white strings), so check the result or use the AI matte.
 - **Premultiply** — output premultiplied alpha (for engines that expect it).
 
 The normal action writes transparent PNG cutouts and never touches originals.
