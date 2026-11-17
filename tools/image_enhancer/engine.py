@@ -259,6 +259,27 @@ def _subject_mask(image, cancelled: Cancelled):
     return Image.fromarray((values * 255).astype(np.uint8)).resize(source.size, Image.Resampling.BILINEAR)
 
 
+def _face_specular_gap(image, boxes) -> float | None:
+    """Shine on the largest face: the distance from mid skin tone to its highlights (0-1).
+
+    Measured on the face because a whole-picture figure is dominated by the background.
+    """
+    if not boxes:
+        return None
+    x0, y0, x1, y1 = max(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    rgb = np.asarray(image.convert("RGB").crop((x0, y0, x1, y1)), dtype=np.float32) / 255.0
+    luma = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
+    p45, p92 = (float(v) for v in np.percentile(luma, (45, 92)))
+    return float(np.clip(p92 - p45, 0.0, 1.0))
+
+
+def _face_detection_available() -> bool:
+    import importlib.util
+    return _YUNET.is_file() and importlib.util.find_spec("cv2") is not None
+
+
 def _face_boxes(image) -> list[tuple[int, int, int, int]]:
     if not _YUNET.is_file():
         return []
@@ -387,6 +408,8 @@ def _with_smart_plan(options: EnhanceOptions, route: smart.Plan) -> EnhanceOptio
         contrast=options.contrast * route.contrast,
         gamma=options.gamma * route.gamma,
         saturation=options.saturation * route.saturation,
+        vibrance=max(options.vibrance, route.vibrance),
+        clarity=max(options.clarity, route.clarity),
         temperature=max(-1.0, min(1.0, options.temperature + route.temperature)),
         denoise=max(options.denoise, route.denoise),
         sharpen=options.sharpen * route.sharpen,
@@ -412,9 +435,16 @@ def process(path: str | Path, opts: EnhanceOptions, *, cancelled: Cancelled = No
 
         profile = smart.analyse(original)
         boxes = _face_boxes(original)
+        face_area = sum((x1 - x0) * (y1 - y0) for x0, y0, x1, y1 in boxes)
+        if not _face_detection_available():
+            profile = replace(profile, reasons=profile.reasons + (
+                "face detection unavailable (OpenCV or the YuNet model is missing) -> skin de-gloss skipped; "
+                "use the Natural Skin preset for portraits",))
         route = smart.plan(profile, requested_mode=options.mode,
                            auto_select=options.auto_select_mode or options.preset == "auto",
-                           requested_scale=options.scale_factor)
+                           requested_scale=options.scale_factor,
+                           face_fraction=face_area / max(original.width * original.height, 1),
+                           face_specular_gap=_face_specular_gap(original, boxes))
 
         # Manual presets do exactly what their name says; the measured tonal plan
         # (brightness, de-gloss, micro-texture, ...) belongs to Auto only.

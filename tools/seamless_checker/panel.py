@@ -205,6 +205,24 @@ class SeamlessCheckerPanel(ctk.CTkFrame):
         self._bind_keys()
         self._poll_worker()
 
+        # The tool page scrolls, so nothing stretches this panel downwards: without a
+        # height of its own the texture view stays a thin strip above an empty window.
+        self._canvas_height = 0
+        self.bind("<Map>", lambda _e: self._fit_canvas_height(), add="+")
+        self.winfo_toplevel().bind("<Configure>", lambda _e: self._fit_canvas_height(), add="+")
+
+    def _fit_canvas_height(self) -> None:
+        """Let the texture view fill the window below the page header and above the dock."""
+        try:
+            if not self.winfo_exists():
+                return
+            target = max(320, self.winfo_toplevel().winfo_height() - 250)
+            if abs(target - self._canvas_height) > 6:
+                self._canvas_height = target
+                self.canvas._viewport.configure(height=target)
+        except tk.TclError:
+            pass
+
     # ------------------------------------------------------------------ UI Layout
     def _build_work_area(self) -> None:
         area = ctk.CTkFrame(self, fg_color="transparent")

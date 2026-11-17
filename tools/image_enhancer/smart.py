@@ -53,6 +53,8 @@ class Plan:
     use_model: bool
     model_scale: int
     reasons: tuple[str, ...]
+    vibrance: float = 0.0
+    clarity: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -214,8 +216,13 @@ def _noise_sigma(source) -> float:
     return estimate_noise_sigma(crop)
 
 
-def plan(profile: Profile, *, requested_mode: str, auto_select: bool, requested_scale: int) -> Plan:
-    """Turn a profile into bounded non-destructive settings and model demand."""
+def plan(profile: Profile, *, requested_mode: str, auto_select: bool, requested_scale: int,
+         face_fraction: float = 0.0, face_specular_gap: float | None = None) -> Plan:
+    """Turn a profile into bounded non-destructive settings and model demand.
+
+    `face_fraction` is the share of the picture covered by detected faces (0 = none found).
+    Skin work (de-gloss, pore texture) is planned only when a face is present.
+    """
     if requested_mode not in MODES:
         raise ValueError(f"unknown Smart Enhance mode: {requested_mode}")
     if requested_scale not in (1, 2, 3, 4):
@@ -232,15 +239,36 @@ def plan(profile: Profile, *, requested_mode: str, auto_select: bool, requested_
     contrast = 1.0 + min(0.15, max(0.0, 0.45 - (1.0 - profile.shadow_fraction - profile.highlight_fraction)) * 0.25)
     saturation = 1.0 - min(0.30, max(0.0, profile.saturation - 0.56) * 0.7)
 
+    # Warm light (evening sun, lamps, wood) is part of the picture, not a fault: cooling it
+    # leaves the image grey. Only an extreme warm cast is eased, and a cool one only partly.
     temperature = 0.0
-    if profile.colour_cast == "warm":
-        temperature = -min(0.22, profile.cast_strength * 1.6)
-    elif profile.colour_cast == "cool":
-        temperature = min(0.22, profile.cast_strength * 1.6)
+    if profile.colour_cast == "warm" and profile.cast_strength > 0.32:
+        temperature = -min(0.05, (profile.cast_strength - 0.32) * 0.5)
+    elif profile.colour_cast == "cool" and profile.cast_strength > 0.08:
+        temperature = min(0.08, profile.cast_strength * 0.5)
+    if temperature:
+        reasons.append(f"{profile.colour_cast} cast {profile.cast_strength:.2f} -> temperature {temperature:+.2f}")
 
+    has_face = face_fraction > 0.004
     sharpen = 1.0
     if profile.sharpness < 0.18 and profile.noise < 0.06:
         sharpen += min(0.35, (0.18 - profile.sharpness) * 1.9)
+    elif profile.noise < 0.09:
+        sharpen += 0.03 if has_face else 0.06
+
+    # The natural lift: richer muted colours and a little local contrast. Gentler on faces.
+    # Strengths were set against a phone "enhance" result of the same picture; more than
+    # this reads as over-processed.
+    vibrance = 0.0
+    if profile.saturation < 0.64:
+        vibrance = min(0.10, (0.64 - profile.saturation) * 0.5 + 0.02) * (0.5 if has_face else 1.0)
+    clarity = 0.0
+    if profile.noise < 0.09:
+        clarity = 0.03 if has_face else 0.05
+    # Richer colour lowers the green and blue channels; give that brightness back.
+    brightness *= 1.0 + vibrance * 0.6
+    if vibrance or clarity:
+        reasons.append(f"natural lift: vibrance {vibrance:.2f}, clarity {clarity:.2f}")
     denoise = min(0.45, max(0.0, profile.noise - 0.04) * 3.0)
     # The denoise filter adapts to the measured sigma; ask for full strength once
     # noise is clearly visible (sigma ~8 on 0-255 luma = sigma-12 RGB noise).
@@ -249,13 +277,21 @@ def plan(profile: Profile, *, requested_mode: str, auto_select: bool, requested_
         reasons.append(f"noise sigma {profile.noise_sigma:.1f} -> denoise {denoise:.2f}")
 
     # De-gloss and micro-texture planning
+    # De-gloss is for shiny skin. On a room, a product or a landscape it only flattens highlights.
     de_gloss = 0.0
-    if profile.specular_gap > 0.25:
-        de_gloss = round(float(min(0.85, profile.specular_gap * 1.4)), 3)
-        reasons.append(f"specular gap {profile.specular_gap:.2f} -> de-gloss {de_gloss:.2f}")
+    skin_gap = face_specular_gap if face_specular_gap is not None else profile.specular_gap
+    if has_face and skin_gap > 0.25:
+        de_gloss = round(float(min(0.85, skin_gap * 1.4)), 3)
+        reasons.append(f"face found, shine on the face {skin_gap:.2f} -> de-gloss {de_gloss:.2f}")
+    elif profile.specular_gap > 0.25:
+        reasons.append("no face found -> de-gloss skipped")
+    if de_gloss > 0 and vibrance > 0:
+        # Pulling shine down already deepens skin colour; adding vibrance on top turns it orange.
+        brightness /= 1.0 + vibrance * 0.6
+        vibrance = 0.0
 
     micro_texture = 0.0
-    if profile.sharpness < 0.12 and profile.noise < 0.03:
+    if has_face and profile.sharpness < 0.12 and profile.noise < 0.03:
         micro_texture = 0.035
         reasons.append("flat/waxy surface detected -> inject micro-pore texture")
 
@@ -285,4 +321,5 @@ def plan(profile: Profile, *, requested_mode: str, auto_select: bool, requested_
         sharpen=round(sharpen, 4), denoise=round(denoise, 4),
         de_gloss=round(de_gloss, 4), micro_texture=round(micro_texture, 4),
         use_model=use_model, model_scale=model_scale, reasons=tuple(reasons),
+        vibrance=round(vibrance, 4), clarity=round(clarity, 4),
     )

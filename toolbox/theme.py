@@ -18,6 +18,8 @@ ACCENT_TINT  = "#172554"   # low-emphasis accent surface
 NEUTRAL_HOVER= "#374151"   # secondary button hover
 TEXT_MAIN    = "#F3F4F6"   # primary text (near-white)
 TEXT_MUTED   = "#9CA3AF"   # secondary / label text (gray)
+ENTRY_BG     = BG_COLOR    # inputs and text boxes read darker than their card
+ACCENT       = ACCENT_BLUE # short name used by the Workflows page
 
 # --- state triad (dark bg + bright fg) ---
 STATE = {
