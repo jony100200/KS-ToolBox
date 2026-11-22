@@ -131,10 +131,23 @@ def build_filters(opts: "AudioOptions", duration: float | None) -> str:
     """Assemble the `-af` chain from the selected options. Pure — no I/O.
 
     `duration` is the *effective* (post-trim) length, needed to place the
-    fade-out. Order: fade-in, fade-out, loudnorm — one comma-joined chain.
-    Returns "" when no filter is selected (caller then omits `-af`).
+    fade-out. Order: voice_clean (75Hz HPF + FFT denoise + broadcast EQ +
+    gentle compressor), trim_silence, fade-in, fade-out, loudnorm — one
+    comma-joined chain. Returns "" when no filter is selected.
     """
     parts: list[str] = []
+    if getattr(opts, "voice_clean", False):
+        parts.extend([
+            "highpass=f=75",
+            "afftdn=nf=-25",
+            "equalizer=f=300:t=q:w=1.2:g=-2.5",
+            "equalizer=f=4000:t=q:w=1.0:g=2.0",
+            "acompressor=threshold=-20dB:ratio=2.5:attack=10:release=120",
+        ])
+    if getattr(opts, "trim_silence", False):
+        parts.append(
+            "silenceremove=stop_periods=-1:stop_duration=0.65:stop_threshold=-42dB:window=0.02"
+        )
     if opts.fade_in and opts.fade_in > 0:
         parts.append(f"afade=t=in:st=0:d={_num(opts.fade_in)}")
     if opts.fade_out and opts.fade_out > 0:
@@ -143,7 +156,11 @@ def build_filters(opts: "AudioOptions", duration: float | None) -> str:
             st = max(0.0, float(duration) - float(opts.fade_out))
         parts.append(f"afade=t=out:st={_num(st)}:d={_num(opts.fade_out)}")
     if opts.normalize:
-        parts.append("loudnorm")
+        if getattr(opts, "voice_clean", False):
+            lufs = float(getattr(opts, "target_lufs", -14.0))
+            parts.append(f"loudnorm=I={_num(lufs)}:TP=-1.5:LRA=11")
+        else:
+            parts.append("loudnorm")
     return ",".join(parts)
 
 
@@ -158,6 +175,9 @@ class AudioOptions:
     fade_in: float = 0.0                # seconds
     fade_out: float = 0.0               # seconds
     normalize: bool = False
+    voice_clean: bool = False           # studio voice cleanup (HPF + denoise + EQ + comp)
+    trim_silence: bool = False          # shorten dead pauses > 0.65s
+    target_lufs: float = -14.0          # target LUFS when voice_clean + normalize are active
     out_root: Path | None = None        # output root; None = ./audio beside source
     input_root: Path | None = None      # mirror mode recreates paths relative to this
     mirror: bool = False
@@ -217,6 +237,10 @@ def _describe_ops(opts: AudioOptions, src: Path, tgt_ext: str) -> str:
         ops.append("trim")
     if (opts.fade_in and opts.fade_in > 0) or (opts.fade_out and opts.fade_out > 0):
         ops.append("fade")
+    if getattr(opts, "voice_clean", False):
+        ops.append("voice-clean")
+    if getattr(opts, "trim_silence", False):
+        ops.append("trim-silence")
     if opts.normalize:
         ops.append("normalize")
     return ", ".join(ops)

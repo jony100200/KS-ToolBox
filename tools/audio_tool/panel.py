@@ -68,9 +68,13 @@ class AudioToolPanel(BaseBatchPanel):
         self._dry = ctk.CTkCheckBox(toggles, text="Preview only (list actions — no writes)", font=t.font(11), fg_color=t.ACCENT_BLUE)
         self._dry.select(); self._dry.pack(side="left")
         self._normalize = ctk.CTkCheckBox(toggles, text="Normalize loudness", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._normalize.pack(side="left", padx=20)
+        self._normalize.pack(side="left", padx=16)
+        self._voice_clean = ctk.CTkCheckBox(toggles, text="Clean Voice (HPF+denoise+EQ)", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._voice_clean.pack(side="left", padx=16)
+        self._trim_silence = ctk.CTkCheckBox(toggles, text="Trim pauses", font=t.font(11), fg_color=t.ACCENT_BLUE)
+        self._trim_silence.pack(side="left", padx=16)
         self._mirror = ctk.CTkCheckBox(toggles, text="Mirror input structure", font=t.font(11), fg_color=t.ACCENT_BLUE)
-        self._mirror.select(); self._mirror.pack(side="left", padx=20)
+        self._mirror.select(); self._mirror.pack(side="left", padx=16)
 
         # run row
         self._build_run_row(b)
@@ -101,6 +105,8 @@ class AudioToolPanel(BaseBatchPanel):
             target_format=self._fmt.get(), bitrate=self._bitrate.get(),
             trim_start=self._trim_start.get().strip(), trim_end=self._trim_end.get().strip(),
             fade_in=fade_in, fade_out=fade_out, normalize=bool(self._normalize.get()),
+            voice_clean=bool(self._voice_clean.get()),
+            trim_silence=bool(self._trim_silence.get()),
             out_root=out_root, input_root=input_root, mirror=mirror,
             dry_run=bool(self._dry.get()),
         )

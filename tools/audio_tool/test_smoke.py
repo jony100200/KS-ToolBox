@@ -149,7 +149,21 @@ def test_ffmpeg() -> None:
             assert len(dry_c) == 1 and dry_c[0]["status"] == "dry_run_ok" and long_wav.is_file()
             real_c = e.cleanup_verified_originals(c_out, permanent_delete=True, dry_run=False)
             assert len(real_c) == 1 and real_c[0]["status"] == "removed" and not long_wav.exists()
-    print("PASS: ffmpeg — convert, trim, normalize, fade, validation, collision, "
+
+            # Studio voice cleanup + pause trimming filter assembly & execution
+            vc_opts = e.AudioOptions(
+                target_format="wav",
+                voice_clean=True,
+                trim_silence=True,
+                normalize=True,
+                out_root=out / "vc_out",
+                dry_run=False,
+            )
+            af_vc = e.build_filters(vc_opts, 2.0)
+            assert "highpass=f=75" in af_vc and "afftdn=nf=-25" in af_vc and "loudnorm=I=-14" in af_vc
+            r_vc = e.process(src, vc_opts)
+            assert r_vc.action == "processed" and e.validate_result(r_vc, vc_opts), r_vc
+    print("PASS: ffmpeg — convert, trim, normalize, voice_clean, fade, validation, collision, "
           "and cancellation checks passed.")
 
 

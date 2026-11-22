@@ -174,6 +174,8 @@ def main() -> int:
             ),
         )
         assert res_ip_resume.action == "skipped" and res_ip_resume.detail == "resumable", res_ip_resume
+        best_enc = e.pick_best_encoder("av1")
+        assert best_enc in e.ENCODERS, best_enc
 
     print(f"PASS: video_compressor — {res.before_mb:.1f}->{res.after_mb:.1f} MB "
           f"(-{res.saved_pct:.0f}%), VMAF {res.vmaf:.1f}; downscale+opus VMAF {res_down.vmaf:.1f}; proof cleanup ok.")

@@ -57,6 +57,11 @@ ENCODERS: dict[str, dict] = {
         "label": "AV1 · Intel Arc / QSV (fast GPU)",
         "flags": lambda crf: ["-c:v", "av1_qsv", "-preset:v", "medium", "-global_quality:v", str(crf)],
     },
+    "amf_av1": {
+        "codec": "av1_amf",
+        "label": "AV1 · AMD AMF (fast GPU)",
+        "flags": lambda crf: ["-c:v", "av1_amf", "-rc:v", "cqp", "-qp_i:v", str(crf), "-qp_p:v", str(crf)],
+    },
     "nvenc_hevc": {
         "codec": "hevc_nvenc",
         "label": "HEVC · NVIDIA NVENC (compatible)",
@@ -66,6 +71,11 @@ ENCODERS: dict[str, dict] = {
         "codec": "hevc_qsv",
         "label": "HEVC · Intel Arc / QSV (compatible)",
         "flags": lambda crf: ["-c:v", "hevc_qsv", "-preset:v", "medium", "-global_quality:v", str(crf)],
+    },
+    "amf_hevc": {
+        "codec": "hevc_amf",
+        "label": "HEVC · AMD AMF (compatible)",
+        "flags": lambda crf: ["-c:v", "hevc_amf", "-rc:v", "cqp", "-qp_i:v", str(crf), "-qp_p:v", str(crf)],
     },
 }
 
@@ -112,6 +122,19 @@ def available_encoders(*, verify: bool = False) -> list[str]:
     if not verify:
         return listed
     return [k for k in listed if probe_encoder(k)]
+
+
+def pick_best_encoder(prefer_family: str = "av1") -> str:
+    """Smart multi-vendor hardware encoder probe: Intel Arc QSV -> NVIDIA NVENC -> AMD AMF -> CPU SVT-AV1."""
+    if prefer_family == "hevc":
+        order = ["qsv_hevc", "nvenc_hevc", "amf_hevc", "qsv_av1", "nvenc_av1", "amf_av1", "svt_av1"]
+    else:
+        order = ["qsv_av1", "nvenc_av1", "amf_av1", "qsv_hevc", "nvenc_hevc", "amf_hevc", "svt_av1"]
+    listed = set(available_encoders(verify=False))
+    for key in order:
+        if key in listed and probe_encoder(key):
+            return key
+    return "svt_av1"
 
 
 # ---------------------------------------------------------------------------
@@ -321,6 +344,8 @@ def compress(src: str | Path, dst: str | Path, *, crf: int = 20,
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".part")     # atomic: write .part, rename on success
 
+    if encoder == "auto":
+        encoder = pick_best_encoder("av1")
     if encoder not in ENCODERS:
         return _err(
             "config.encoder",
