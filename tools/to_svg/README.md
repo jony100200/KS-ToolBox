@@ -65,8 +65,3 @@ and same-size corruption repair. When vtracer and Pillow are available, the
 same smoke also performs and validates a real trace; otherwise only that
 optional leg is skipped.
 
-## Credit
-
-The vtracer conversion path is distilled from KS ChobiEngine's
-`tosvg_wrapper` module (the job-runner wrapper and multi-engine silent-fallback
-were dropped; a missing dep is now announced as a value, never swallowed).

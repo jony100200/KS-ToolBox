@@ -10,6 +10,7 @@ import math
 import os
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -412,3 +413,117 @@ def sweep_part_files(root: Path) -> int:
             except OSError:
                 pass
     return removed
+
+
+def safe_remove(path: str | Path, *, permanent: bool = False) -> bool:
+    """Send *path* to Recycle Bin when send2trash is available (unless permanent=True)."""
+    target = Path(path)
+    if not permanent:
+        try:
+            import send2trash
+            send2trash.send2trash(str(target))
+            return True
+        except ImportError:
+            pass
+        except Exception:
+            return False
+    try:
+        target.unlink()
+        return True
+    except PermissionError:
+        # Windows Read-Only attributes (e.g. synced/archived media folders) block unlink.
+        try:
+            os.chmod(target, stat.S_IWRITE)
+            target.unlink()
+            return True
+        except OSError:
+            return False
+    except OSError:
+        return False
+
+
+def _replace_force(src: Path, dst: Path) -> None:
+    """Replace *dst* with *src*, clearing Windows Read-Only attributes on conflict."""
+    try:
+        src.replace(dst)
+    except PermissionError:
+        if dst.exists():
+            os.chmod(dst, stat.S_IWRITE)
+        src.replace(dst)
+
+
+def commit_candidate(
+    candidate: Path,
+    dst: Path,
+    cancelled: Callable[[], bool] | None = None,
+    *,
+    chunk_size: int = 4 * 1024 * 1024,
+) -> None:
+    """Atomically move *candidate* to *dst*, supporting cross-drive SSD->HDD staging."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if candidate.parent.resolve(strict=False) == dst.parent.resolve(strict=False):
+        _replace_force(candidate, dst)
+        return
+    tmp_dst = dst.with_name(f"{dst.stem}.part{dst.suffix}")
+    tmp_dst.unlink(missing_ok=True)
+    try:
+        with candidate.open("rb") as rf, tmp_dst.open("wb") as wf:
+            while buf := rf.read(chunk_size):
+                if cancelled is not None and cancelled():
+                    raise CommandCancelled(["commit_candidate", str(dst)])
+                wf.write(buf)
+        _replace_force(tmp_dst, dst)
+    except BaseException:
+        tmp_dst.unlink(missing_ok=True)
+        raise
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+def iter_files_sequential(
+    root: str | Path,
+    exts: frozenset[str] | set[str],
+    *,
+    min_bytes: int = 0,
+    exclude_roots: tuple[Path, ...] = (),
+    skip_dirs: frozenset[str] = frozenset(),
+) -> list[Path]:
+    """Single-threaded deterministic os.scandir walk (gentle on spinning HDDs)."""
+    root_p = Path(root)
+    norm_exts = {e.lower() for e in exts}
+    if root_p.is_file():
+        return [root_p] if root_p.suffix.lower() in norm_exts else []
+    results: list[Path] = []
+    skip = {"$RECYCLE.BIN", "System Volume Information", ".Trash-1000"} | set(skip_dirs)
+    excluded = {p.resolve(strict=False) for p in exclude_roots}
+
+    def walk(dir_path: str) -> None:
+        if Path(dir_path).resolve(strict=False) in excluded:
+            return
+        subdirs: list[str] = []
+        try:
+            with os.scandir(dir_path) as it:
+                entries = sorted(it, key=lambda en: en.name.lower())
+        except OSError:
+            return
+        for entry in entries:
+            try:
+                is_junc = getattr(entry, "is_junction", None)
+                if entry.is_dir(follow_symlinks=False) and not (is_junc and is_junc()):
+                    if entry.name not in skip:
+                        subdirs.append(entry.path)
+                elif entry.is_file(follow_symlinks=False):
+                    low = entry.name.lower()
+                    _, ext = os.path.splitext(low)
+                    if ext in norm_exts:
+                        if ".verify." in low or ".part." in low or low.endswith(".part"):
+                            continue
+                        if min_bytes <= 0 or entry.stat(follow_symlinks=False).st_size >= min_bytes:
+                            results.append(Path(entry.path))
+            except OSError:
+                continue
+        for sd in subdirs:
+            walk(sd)
+
+    walk(str(root_p))
+    return results

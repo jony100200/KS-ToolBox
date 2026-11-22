@@ -13,8 +13,6 @@ $py = if ($env:KS_BUILD_PYTHON) {
   Join-Path $root ".venv-release\Scripts\python.exe"
 } elseif (Test-Path (Join-Path $root ".venv\Scripts\python.exe")) {
   Join-Path $root ".venv\Scripts\python.exe"
-} elseif (Test-Path "D:\KSAppDev\.venv\Scripts\python.exe") {
-  "D:\KSAppDev\.venv\Scripts\python.exe"
 } else {
   Join-Path $root ".venv\Scripts\python.exe"
 }

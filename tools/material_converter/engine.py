@@ -214,7 +214,7 @@ def unpack_orm(img):
 def pack_mos(metal, ao, rough):
     """Unity metallic/smoothness pack as RGBA:
     R = Metallic, G = AO (Occlusion), B = 1.0, A = Smoothness (1 - Roughness).
-    (Lifted from RupayanFlow's Unity_MOS convention.) Pure."""
+    (Follows the Unity MOS channel convention.) Pure."""
     from PIL import Image
     import numpy as np
     m = _as_gray(metal)

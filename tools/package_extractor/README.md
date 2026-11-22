@@ -85,8 +85,3 @@ atomic reports, exact corruption detection, recursive validation, preview bomb
 and entry-count budgets, same-destination detection, invalid-option rejection, and cancellation
 rollback without touching a pre-existing collision target.
 
-## Credits
-
-Unity `.unitypackage` parsing distilled from KS UnityExtractor; safe-path /
-collision helpers modelled on RupayanFlow's `pack_core`. Reimplemented cleanly on
-the Python standard library for KS-ToolBox.

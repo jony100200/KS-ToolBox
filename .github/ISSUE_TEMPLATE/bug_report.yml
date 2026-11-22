@@ -1,0 +1,40 @@
+name: Bug Report
+description: Report a bug or unexpected behavior in a KS ToolBox tool
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: input
+    id: tool
+    attributes:
+      label: Tool Name
+      placeholder: e.g. Alpha Doctor, Video Compressor, Format Converter
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version & Install Type
+      placeholder: e.g. v1.2 portable Windows zip, or source (Python 3.12 on Linux)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      placeholder: |
+        1. Open tool ...
+        2. Select options ...
+        3. Click Run ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs Actual Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log Output / Error Message (optional)
+      render: text

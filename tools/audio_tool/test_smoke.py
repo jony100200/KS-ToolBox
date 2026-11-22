@@ -134,6 +134,21 @@ def test_ffmpeg() -> None:
         assert nonfinite_trim.action == "failed" and nonfinite_trim.detail == "bad.trim"
         nonfinite_fade = e.process(src, e.AudioOptions(fade_in=float("nan"), dry_run=True))
         assert nonfinite_fade.action == "failed" and nonfinite_fade.detail == "bad.fade"
+
+        # (e) size-gated compress_audio + duration-verified proof cleanup
+        long_wav = tmp / "bloated.wav"
+        make_long = [ff, "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=8", str(long_wav)]
+        if run_cancellable_cmd(make_long, timeout=120).returncode == 0:
+            c_out = tmp / "c_out"
+            cres = e.compress_audio(
+                long_wav,
+                e.CompressOptions(target_format="opus", bitrate="96k", out_root=c_out, work_dir=tmp / "awork", dry_run=False),
+            )
+            assert cres.action == "compressed" and cres.after_kb < cres.before_kb, cres
+            dry_c = e.cleanup_verified_originals(c_out, dry_run=True)
+            assert len(dry_c) == 1 and dry_c[0]["status"] == "dry_run_ok" and long_wav.is_file()
+            real_c = e.cleanup_verified_originals(c_out, permanent_delete=True, dry_run=False)
+            assert len(real_c) == 1 and real_c[0]["status"] == "removed" and not long_wav.exists()
     print("PASS: ffmpeg — convert, trim, normalize, fade, validation, collision, "
           "and cancellation checks passed.")
 

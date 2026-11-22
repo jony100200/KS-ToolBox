@@ -4,8 +4,8 @@ All notable changes to KS ToolBox. Format loosely follows Keep a Changelog.
 
 ## [Unreleased]
 
-Image tools fix pass from the 2026-11-12 audit. Numbers are measured with the audit
-images (PSNR in dB against the clean original, higher is better).
+Image tools quality and accuracy pass (PSNR measured in dB against clean reference
+images; higher is better).
 
 ### Fixed
 - **Metadata Scrubber: every JPEG failed** (`ValueError: Cannot use 'keep' when original
@@ -139,5 +139,4 @@ cross-platform UI. Free, offline, no credits, no cloud.
 ### Notes
 - Core deps are small (`customtkinter`, `send2trash`, `pillow`, `numpy`); per-tool extras are optional (see `requirements-optional.txt`).
 - ffmpeg/ffprobe power the video/audio tools (bundle in `bin/` or install on PATH).
-- A bundled FFmpeg build with x264/x265 is GPL — see `THIRD_PARTY_NOTICES.md` for redistribution obligations.
 - Full deterministic-vs-AI analysis in `docs/KS_TOOLBOX_OPTIMIZATION_AUDIT.md`; reproducible benchmarks in `benchmarks/`.

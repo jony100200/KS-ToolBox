@@ -76,6 +76,31 @@ defined ceiling; larger collections should be split into production units.
 python -m tools.asset_auditor.test_smoke
 ```
 
+## HDD-Gentle Exact Duplicate CLI
+
+For large drives across all file types (videos, archives, models, images):
+
+```
+python -m tools.asset_auditor.cli dupes -i <root> -o <report_dir>
+```
+
+Uses a single-threaded `os.scandir` metadata walk, discards unique sizes without
+opening files, skips hardlink aliases (`st_dev`, `st_ino`), runs a 64 KB head/mid/tail
+partial fingerprint on size collisions, and only streams full SHA-256 on remaining matches.
+
+To re-verify a `dupes.json` report and safely move duplicate copies to the Recycle Bin
+(always keeping 1 canonical copy):
+
+```
+python -m tools.asset_auditor.cli dupes-clean -r <report_dir>/dupes.json --execute
+```
+
+To build a fast offline search page and Markdown folder map (`00_FIND_EVERYTHING.html` + `00_DRIVE_MAP.md`) at a drive or folder root with bounded sequential depth:
+
+```
+python -m tools.asset_auditor.cli index -i <root> -o <out_dir> --max-depth 3
+```
+
 Checks the filename-safety rules (no deps), then — with numpy + Pillow — the
 dHash/Hamming behaviour, exact indexed/all-pairs grouping parity across five
 thresholds, the corrupt/dimension check, and a full audit over a temp folder
@@ -83,14 +108,3 @@ built to contain every issue class. It then validates exact three-report reuse,
 same-size corruption rejection, strict options, announced thumbnail fallback,
 and cancellation cleanup. Skips cleanly if numpy/Pillow are absent.
 
-## Credits
-
-Deterministic primitives distilled (numpy/Pillow path only, optional
-imagehash/cv2/skimage branches dropped) from:
-
-- **ChobiEngine** `texture_similarity_guard/image_fingerprint.py` — dHash bits.
-- **ChobiEngine** `image_analyzer/services/analysis_cv.py` — corrupt / resolution /
-  alpha / health preflight.
-- **RupayanFlow** `packaging/pack_core.py` — `sha256_file`, reserved-name /
-  illegal-char / trailing-dot-space validation.
-- **RupayanFlow** `analysis/heuristics.py` — brightness/contrast luminance stats.

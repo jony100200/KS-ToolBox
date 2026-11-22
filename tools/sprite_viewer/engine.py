@@ -6,7 +6,7 @@ missing dep is announced when the tool is opened). Fallible IO returns the share
 error-envelope; the in-memory transforms (slicing, detection) return plain lists
 because they can't fail on a valid image.
 
-Lifted (deterministic, numpy dropped, job-shells dropped) from ChobiEngine:
+Deterministic pure-Pillow sprite slicing and animation helpers:
   - grid slicing            <- sprite_processor/services/autosprite_service.py
                                (`split_sprite_sheet` cell/row/col math)
   - alpha connected-comp    <- sprite_processor/services/splitter_service.py

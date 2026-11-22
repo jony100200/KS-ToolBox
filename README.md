@@ -42,10 +42,12 @@ always explicit and confirmed.
 | [**Video Chopper**](tools/video_chopper/README.md) | Split a video into clips at black-frame gaps (scene/take boundaries). Lossless stream-copy or frame-accurate re-encode. |
 | [**Audio Tool**](tools/audio_tool/README.md) | Batch convert / trim / fade / loudness-normalize audio via the bundled FFmpeg. |
 | [**Format Converter**](tools/format_converter/README.md) | Convert images, audio/video, and documents through verified local adapters. |
+| [**YouTube Downloader**](tools/youtube_downloader/README.md) | Download YouTube videos, audio, and thumbnails locally with clean filename sanitization. |
 
 ### 🖼️ Images
 | Tool | What it does |
 |---|---|
+| [**Image Compressor**](tools/image_compressor/README.md) | Size-gated, pixel/PSNR-verified batch image compression (lossless WebP, PNG/TIFF optimization, or visually-lossless) with proof sidecars and safe Recycle Bin cleanup. |
 | [**Image Enhancer**](tools/image_enhancer/README.md) | Local batch restoration, CLAHE, Wavelet de-gloss, skin-tone QA, creative grades, and optional micro-model rack (SPAN, SAFMN, RAMiT, SCUNet, NAFNet, DehazeFormer, CodeFormer, AnimeGANv2) — no ComfyUI or cloud. |
 | [**Image Rescale**](tools/image_rescale/README.md) | Batch-resize four ways (longest-side, megapixels, scale factor, fit-inside), with snap-to-grid, safe upscale gating, and optional local Real-ESRGAN AI upscale. |
 | [**Metadata Scrubber**](tools/metadata_scrubber/README.md) | Batch remove EXIF, GPS coordinates, camera serials, and AI generation parameters/prompts from PNG, JPEG, and WebP. |
@@ -58,7 +60,8 @@ always explicit and confirmed.
 ### 🎮 Game / Asset workflow
 | Tool | What it does |
 |---|---|
-| [**Alpha Doctor**](tools/alpha_doctor/README.md) | Remove backgrounds & repair alpha — deterministic chroma / auto-solid / edge-flood keying + despill/defringe/premultiply, with an *optional* U2Net method for hard photos. |
+| [**Alpha Doctor**](tools/alpha_doctor/README.md) | Remove backgrounds & repair alpha for images (RGBA PNG) and videos (ProRes 4444 `.mov`) — chroma / auto-solid / edge-flood keying, inward edge decontamination, green/blue/red/orange despill, defringe, and optional U2Net. |
+| [**Image to PBR**](tools/image_to_pbr/README.md) | Generate normal, roughness, AO, and height PBR maps from a single diffuse/albedo texture deterministically. |
 | [**Material Converter**](tools/material_converter/README.md) | Pack/convert/rename PBR texture-map sets — ORM/MOS packing, DirectX↔OpenGL normals, gloss↔roughness, Unity/Unreal/Godot/Blender/glTF presets. |
 | [**Sprite Viewer**](tools/sprite_viewer/README.md) | View & play sprite sheets and animations — grid/cell/auto-detect slicing, playback, slice-grid overlay. |
 | [**Seamless Checker**](tools/seamless_checker/README.md) | Interactive 3×3 wrap inspector and redo triage — dual-pass PBR and standalone detection, mouse zoom/pan, all-or-nothing Redo transfer. |
@@ -88,7 +91,7 @@ python -m venv .venv
 .venv/Scripts/python -m pip install -r requirements-optional.txt  # optional: extra features for some tools
 .venv/Scripts/python main.py
 ```
-The video and audio tools need FFmpeg. The Windows download already includes it; from source, put `ffmpeg` and `ffprobe` on your PATH or in a `bin/` folder.
+The video and audio tools use FFmpeg. The Windows download includes an LGPL FFmpeg build; you can also drop your own local `ffmpeg` and `ffprobe` into `bin/` or put them on your `PATH`.
 
 ## Optional AI Micro-Models
 

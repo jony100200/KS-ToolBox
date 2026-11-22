@@ -1,4 +1,4 @@
-"""Registers Dataset Manager as a ToolBox tool (the LEGO plug)."""
+"""Registers Dataset Manager as a ToolBox tool."""
 from __future__ import annotations
 
 import customtkinter as ctk

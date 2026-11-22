@@ -18,6 +18,10 @@ trimming, fades and loudness normalization, all applied in a single pass.
   fade-out start is computed from the effective (post-trim) duration, which is
   probed with ffprobe.
 - **Normalize** — loudness-normalize via the `loudnorm` filter.
+- **Size-gated Compress CLI** — `python -m tools.audio_tool.cli compress -i <dir>`
+  targets bloated lossless audio (`.wav`, `.aiff`, `.flac`), verifies output
+  duration and smaller size, writes `<out>.aud.json` proofs, and supports
+  `cleanup` to safely Recycle-Bin verified originals.
 
 Multiple filters chain into a single `-af` (order: fade-in, fade-out,
 loudnorm).

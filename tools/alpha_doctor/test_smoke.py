@@ -287,6 +287,195 @@ def test_auto_despill_and_enclosed() -> None:
     print("PASS: alpha_doctor auto despill (green/blue edges, interior untouched, none on paper) + enclosed option.")
 
 
+def test_red_orange_despill_and_decontamination() -> None:
+    """Verify red/orange rim spill suppression + inward RGB edge decontamination."""
+    if importlib.util.find_spec("PIL") is None:
+        print("SKIP: Pillow not installed — decontamination leg skipped.")
+        return
+    from PIL import Image
+
+    # 1. Pure red and orange despill preserve neutral/navy colors while clamping warm spill.
+    probe = np.array(
+        [[[230, 95, 35], [220, 30, 30], [20, 30, 60], [180, 180, 185]]],
+        dtype=np.uint8,
+    )
+    orange_out = e.despill(probe, "orange")
+    red_out = e.despill(probe, "red")
+    assert orange_out[0, 0, 0] <= orange_out[0, 0, 1] + 1e-3
+    assert orange_out[0, 0, 1] < 95, f"orange secondary green spill not pulled: {orange_out[0, 0]}"
+    assert red_out[0, 1, 0] <= 30 + 1e-3
+    assert tuple(orange_out[0, 2].astype(int)) == (20, 30, 60), "navy untouched"
+    assert tuple(orange_out[0, 3].astype(int)) == (180, 180, 185), "neutral grey untouched"
+    assert e.screen_colour(np.array([220, 30, 30], dtype=np.float32)) == "red"
+
+    # 2. Direct inward RGB decontamination removes orange rim + white outline on boundary pixels.
+    rgba = np.zeros((64, 64, 4), dtype=np.uint8)
+    rgba[16:48, 16:48, :3] = (20, 30, 60)
+    rgba[16:48, 16:48, 3] = 255
+    # Contaminate outer 2px rim inside solid boundary with warm orange-red spill, plus 1px grey halo.
+    rgba[16:18, 16:48, :3] = (230, 95, 35)
+    rgba[46:48, 16:48, :3] = (230, 95, 35)
+    rgba[16:48, 16:18, :3] = (230, 95, 35)
+    rgba[16:48, 46:48, :3] = (230, 95, 35)
+    rgba[15, 15:49] = (210, 210, 215, 128)
+    rgba[48, 15:49] = (210, 210, 215, 128)
+
+    cleaned = e.decontaminate_edges(rgba, inward_px=2, bleed_px=2)
+    assert tuple(cleaned[32, 32]) == (20, 30, 60, 255), "interior core altered"
+    assert tuple(cleaned[16, 32, :3]) == (20, 30, 60), f"rim not replaced: {cleaned[16, 32]}"
+    assert tuple(cleaned[15, 32, :3]) == (20, 30, 60), f"halo not replaced: {cleaned[15, 32]}"
+    assert int(cleaned[15, 32, 3]) == 128, "decontaminate_edges must preserve alpha"
+
+    # 3. Full process() pipeline with orange rim despill + inward decontamination.
+    for bad in (
+        e.AlphaOptions(green_despill="purple"),
+        e.AlphaOptions(decontaminate_px=0),
+        e.AlphaOptions(decontaminate_px=17),
+        e.AlphaOptions(decontaminate_px=True),
+    ):
+        norm, reason = e.normalized_options(bad)
+        assert norm is None and reason, f"expected invalid option rejection for {bad}"
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        img = np.zeros((96, 96, 3), dtype=np.uint8)
+        img[24:72, 24:72] = (20, 30, 60)
+        # Bake a 2px orange rim + 1px white outline around the dark navy square over #000000.
+        img[24:26, 24:72] = (230, 95, 35)
+        img[70:72, 24:72] = (230, 95, 35)
+        img[24:72, 24:26] = (230, 95, 35)
+        img[24:72, 70:72] = (230, 95, 35)
+        img[23, 23:73] = (210, 210, 215)
+        img[72, 23:73] = (210, 210, 215)
+        src = tmp / "presenter.png"
+        Image.fromarray(img, "RGB").save(src)
+
+        opts = e.AlphaOptions(
+            out_root=tmp / "out",
+            method="chroma",
+            key_color="#000000",
+            tolerance=40.0,
+            feather_band=20.0,
+            green_despill="orange",
+            do_decontaminate=True,
+            decontaminate_px=3,
+            do_defringe=True,
+            erode_px=1,
+            feather=0.5,
+            dry_run=False,
+        )
+        res = e.process(src, opts)
+        assert res.action == "cut", res
+        assert "despill:orange" in res.detail and "decontam:3" in res.detail, res.detail
+        with Image.open(res.out_path) as got:
+            out = np.asarray(got.convert("RGBA"), dtype=np.uint8)
+        assert tuple(out[48, 48, :3]) == (20, 30, 60), "interior navy damaged"
+        visible = out[..., 3] > 20
+        red_excess = out[..., 0].astype(np.int16) - np.maximum(out[..., 1], out[..., 2]).astype(np.int16)
+        assert int(red_excess[visible].max()) <= 5, f"orange rim survived: {int(red_excess[visible].max())}"
+    print("PASS: alpha_doctor red/orange rim despill + inward RGB edge decontamination.")
+
+
+def test_video_prores_pipeline() -> None:
+    """End-to-end ProRes 4444 .mov matting, audio preservation, reuse check, and cancellation."""
+    import subprocess
+
+    tools = e.tools_status()
+    if not tools.get("ffmpeg") or not tools.get("ffprobe"):
+        print("SKIP: ffmpeg/ffprobe not installed — video ProRes pipeline skipped.")
+        return
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src = tmp / "clip.mp4"
+        out = tmp / "out"
+        gen_cmd = [
+            tools["ffmpeg"], "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=0x00FF00:s=160x90:r=6:d=0.5",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=0.5",
+            "-vf", "drawbox=x=50:y=20:w=55:h=50:color=0x1E2640:t=fill",
+            "-c:v", "mpeg4", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest",
+            str(src),
+        ]
+        gen = subprocess.run(gen_cmd, capture_output=True, text=True)
+        assert gen.returncode == 0, f"fixture build failed: {gen.stderr}"
+
+        opts = e.AlphaOptions(
+            out_root=out,
+            method="chroma",
+            key_color="#00FF00",
+            tolerance=95.0,
+            feather_band=45.0,
+            do_decontaminate=True,
+            decontaminate_px=2,
+            dry_run=False,
+        )
+        res = e.process(src, opts)
+        assert res.action == "cut", f"video cut failed: {res}"
+        assert res.out_path and Path(res.out_path).suffix == ".mov", res.out_path
+        assert res.artifact is not None
+        assert res.artifact["pix_fmt"].startswith("yuva"), res.artifact
+        assert res.artifact["has_audio"] is True, res.artifact
+        assert res.artifact["frames"] >= 2, res.artifact
+        assert "decontam:2" in res.detail, res.detail
+        assert e.validate_result(res, opts, expected_src=src)
+
+        out_mov = Path(res.out_path)
+        mov_bytes = out_mov.read_bytes()
+        out_mov.write_bytes(b"X" * len(mov_bytes))
+        assert not e.validate_result(res, opts), "same-size .mov corruption was reused"
+        out_mov.write_bytes(mov_bytes)
+        assert e.validate_result(res, opts), "valid .mov failed re-validation"
+
+        # Decode frame 0 from the ProRes 4444 .mov and inspect alpha corners vs subject center.
+        raw_cmd = [
+            tools["ffmpeg"], "-hide_banner", "-loglevel", "error",
+            "-i", str(out_mov), "-map", "0:v:0", "-frames:v", "1",
+            "-vf", "format=rgba", "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1",
+        ]
+        dec = subprocess.run(raw_cmd, capture_output=True)
+        assert dec.returncode == 0 and len(dec.stdout) == 160 * 90 * 4
+        frame0 = np.frombuffer(dec.stdout, dtype=np.uint8).reshape((90, 160, 4))
+        assert frame0[5, 5, 3] < 20, f"corner alpha not transparent: {frame0[5, 5]}"
+        assert frame0[45, 75, 3] > 240, f"subject center not opaque: {frame0[45, 75]}"
+
+        # Cancellation must clean staged .part.mov without leaving orphans.
+        cancel_out = tmp / "cancelled"
+        checks = 0
+
+        def cancel_after_start() -> bool:
+            nonlocal checks
+            checks += 1
+            return checks >= 3
+
+        try:
+            e.process(
+                src,
+                e.AlphaOptions(out_root=cancel_out, method="chroma", key_color="#00FF00", dry_run=False),
+                cancelled=cancel_after_start,
+            )
+        except e.CommandCancelled:
+            pass
+        else:
+            raise AssertionError("video cancellation did not propagate")
+        assert not list(tmp.rglob("*.part.mov")), "cancelled video left staged .part.mov"
+
+        # Collision checks: self-overwrite (.mov -> same .mov) and same-stem (.mp4 + .mov).
+        self_mov = tmp / "same.mov"
+        self_mov.write_bytes(mov_bytes)
+        self_res = e.process(self_mov, e.AlphaOptions(out_root=tmp, dry_run=False))
+        assert self_res.action == "failed" and self_res.detail == "output.collision"
+        assert self_mov.read_bytes() == mov_bytes, "source .mov overwritten"
+
+        other_dir = tmp / "other"
+        other_dir.mkdir()
+        other_mov = other_dir / "clip.mov"
+        other_mov.write_bytes(b"stub")
+        collisions = e.find_output_collisions([src, other_mov], e.AlphaOptions(out_root=out, dry_run=False))
+        assert len(collisions) == 1, "same-stem video outputs were not rejected"
+    print("PASS: alpha_doctor video ProRes 4444 .mov pipeline — matte, audio, validation, cancel, collision.")
+
+
 def main() -> int:
     global np, e
     if importlib.util.find_spec("numpy") is None:
@@ -300,6 +489,8 @@ def main() -> int:
     test_pure()
     test_deterministic_pipeline()
     test_auto_despill_and_enclosed()
+    test_red_orange_despill_and_decontamination()
+    test_video_prores_pipeline()
     test_safety_contracts()
     test_ai_optional()
     return 0

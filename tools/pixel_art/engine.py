@@ -140,7 +140,7 @@ def preview_grid(img: Image.Image, opts: "PixelOptions") -> Image.Image:
 
     Computed from the full-resolution image, so the live preview shows the same
     block size as the saved file. Pixelising a small preview proxy instead made
-    the blocks several times too big (2026-11-12 audit).
+    the blocks several times too big.
     """
     return pixelize(
         img,

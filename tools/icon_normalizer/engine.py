@@ -5,7 +5,7 @@ functions so discovery/the sidebar work before Pillow is installed). Each image
 is trimmed to its opaque bounds, scaled to fit — aspect preserved — into a
 `size` x `size` transparent canvas, and centred. Output is always RGBA PNG.
 
-Distilled from RupayanFlow's `asset2d.icons.core.fit_icon`, dropping the numpy
+Pure-Pillow icon normalization (trim, square-pad, resize) without numpy
 dependency (Pillow's own alpha `getbbox` + `resize` do the same work), the job
 wrapper, and the unrelated background-removal helpers. The absolute pixel margin
 is generalised to a `padding_pct` so one setting works at any target size, and

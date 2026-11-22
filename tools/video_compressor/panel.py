@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import threading
 from dataclasses import asdict
 from pathlib import Path
 from tkinter import messagebox
@@ -34,28 +35,81 @@ class VideoCompressorPanel(BaseBatchPanel):
         self._refresh_tools_hint()
 
     # -- options (tool-specific) ----------------------------------------------
+    _PRESETS: dict[str, dict[str, str]] = {
+        "Archival (AV1 CRF 20)": {
+            "encoder": "svt_av1", "crf": "20", "vmaf": "92", "container": "MKV",
+            "max_height": "Keep original", "max_fps": "Keep original", "audio": "Copy original",
+        },
+        "Space Saver 1080p (AV1 CRF 24)": {
+            "encoder": "svt_av1", "crf": "24", "vmaf": "90", "container": "MKV",
+            "max_height": "1080p", "max_fps": "30 fps", "audio": "Shrink raw/bloated audio",
+        },
+        "Compatible 1080p (HEVC NVENC · MP4)": {
+            "encoder": "nvenc_hevc", "crf": "22", "vmaf": "90", "container": "MP4",
+            "max_height": "1080p", "max_fps": "Keep original", "audio": "Shrink raw/bloated audio",
+        },
+        "Fast Intel Arc (AV1 QSV CRF 22)": {
+            "encoder": "qsv_av1", "crf": "22", "vmaf": "92", "container": "MKV",
+            "max_height": "Keep original", "max_fps": "Keep original", "audio": "Shrink raw/bloated audio",
+        },
+        "Fast NVIDIA (AV1 NVENC CRF 22)": {
+            "encoder": "nvenc_av1", "crf": "22", "vmaf": "92", "container": "MKV",
+            "max_height": "Keep original", "max_fps": "Keep original", "audio": "Shrink raw/bloated audio",
+        },
+    }
+
     def _build_options_card(self):
         card = c.Card(self, "Options", icon=Icons.GEAR)
         card.grid(row=1, column=0, sticky="nsew", padx=t.PAD_GRID, pady=(t.PAD_GRID, 0))
         b = card.body
-        # encoder + crf + vmaf row
+
+        # preset row
+        prow = ctk.CTkFrame(b, fg_color="transparent"); prow.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(prow, text="Quick Preset", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left", padx=(0, 10))
+        self._preset = ctk.CTkOptionMenu(
+            prow, values=["Custom", *self._PRESETS.keys()], width=260,
+            fg_color=t.BG_COLOR, button_color=t.CARD_BORDER,
+            button_hover_color=t.NEUTRAL_HOVER, command=self._apply_preset,
+        )
+        self._preset.set("Archival (AV1 CRF 20)")
+        self._preset.pack(side="left")
+
+        # encoder + crf + vmaf + container row
         row = ctk.CTkFrame(b, fg_color="transparent"); row.pack(fill="x")
+        self._enc_labels = {spec["label"]: key for key, spec in e.ENCODERS.items()}
+        self._enc_keys = {key: spec["label"] for key, spec in e.ENCODERS.items()}
         ctk.CTkLabel(row, text="Encoder", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=0, sticky="w")
-        self._encoder = ctk.CTkOptionMenu(row, values=["AV1 (best quality / size)", "AV1 NVENC (GPU fast)"],
-                                          width=180, fg_color=t.BG_COLOR, button_color=t.CARD_BORDER,
+        self._encoder = ctk.CTkOptionMenu(row, values=list(self._enc_labels.keys()),
+                                          width=235, fg_color=t.BG_COLOR, button_color=t.CARD_BORDER,
                                           button_hover_color=t.NEUTRAL_HOVER)
-        self._encoder.grid(row=1, column=0, sticky="w", padx=(0, 24), pady=(2, 0))
-        ctk.CTkLabel(row, text="CRF (lower = higher quality)", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=1, sticky="w")
-        self._crf = ctk.CTkOptionMenu(row, values=["18", "20", "22", "24"], width=70,
+        self._encoder.grid(row=1, column=0, sticky="w", padx=(0, 18), pady=(2, 0))
+        ctk.CTkLabel(row, text="CRF", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=1, sticky="w")
+        self._crf = ctk.CTkOptionMenu(row, values=["18", "20", "22", "24", "28"], width=70,
                                       fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
-        self._crf.set("20"); self._crf.grid(row=1, column=1, sticky="w", padx=(0, 24), pady=(2, 0))
+        self._crf.set("20"); self._crf.grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(2, 0))
         ctk.CTkLabel(row, text="Min VMAF", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=2, sticky="w")
-        self._vmaf = c.entry(row, width=60); self._vmaf.insert(0, "92"); self._vmaf.grid(row=1, column=2, sticky="w", pady=(2, 0))
-        ctk.CTkLabel(row, text="Output container", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=3, sticky="w", padx=(24, 0))
-        self._container = ctk.CTkOptionMenu(row, values=["MKV", "MP4"], width=90,
+        self._vmaf = c.entry(row, width=60); self._vmaf.insert(0, "92"); self._vmaf.grid(row=1, column=2, sticky="w", padx=(0, 18), pady=(2, 0))
+        ctk.CTkLabel(row, text="Container", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=3, sticky="w")
+        self._container = ctk.CTkOptionMenu(row, values=["MKV", "MP4"], width=85,
                                             fg_color=t.BG_COLOR, button_color=t.CARD_BORDER,
                                             button_hover_color=t.NEUTRAL_HOVER)
-        self._container.set("MKV"); self._container.grid(row=1, column=3, sticky="w", padx=(24, 0), pady=(2, 0))
+        self._container.set("MKV"); self._container.grid(row=1, column=3, sticky="w", pady=(2, 0))
+
+        # resolution + fps + audio space-saving caps
+        row2 = ctk.CTkFrame(b, fg_color="transparent"); row2.pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(row2, text="Max resolution", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=0, sticky="w")
+        self._max_height = ctk.CTkOptionMenu(row2, values=["Keep original", "1080p", "720p"], width=130,
+                                             fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
+        self._max_height.set("Keep original"); self._max_height.grid(row=1, column=0, sticky="w", padx=(0, 18), pady=(2, 0))
+        ctk.CTkLabel(row2, text="Max FPS", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=1, sticky="w")
+        self._max_fps = ctk.CTkOptionMenu(row2, values=["Keep original", "30 fps", "24 fps"], width=120,
+                                          fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
+        self._max_fps.set("Keep original"); self._max_fps.grid(row=1, column=1, sticky="w", padx=(0, 18), pady=(2, 0))
+        ctk.CTkLabel(row2, text="Audio", text_color=t.TEXT_MUTED, font=t.font(11)).grid(row=0, column=2, sticky="w")
+        self._audio_mode = ctk.CTkOptionMenu(row2, values=["Copy original", "Shrink raw/bloated audio"], width=200,
+                                             fg_color=t.BG_COLOR, button_color=t.CARD_BORDER, button_hover_color=t.NEUTRAL_HOVER)
+        self._audio_mode.set("Copy original"); self._audio_mode.grid(row=1, column=2, sticky="w", pady=(2, 0))
+
         # output folder
         self._build_output_row(b, "Output folder (blank = ./compressed beside each source)")
         # toggles — safety row + batch row
@@ -72,8 +126,22 @@ class VideoCompressorPanel(BaseBatchPanel):
         self._skip.select(); self._skip.pack(side="left", padx=20)
         # run row
         self._build_run_row(b)
+        self._clean_btn = c.secondary_button(b, "Verify & Clean Originals (from Output Folder)", self._verify_and_clean_originals, width=320)
+        self._clean_btn.pack(anchor="w", pady=(8, 0))
         self._tools_hint = ctk.CTkLabel(b, text="", text_color=t.TEXT_MUTED, font=t.font(10))
         self._tools_hint.pack(anchor="w", pady=(6, 0))
+
+    def _apply_preset(self, choice: str):
+        spec = self._PRESETS.get(choice)
+        if not spec:
+            return
+        self._encoder.set(self._enc_keys[spec["encoder"]])
+        self._crf.set(spec["crf"])
+        self._vmaf.delete(0, "end"); self._vmaf.insert(0, spec["vmaf"])
+        self._container.set(spec["container"])
+        self._max_height.set(spec["max_height"])
+        self._max_fps.set(spec["max_fps"])
+        self._audio_mode.set(spec["audio"])
 
     def _refresh_tools_hint(self):
         s = e.tools_status()
@@ -81,7 +149,79 @@ class VideoCompressorPanel(BaseBatchPanel):
         if missing:
             self._tools_hint.configure(text=f"⚠ missing on PATH: {', '.join(missing)} — install ffmpeg/ffprobe")
         else:
-            self._tools_hint.configure(text="tools: ffmpeg ✓  ffprobe ✓  | bundled LGPL AV1 + VMAF")
+            encs = ", ".join(e.available_encoders()) or "none"
+            self._tools_hint.configure(text=f"tools: ffmpeg ✓  ffprobe ✓  | encoders (probing…): {encs}")
+            def _probe():
+                verified = ", ".join(e.available_encoders(verify=True)) or "none"
+                try:
+                    self.after(0, lambda: self._tools_hint.configure(
+                        text=f"tools: ffmpeg ✓  ffprobe ✓  | working encoders: {verified}"
+                    ))
+                except Exception:
+                    pass
+            threading.Thread(target=_probe, daemon=True).start()
+
+    def _verify_and_clean_originals(self):
+        out = self._out_entry.get().strip()
+        if not out or not Path(out).is_dir():
+            self._logline("Pick an existing Output folder containing compressed videos + .json proofs first.", t.STATE["error"][1])
+            return
+        try:
+            vmaf_floor = float(self._vmaf.get())
+        except ValueError:
+            self._logline("Min VMAF must be a number.", t.STATE["error"][1])
+            return
+        self._clean_btn.configure(state="disabled")
+        self._logline(f"Verifying proofs in {out} (VMAF >= {vmaf_floor:.1f})…", t.TEXT_MUTED)
+
+        def _preview():
+            results = e.cleanup_verified_originals(out, vmaf_floor=vmaf_floor, dry_run=True)
+            def _confirm():
+                try:
+                    self._clean_btn.configure(state="normal")
+                    ready = [r for r in results if r.status == "dry_run_ok"]
+                    rejected = [r for r in results if r.status == "rejected"]
+                    already = [r for r in results if r.status == "already_removed"]
+                    reclaim_gb = sum(r.saved_bytes for r in ready) / 1e9
+                    self._logline(
+                        f"Proof audit: {len(results)} proof(s) · {len(ready)} verified ready ({reclaim_gb:.2f} GB) · "
+                        f"{len(already)} already removed · {len(rejected)} rejected",
+                        t.TEXT_MAIN,
+                    )
+                    if not ready:
+                        return
+                    ok = messagebox.askyesno(
+                        "Remove verified larger originals?",
+                        f"{len(ready)} compressed file(s) passed output existence, smaller size, "
+                        f"duration match, and VMAF >= {vmaf_floor:.1f}.\n\n"
+                        f"Send the {len(ready)} larger original file(s) to the Recycle Bin "
+                        f"to reclaim {reclaim_gb:.2f} GB?",
+                        icon="warning",
+                        parent=self,
+                    )
+                    if not ok:
+                        self._logline("Cleanup cancelled — originals kept.", t.TEXT_MUTED)
+                        return
+                    self._clean_btn.configure(state="disabled")
+                    def _execute():
+                        done_res = e.cleanup_verified_originals(out, vmaf_floor=vmaf_floor, dry_run=False)
+                        rem = sum(1 for r in done_res if r.status == "removed")
+                        freed = sum(r.saved_bytes for r in done_res if r.status == "removed") / 1e9
+                        def _finish():
+                            self._clean_btn.configure(state="normal")
+                            self._logline(f"Removed {rem} larger original(s) → Recycle Bin ({freed:.2f} GB reclaimed).", t.STATE["done"][1])
+                        try:
+                            self.after(0, _finish)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_execute, daemon=True).start()
+                except Exception:
+                    pass
+            try:
+                self.after(0, _confirm)
+            except Exception:
+                pass
+        threading.Thread(target=_preview, daemon=True).start()
 
     def _pre_run_check(self, opts) -> bool:
         # Destructive batch action must be explicitly confirmed (Preview+Confirm+
@@ -103,9 +243,17 @@ class VideoCompressorPanel(BaseBatchPanel):
             vmaf_floor = float(self._vmaf.get())
         except ValueError:
             self._logline("Min VMAF must be a number.", t.STATE["error"][1]); return None
-        enc_map = {"AV1 (best quality / size)": "svt_av1", "AV1 NVENC (GPU fast)": "nvenc_av1"}
         container = "mp4" if self._container.get() == "MP4" else "mkv"
-        policy = e.Policy(crf=int(self._crf.get()), encoder=enc_map[self._encoder.get()])
+        height_map = {"Keep original": None, "1080p": 1080, "720p": 720}
+        fps_map = {"Keep original": None, "30 fps": 30.0, "24 fps": 24.0}
+        audio_mode = "shrink_bloated" if self._audio_mode.get() == "Shrink raw/bloated audio" else "copy"
+        policy = e.Policy(
+            crf=int(self._crf.get()),
+            encoder=self._enc_labels[self._encoder.get()],
+            max_height=height_map[self._max_height.get()],
+            max_fps=fps_map[self._max_fps.get()],
+            audio_mode=audio_mode,
+        )
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
         mirror = bool(self._mirror.get())
@@ -120,8 +268,8 @@ class VideoCompressorPanel(BaseBatchPanel):
     def _build_submission(self, files: list[Path], opts: e.ProcessOptions) -> QueueSubmission:
         definition = JobDefinition.create(
             tool_id="video_compressor",
-            tool_version="2",
-            workflow_version="compress.v3",
+            tool_version="3",
+            workflow_version="compress.v4",
             inputs=files,
             settings=asdict(opts),
             max_retries=1,

@@ -15,8 +15,8 @@ What it does, for one texture:
 Errors are values: the standard envelope-style Result where a call can fail.
 The scoring/rolling/tiling math itself is pure. See CodingPrinciples.md.
 
-Lifted from RupayanFlow `seamless/tile_tools.py` (offset_wrap / tile_preview /
-seam_score) and ChobiEngine `seamless_checker/tile_metrics.py` (axis edge-diff /
+Deterministic tile-seam metrics (offset_wrap / tile_preview /
+seam_score / axis edge-diff /
 RMSE), keeping the numpy+Pillow path and dropping the cv2 + job-wrapper layers
 (cv2 is not required — the seam math is pure numpy).
 

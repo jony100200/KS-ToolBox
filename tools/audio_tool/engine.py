@@ -26,6 +26,8 @@ Public interface:
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import subprocess
 from collections.abc import Callable
@@ -34,12 +36,14 @@ from pathlib import Path
 
 from toolbox.engine_common import (
     CommandCancelled,
+    commit_candidate as _commit_candidate,
     find_output_collisions as _find_collisions,
     ok,
     err,
     probe_media_duration,
     resolve_tool,
     run_cancellable_cmd,
+    safe_remove as _safe_remove_audio,
     sha256_file,
     tools_status as _tools_status_raw,
 )
@@ -426,3 +430,262 @@ def validate_result(result: Result, opts: AudioOptions) -> bool:
         )
     except (OSError, TypeError, ValueError):
         return False
+
+
+# --- size-gated audio compression + proof cleanup ----------------------------
+
+BLOATED_AUDIO_EXTS = {".wav", ".aiff", ".aif", ".flac"}
+
+
+@dataclass
+class CompressOptions:
+    target_format: str = "opus"          # opus | m4a | mp3 | ogg
+    bitrate: str = "128k"
+    out_root: Path | None = None
+    input_root: Path | None = None
+    mirror: bool = False
+    min_saving: float = 0.10
+    min_bytes: int = 64 * 1024
+    only_bloated: bool = True            # skip already-lossy formats (.mp3/.aac/.m4a/.ogg/.opus)
+    delete_original: bool = False
+    skip_existing: bool = True
+    dry_run: bool = True
+    work_dir: Path | None = None
+    in_place: bool = False
+
+
+@dataclass
+class CompressResult:
+    src: str
+    action: str                          # compressed | skipped | failed | dry-run
+    reason: str
+    before_kb: float = 0.0
+    after_kb: float = 0.0
+    saved_pct: float = 0.0
+    duration_seconds: float = 0.0
+    out_path: str | None = None
+    original_removed: bool = False
+    detail: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def plan_compress_output(src: str | Path, opts: CompressOptions) -> Path:
+    src = Path(src)
+    ext = "." + opts.target_format.lower().lstrip(".")
+    name = src.stem + ext
+    if opts.out_root:
+        root = Path(opts.out_root)
+        if opts.mirror and opts.input_root:
+            try:
+                rel = src.relative_to(opts.input_root)
+                return root / rel.parent / name
+            except ValueError:
+                pass
+        return root / name
+    if opts.in_place:
+        return src.with_suffix(ext)
+    return src.parent / "audio_compressed" / name
+
+
+def compress_audio(
+    path: str | Path,
+    opts: CompressOptions,
+    cancelled: Callable[[], bool] | None = None,
+) -> CompressResult:
+    """Assess -> encode -> verify duration + smaller size -> write proof -> [delete]."""
+    if cancelled is not None and cancelled():
+        raise CommandCancelled(["audio_compress", str(path)])
+    src = Path(path)
+    if not src.is_file():
+        return CompressResult(str(src), "failed", f"not a file: {src}", detail="file.missing")
+    ext = src.suffix.lower()
+    if ext not in AUDIO_EXTS:
+        return CompressResult(str(src), "skipped", f"unsupported extension: {ext}", detail="unsupported")
+    before_bytes = src.stat().st_size
+    if before_bytes < opts.min_bytes:
+        return CompressResult(str(src), "skipped", f"smaller than {opts.min_bytes} B threshold",
+                              before_kb=round(before_bytes / 1024, 1), detail="too-small")
+    if opts.only_bloated and ext not in BLOATED_AUDIO_EXTS:
+        return CompressResult(str(src), "skipped", f"{ext} already lossy-compressed",
+                              before_kb=round(before_bytes / 1024, 1), detail="already-efficient")
+
+    tgt_fmt = opts.target_format.lower().lstrip(".")
+    tgt_ext = "." + tgt_fmt
+    muxer = _muxer(tgt_ext)
+    if not muxer or tgt_fmt not in LOSSY_FORMATS:
+        return CompressResult(str(src), "failed", f"unsupported lossy target: {opts.target_format}",
+                              detail="unsupported.target")
+
+    dst = plan_compress_output(src, opts)
+    same_target = dst.resolve(strict=False) == src.resolve(strict=False)
+    if not same_target and opts.skip_existing and dst.is_file() and dst.stat().st_size > 0:
+        return CompressResult(str(src), "skipped", "already compressed (output exists)",
+                              before_kb=round(before_bytes / 1024, 1),
+                              after_kb=round(dst.stat().st_size / 1024, 1),
+                              out_path=str(dst), detail="resumable")
+    if opts.dry_run:
+        return CompressResult(str(src), "dry-run", f"would compress {ext}->{tgt_ext}",
+                              before_kb=round(before_bytes / 1024, 1), out_path=str(dst))
+    if same_target and not opts.delete_original:
+        return CompressResult(str(src), "failed", "in-place same-ext replacement requires delete_original=True",
+                              detail="config.conflict")
+
+    ff = resolve_tool("ffmpeg")
+    if not ff:
+        return CompressResult(str(src), "failed", "ffmpeg not found", detail="dep.missing")
+
+    src_dur_res = probe_duration(src, cancelled=cancelled)
+    if src_dur_res["error"]:
+        return CompressResult(str(src), "failed", src_dur_res["details"], detail=src_dur_res["error_type"])
+    src_dur = float(src_dur_res["data"])
+
+    if opts.work_dir:
+        work_root = Path(opts.work_dir)
+        work_root.mkdir(parents=True, exist_ok=True)
+        tag = hashlib.sha1(str(src).encode("utf-8", errors="replace")).hexdigest()[:10]
+        candidate = work_root / f"{dst.stem}.{tag}.verify.part{dst.suffix}"
+    else:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        candidate = dst.with_name(f"{dst.stem}.verify.part{dst.suffix}")
+    candidate.unlink(missing_ok=True)
+
+    cmd = [ff, "-y", "-i", str(src), "-vn", *_audio_codec(tgt_ext, opts.bitrate), "-f", muxer, str(candidate)]
+    try:
+        r = run_cancellable_cmd(cmd, timeout=3600, cancelled=cancelled)
+        if r.returncode != 0 or not candidate.is_file() or candidate.stat().st_size == 0:
+            candidate.unlink(missing_ok=True)
+            return CompressResult(str(src), "failed", f"ffmpeg failed: {(r.stderr or '')[-250:]}", detail="ff.failed")
+        out_dur_res = probe_duration(candidate, cancelled=cancelled)
+        if out_dur_res["error"]:
+            candidate.unlink(missing_ok=True)
+            return CompressResult(str(src), "failed", out_dur_res["details"], detail="output.invalid")
+        out_dur = float(out_dur_res["data"])
+    except CommandCancelled:
+        candidate.unlink(missing_ok=True)
+        raise
+
+    if abs(out_dur - src_dur) > max(1.0, 0.02 * src_dur):
+        candidate.unlink(missing_ok=True)
+        return CompressResult(str(src), "skipped",
+                              f"duration mismatch ({out_dur:.1f}s vs {src_dur:.1f}s) — kept original",
+                              before_kb=round(before_bytes / 1024, 1), detail="duration-mismatch")
+
+    after_bytes = candidate.stat().st_size
+    saved_frac = (1.0 - after_bytes / before_bytes) if before_bytes else 0.0
+    if after_bytes >= before_bytes or saved_frac < opts.min_saving:
+        candidate.unlink(missing_ok=True)
+        return CompressResult(str(src), "skipped",
+                              f"not sufficiently smaller ({saved_frac * 100:.1f}% < {opts.min_saving * 100:.0f}%)",
+                              before_kb=round(before_bytes / 1024, 1),
+                              after_kb=round(after_bytes / 1024, 1), detail="no-gain")
+
+    try:
+        src_sha = sha256_file(src, chunk_size=4 * 1024 * 1024, cancelled=cancelled)
+    except CommandCancelled:
+        candidate.unlink(missing_ok=True)
+        raise
+    except Exception:
+        src_sha = None
+
+    removed = False
+    if same_target:
+        removed = _safe_remove_audio(src)
+        if not removed:
+            candidate.unlink(missing_ok=True)
+            return CompressResult(str(src), "failed", "failed to remove original before in-place replace",
+                                  detail="delete.failed")
+
+    _commit_candidate(candidate, dst, cancelled=cancelled)
+
+    if not same_target and opts.delete_original:
+        removed = _safe_remove_audio(src)
+
+    proof = {
+        "tool": "audio_tool",
+        "version": "aud_compress.v1",
+        "source": str(src),
+        "source_sha256": src_sha,
+        "output": str(dst),
+        "output_bytes": dst.stat().st_size,
+        "before_bytes": int(before_bytes),
+        "after_bytes": int(after_bytes),
+        "saved_pct": round(saved_frac * 100, 1),
+        "src_duration_s": round(src_dur, 3),
+        "out_duration_s": round(out_dur, 3),
+        "target_format": opts.target_format,
+        "bitrate": opts.bitrate,
+        "duration_verified": True,
+        "original_removed": bool(removed),
+    }
+    sidecar = dst.with_suffix(dst.suffix + ".aud.json")
+    tmp_p = sidecar.with_name(sidecar.name + ".part")
+    try:
+        tmp_p.write_text(json.dumps(proof, indent=2), encoding="utf-8")
+        tmp_p.replace(sidecar)
+    except OSError:
+        tmp_p.unlink(missing_ok=True)
+
+    return CompressResult(
+        str(src), "compressed", f"{ext}->{tgt_ext} (-{saved_frac * 100:.1f}%)",
+        before_kb=round(before_bytes / 1024, 1),
+        after_kb=round(after_bytes / 1024, 1),
+        saved_pct=round(saved_frac * 100, 1),
+        duration_seconds=round(out_dur, 3),
+        out_path=str(dst),
+        original_removed=removed,
+        detail="original removed" if removed else "original kept",
+    )
+
+
+def cleanup_verified_originals(
+    proof_root: str | Path,
+    *,
+    min_saved_bytes: int = 1,
+    permanent_delete: bool = False,
+    dry_run: bool = True,
+    cancelled: Callable[[], bool] | None = None,
+) -> list[dict]:
+    root = Path(proof_root)
+    proofs = sorted(p for p in root.rglob("*.aud.json") if p.is_file())
+    out_rows: list[dict] = []
+    for pp in proofs:
+        if cancelled is not None and cancelled():
+            raise CommandCancelled(["audio_cleanup", str(pp)])
+        try:
+            proof = json.loads(pp.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as ex:
+            out_rows.append({"proof": str(pp), "status": "rejected", "reason": str(ex), "saved_bytes": 0})
+            continue
+        if not isinstance(proof, dict) or proof.get("tool") != "audio_tool":
+            continue
+        src = Path(str(proof.get("source") or ""))
+        out = Path(str(proof.get("output") or ""))
+        before_b = int(proof.get("before_bytes") or 0)
+        if not out.is_file() or out.stat().st_size != int(proof.get("output_bytes") or out.stat().st_size) or not proof.get("duration_verified"):
+            out_rows.append({"proof": str(pp), "src": str(src), "out": str(out), "status": "rejected", "reason": "output/duration invalid", "saved_bytes": 0})
+            continue
+        actual_out = out.stat().st_size
+        if proof.get("original_removed") or not src.is_file() or src.resolve(strict=False) == out.resolve(strict=False):
+            out_rows.append({"proof": str(pp), "src": str(src), "out": str(out), "status": "already_removed", "reason": "already removed", "saved_bytes": max(0, before_b - actual_out)})
+            continue
+        actual_src = src.stat().st_size
+        saved = actual_src - actual_out
+        if (before_b and actual_src != before_b) or saved < min_saved_bytes:
+            out_rows.append({"proof": str(pp), "src": str(src), "out": str(out), "status": "rejected", "reason": "not smaller or size changed", "saved_bytes": 0})
+            continue
+        if dry_run:
+            out_rows.append({"proof": str(pp), "src": str(src), "out": str(out), "status": "dry_run_ok", "reason": "verified ready", "saved_bytes": saved})
+        elif _safe_remove_audio(src, permanent=permanent_delete):
+            proof["original_removed"] = True
+            tmp_p = pp.with_name(pp.name + ".part")
+            try:
+                tmp_p.write_text(json.dumps(proof, indent=2), encoding="utf-8")
+                tmp_p.replace(pp)
+            except OSError:
+                tmp_p.unlink(missing_ok=True)
+            out_rows.append({"proof": str(pp), "src": str(src), "out": str(out), "status": "removed", "reason": "removed", "saved_bytes": saved})
+        else:
+            out_rows.append({"proof": str(pp), "src": str(src), "out": str(out), "status": "rejected", "reason": "remove failed", "saved_bytes": 0})
+    return out_rows

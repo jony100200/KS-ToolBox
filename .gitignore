@@ -70,5 +70,6 @@ GITHUB_RELEASE_v1.1.0.md
 tools/youtube_downloader/test_smoke.py
 tools/youtube_downloader/test_smoke.py
 
-# seamless checker runtime state (machine-local)
-tools/seamless_checker/_local/
+# Local tool runtime state
+_local/
+

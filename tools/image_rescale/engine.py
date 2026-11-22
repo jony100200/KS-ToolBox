@@ -2,7 +2,7 @@
 
 Pure logic, no UI, no global state. Pillow only. The sizing math (resample
 picking, snap-to-grid, upscale gating, half-up rounding) is distilled from
-RupayanFlow's multi-mode resize engine, keeping the four modes a batch resizer
+multi-mode resize engine covering the four modes a batch resizer
 actually needs and dropping the crop/pad/mask machinery it doesn't.
 
 Modes:
@@ -60,7 +60,7 @@ def _pick_resample(name: str, factor: float):
              "bicubic": Image.BICUBIC, "lanczos": Image.LANCZOS}
     if name in table:
         return table[name]
-    # auto: Lanczos both ways. Measured on the 2026-11-12 audit photo, a 2x enlarge
+    # auto: Lanczos both ways. In benchmark testing, a 2x enlarge
     # scores 41.2 dB with Lanczos vs 39.2 dB with bilinear.
     return Image.LANCZOS
 

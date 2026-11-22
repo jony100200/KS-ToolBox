@@ -94,8 +94,3 @@ byte-for-byte unchanged** afterward. It also covers unsafe output plans, strict
 settings, cancellation cleanup, JSON-last provenance, same-size corruption,
 path confinement, and exact validation.
 
-## Credits
-
-Part of **KS ToolBox**. Deterministic primitives (folder scan, natural sort,
-sha256, the `train/val/test` split idea) distilled from KS-RupayanFlow's batch
-manifest / dataset-library modules; no AI/VLM code was carried over.

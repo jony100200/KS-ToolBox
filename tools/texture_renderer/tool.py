@@ -1,4 +1,4 @@
-"""Registers Texture Renderer as a ToolBox tool (the LEGO plug).
+"""Registers Texture Renderer as a ToolBox tool.
 
 `meta` must be readable by discovery without importing the panel/engine (which
 pull customtkinter / Pillow), so `build_panel` imports the panel lazily. This

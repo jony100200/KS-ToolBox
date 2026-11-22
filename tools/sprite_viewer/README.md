@@ -71,10 +71,3 @@ frames; invalid grids are bounded; `slice_by_cell` tiles correctly;
 `export_gif` writes a decode-valid animated GIF without staging residue;
 `export_meta_json` writes parse-valid metadata.
 
-## Credits
-
-Slicing and alpha connected-component detection lifted from KS ChobiEngine's
-`sprite_processor` services (`autosprite_service.split_sprite_sheet` cell math;
-`splitter_service.find_sprite_boxes` alpha BFS) — the job-shell wrappers were
-dropped, numpy was dropped (pure Pillow), and the nested-Python dilation was
-replaced with a C-speed `ImageFilter.MaxFilter`.

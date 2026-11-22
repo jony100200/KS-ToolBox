@@ -1,4 +1,4 @@
-"""Registers Package Extractor as a ToolBox tool (the LEGO plug)."""
+"""Registers Package Extractor as a ToolBox tool."""
 from __future__ import annotations
 
 import customtkinter as ctk

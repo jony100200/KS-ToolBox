@@ -79,11 +79,3 @@ algebra (pack/unpack round-trip, normal-flip involution, invert), then converts
 a real fake texture set end-to-end and asserts the packed ORM channels, the
 Unity-renamed outputs, the flipped normal, and the manifest.
 
-## Credits
-
-Channel-pack (ORM), per-map naming, and 8/16-bit PNG writing distilled from
-KS ChobiEngine's `pbr_map_generator` exporters and KS-RupayanFlow's `pbr/export`
-(MOS pack, `MAP_SPECS`, `_Material.json`). The DirectX↔OpenGL normal flip mirrors
-ChobiEngine's `normal_generation` (`if directx: ny *= -1`). The filename
-auto-detection, ORM unpack/split, standalone gloss↔roughness invert, and the
-Blender/glTF presets were built for this tool.

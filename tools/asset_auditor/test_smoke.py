@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import random
 import sys
 import tempfile
@@ -237,8 +238,76 @@ def test_full_audit() -> None:
           f"durable reports validated/cancelled; {unsafe_note}.")
 
 
+def test_exact_dup_three_stage() -> None:
+    """Verify HDD-gentle 3-stage dedupe skips unique sizes without reading them."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        # 1. Exact duplicate (> 192 KB so Stage 2 partial hash is exercised separately from Stage 3)
+        payload_a = (b"HEADER_MATCH_" * 6000) + b"TAIL_DIFF_A" + (b"0" * 180_000)
+        payload_b = (b"HEADER_MATCH_" * 6000) + b"TAIL_DIFF_B" + (b"0" * 180_000)
+        (tmp / "dup_1.bin").write_bytes(payload_a)
+        (tmp / "sub").mkdir()
+        (tmp / "sub" / "dup_2.bin").write_bytes(payload_a)
+        # Same size, same head+mid+tail, differs only at byte offset 100_000 -> caught at Stage 3!
+        diff_mid = bytearray(payload_a)
+        diff_mid[100_000] ^= 0xFF
+        (tmp / "same_size_diff_inner.bin").write_bytes(bytes(diff_mid))
+        # Unique size -> skipped at Stage 1 without opening
+        (tmp / "unique.bin").write_bytes(payload_b + b"EXTRA")
+        # 0-byte file
+        (tmp / "empty.bin").write_bytes(b"")
+
+        out = tmp / "dup_report"
+        rep = e.find_exact_duplicates([tmp], e.DupScanOptions(out_root=out))
+        assert rep.total_files == 5, rep
+        assert rep.unique_size_skipped == 1, rep
+        assert len(rep.empty_files) == 1
+        assert len(rep.groups) == 1, rep.groups
+        assert len(rep.groups[0].paths) == 2
+        assert rep.groups[0].reclaimable_bytes == len(payload_a)
+        assert (out / "dupes.json").is_file() and (out / "dupes.csv").is_file() and (out / "dupes.html").is_file()
+
+        # Verify cleanup_exact_duplicates: dry-run keeps both, execute removes 1 and keeps preferred
+        dry_items = e.cleanup_exact_duplicates(out / "dupes.json", dry_run=True)
+        assert len(dry_items) == 1 and dry_items[0].status == "dry_run_ok", dry_items
+        assert (tmp / "dup_1.bin").is_file() and (tmp / "sub" / "dup_2.bin").is_file()
+        real_items = e.cleanup_exact_duplicates(
+            out / "dupes.json",
+            prefer_prefixes=(str(tmp / "sub"),),
+            permanent_delete=True,
+            dry_run=False,
+        )
+        assert len(real_items) == 1 and real_items[0].status == "removed", real_items
+        assert Path(real_items[0].keep_path) == tmp / "sub" / "dup_2.bin"
+        assert Path(real_items[0].keep_path).is_file()
+        assert not Path(real_items[0].dup_path).exists()
+
+        # Verify hardlinks to the same file are skipped rather than reported as duplicates
+        hl_src = tmp / "hardlink_orig.bin"
+        hl_src.write_bytes(b"HARDLINK_TEST_" * 500)
+        hl_dst = tmp / "hardlink_alias.bin"
+        try:
+            os.link(hl_src, hl_dst)
+            rep_hl = e.find_exact_duplicates([tmp])
+            assert rep_hl.hardlinks_skipped >= 1, rep_hl
+            assert not any(str(hl_dst) in g.paths and str(hl_src) in g.paths for g in rep_hl.groups), rep_hl.groups
+        except OSError:
+            pass
+
+        # Verify bounded-depth drive finder index skips system dirs and writes atomic HTML + MD
+        (tmp / "$RECYCLE.BIN").mkdir()
+        (tmp / "$RECYCLE.BIN" / "ignored.zip").write_bytes(b"X" * 2048)
+        idx_res = e.build_drive_index(tmp, max_depth=2, include_files_depth=1, min_file_bytes=1024)
+        assert (tmp / "00_FIND_EVERYTHING.html").is_file() and (tmp / "00_DRIVE_MAP.md").is_file()
+        assert not list(tmp.glob("*.part")), "drive index left stale .part file"
+        html_txt = (tmp / "00_FIND_EVERYTHING.html").read_text(encoding="utf-8")
+        assert "$RECYCLE.BIN" not in html_txt and idx_res["dirs"] >= 1, idx_res
+    print("PASS: exact_dup_three_stage — size filter, partial hash, full sha256, cleanup, and reports ok.")
+
+
 def main() -> int:
     test_unsafe_names()
+    test_exact_dup_three_stage()
     if not _have_deps():
         print("SKIP: numpy/Pillow not installed — image-dependent legs skipped.")
         return 0

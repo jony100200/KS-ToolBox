@@ -42,10 +42,3 @@ Builds an off-centre opaque block on a transparent field, asserts the pure
 `normalize()` returns a square, trimmed, centred image at the target size, then
 runs the full `process()` pipeline and asserts a valid square RGBA PNG is written.
 
-## Credits
-
-Normalization algorithm lifted from RupayanFlow's `asset2d.icons.core.fit_icon`,
-reworked to drop the numpy dependency (Pillow's alpha `getbbox` + `resize` do the
-same work), generalise the fixed pixel margin to a size-independent `padding_pct`,
-add an atomic `.part` write, and surface per-image failures as errors instead of
-returning a silent empty canvas.

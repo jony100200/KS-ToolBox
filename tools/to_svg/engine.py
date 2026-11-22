@@ -4,7 +4,7 @@ Pure logic, no UI, no global state. vtracer (the Rust tracer's Python binding)
 does the raster→vector conversion; it is imported LAZILY inside process() so
 discovery and the sidebar keep working on a machine that hasn't installed it yet.
 
-The conversion logic is distilled from ChobiEngine's tosvg_wrapper, keeping the
+Pure vtracer SVG vectorization wrapper keeping the
 vtracer path and dropping the job-runner shape around it. Anti-patterns fixed on
 the way in: the source swallowed import errors with `except Exception: pass` and
 picked engines by silent fallback — here a missing dep is announced as a value

@@ -58,9 +58,3 @@ vertical seam scores LOW on X; `offset_wrap` twice is an even-dim identity;
 `tile_preview` triples size), then runs the full pipeline on a real image and
 asserts the previews were written and a score reported.
 
-## Credits
-
-Seam math and previews lifted from RupayanFlow's `seamless/tile_tools.py`
-(`offset_wrap`, `tile_preview`, `seam_score`) and ChobiEngine's
-`seamless_checker/tile_metrics.py` (per-axis edge-diff / RMSE), keeping the pure
-numpy + Pillow path and dropping the cv2 + job-wrapper layers.

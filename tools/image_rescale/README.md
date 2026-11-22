@@ -65,7 +65,3 @@ python -m tools.image_rescale.test_smoke
 Checks the sizing math for all four modes (plus upscale-gating and snap), then
 resizes a real image and asserts the saved dimensions match.
 
-## Credits
-
-Sizing math distilled from RupayanFlow's multi-mode resize engine, keeping the
-four modes a batch resizer needs.

@@ -32,16 +32,18 @@ _AI_MODEL_LABELS = {
 }
 
 
-# Despill menu label -> AlphaOptions.green_despill (None = auto).
 _DESPILL_CHOICES = {
-    "Auto (green/blue screen edges)": None,
+    "Auto (screen edges)": None,
+    "Red / orange rim (edges)": "orange",
+    "Green (edges)": "green",
+    "Blue (edges)": "blue",
     "Green, whole image": True,
     "Off": False,
 }
 
 class AlphaDoctorPanel(BaseBatchPanel):
-    FILE_EXTS = e.IMAGE_EXTS
-    FILE_LABEL = "image"
+    FILE_EXTS = e.MEDIA_EXTS
+    FILE_LABEL = "file"
     RESULTS_ICON = Icons.BROOM
     RUN_LABEL = "Remove Background & Save"
 
@@ -109,6 +111,13 @@ class AlphaDoctorPanel(BaseBatchPanel):
             row2, text="Edge flood: also remove enclosed background", font=t.font(11), fg_color=t.ACCENT_BLUE,
         )
         self._enclosed.pack(side="left", padx=16)
+        self._decontaminate = ctk.CTkCheckBox(
+            row2, text="Decontaminate edges", font=t.font(11), fg_color=t.ACCENT_BLUE,
+        )
+        self._decontaminate.pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(row2, text="Rim px", text_color=t.TEXT_MUTED, font=t.font(11)).pack(side="left", padx=(10, 4))
+        self._decontam_px = c.entry(row2, width=44); self._decontam_px.insert(0, "2")
+        self._decontam_px.pack(side="left")
         self._hint = ctk.CTkLabel(b, text="", text_color=t.TEXT_MUTED, font=t.font(10)); self._hint.pack(anchor="w", pady=(6, 0))
         self._build_run_row(b)
 
@@ -119,9 +128,9 @@ class AlphaDoctorPanel(BaseBatchPanel):
             (wdg.grid() if chroma else wdg.grid_remove())
         for wdg in (self._model_label, self._model):
             (wdg.grid() if method == "ai" else wdg.grid_remove())
-        hints = {"solid": "Deterministic — keys out the auto-detected flat background. No model.",
-                 "chroma": "Deterministic — keys the chosen colour. Great for green/blue screen, flat logos.",
-                 "edge_flood": "Deterministic — removes background regions touching the image border.",
+        hints = {"solid": "Deterministic — keys out the auto-detected flat background (images → RGBA PNG, videos → ProRes 4444 .mov).",
+                 "chroma": "Deterministic — keys the chosen colour (images → RGBA PNG, videos → ProRes 4444 .mov).",
+                 "edge_flood": "Deterministic — removes background regions touching the frame border.",
                  "ai": self._ai_hint()}
         self._hint.configure(text=hints.get(method, ""))
 
@@ -154,6 +163,10 @@ class AlphaDoctorPanel(BaseBatchPanel):
             tol = float(self._tol.get())
         except ValueError:
             self._logline("Tolerance must be a number.", t.STATE["error"][1]); return None
+        try:
+            decontam_px = int(self._decontam_px.get().strip())
+        except ValueError:
+            self._logline("Rim px must be a whole number (1-16).", t.STATE["error"][1]); return None
         key_hex = self._key_hex.get().strip() if self._key.get() == "custom" else e.KEY_PRESETS.get(self._key.get(), "#00FF00")
         out = self._out_entry.get().strip()
         out_root = Path(out) if out else None
@@ -164,6 +177,8 @@ class AlphaDoctorPanel(BaseBatchPanel):
                               do_defringe=bool(self._defringe.get()),
                               green_despill=_DESPILL_CHOICES[self._despill.get()],
                               remove_enclosed=bool(self._enclosed.get()),
+                              do_decontaminate=bool(self._decontaminate.get()),
+                              decontaminate_px=decontam_px,
                               do_premultiply=bool(self._premul.get()), dry_run=bool(self._dry.get()))
 
     def _pre_run_check(self, opts: e.AlphaOptions) -> bool:
@@ -175,6 +190,15 @@ class AlphaDoctorPanel(BaseBatchPanel):
             e.find_output_collisions(self._files, normalized)
         ):
             return False
+        if any(e.is_video_path(path) for path in self._files):
+            tools = e.tools_status()
+            missing = [name for name in ("ffmpeg", "ffprobe") if not tools.get(name)]
+            if missing:
+                self._logline(
+                    f"Video matting requires {', '.join(missing)} (bundle bin/ or install FFmpeg).",
+                    t.STATE["error"][1],
+                )
+                return False
         if normalized.method != "ai":
             return True
         if importlib.util.find_spec("onnxruntime") is None:
@@ -230,7 +254,7 @@ class AlphaDoctorPanel(BaseBatchPanel):
         definition = JobDefinition.create(
             tool_id="alpha_doctor",
             tool_version="1",
-            workflow_version="alpha-cutout.v2",
+            workflow_version="alpha-cutout.v3",
             inputs=files,
             settings=settings,
             max_retries=1,
@@ -250,7 +274,7 @@ class AlphaDoctorPanel(BaseBatchPanel):
 
         return QueueSubmission(
             definition=definition,
-            label=f"Alpha Doctor {opts.method.replace('_', ' ').title()} · {len(files)} image(s)",
+            label=f"Alpha Doctor {opts.method.replace('_', ' ').title()} · {len(files)} file(s)",
             execute=lambda path, token: e.process(
                 path, opts, cancelled=lambda: token.is_cancelled
             ),

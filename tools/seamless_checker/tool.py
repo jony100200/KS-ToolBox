@@ -1,4 +1,4 @@
-"""Registers Seamless Checker as a ToolBox tool (the LEGO plug).
+"""Registers Seamless Checker as a ToolBox tool.
 
 Keeps discovery fast and lightweight by importing the panel lazily inside build_panel.
 """
